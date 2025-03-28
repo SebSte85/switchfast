@@ -7,6 +7,8 @@ export interface ProcessInfo {
   title: string;
   path?: string;
   icon?: string;
+  parentId?: number; // ID des Elternprozesses
+  children?: ProcessInfo[]; // Array von Kindprozessen
 }
 
 // Themen zur Gruppierung von Anwendungen
@@ -15,6 +17,7 @@ export interface Theme {
   name: string;
   applications: number[]; // Array von Prozess-IDs
   shortcut?: string; // Tastaturkombination zum Aktivieren des Themes
+  color?: string; // Farbe für die visuelle Darstellung des Themes
 }
 
 // ApplicationListProps Interface
@@ -22,11 +25,13 @@ export interface ApplicationListProps {
   applications: ProcessInfo[];
   themes: Theme[];
   activeTheme: string | null;
-  activeThemes: string[]; // Array of active theme IDs
+  activeThemes?: string[];
   onAddToTheme: (themeId: string, applicationId: number) => void;
   onRemoveFromTheme: (themeId: string, applicationId: number) => void;
   onUpdateTheme?: (themeId: string, updatedTheme: Partial<Theme>) => void;
-  onToggleActiveTheme?: (themeId: string) => void; // Toggle theme activation
+  onToggleActiveTheme?: (themeId: string) => void;
+  compactMode?: boolean; // Kompakt-Modus-Flag
+  showOnlyShortcuts?: boolean; // Flag, um nur Shortcuts anzuzeigen, keine Namen
 }
 
 // IPC-Kommunikation zwischen Main und Renderer

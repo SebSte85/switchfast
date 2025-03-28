@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { ipcRenderer } from "electron";
 import "./styles/index.css";
 import ApplicationList from "./components/ApplicationList";
@@ -10,6 +10,8 @@ interface ProcessInfo {
   title: string;
   path?: string;
   icon?: string;
+  parentId?: number;
+  children?: ProcessInfo[];
 }
 
 interface Theme {
@@ -17,6 +19,7 @@ interface Theme {
   name: string;
   applications: number[];
   shortcut: string;
+  color?: string;
 }
 
 const App: React.FC = () => {
@@ -26,6 +29,31 @@ const App: React.FC = () => {
   const [activeThemes, setActiveThemes] = useState<string[]>([]);
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [compactMode, setCompactMode] = useState<boolean>(false);
+
+  // Theme hinzufügen mit useCallback
+  const handleAddTheme = useCallback((newTheme: Theme) => {
+    // Ensure we have a unique ID by using the current timestamp if not provided
+    const themeToAdd = {
+      ...newTheme,
+      id: newTheme.id || `theme_${Date.now()}`,
+      applications: newTheme.applications || [],
+      shortcut: newTheme.shortcut || "",
+      color: newTheme.color || "#78d97c", // Standard-Grün, falls keine Farbe angegeben
+    };
+
+    // Überprüfen, ob bereits ein Theme mit dieser ID existiert
+    setThemes((prevThemes) => {
+      const themeExists = prevThemes.some(
+        (theme) => theme.id === themeToAdd.id
+      );
+      if (themeExists) {
+        // Falls ja, eine neue eindeutige ID generieren
+        themeToAdd.id = `theme_${Date.now()}`;
+      }
+      return [...prevThemes, themeToAdd];
+    });
+  }, []);
 
   // Laden der laufenden Anwendungen
   useEffect(() => {
@@ -52,6 +80,19 @@ const App: React.FC = () => {
     // Anwendungen alle 10 Sekunden aktualisieren
     const intervalId = setInterval(fetchApplications, 10000);
     return () => clearInterval(intervalId);
+  }, []);
+
+  // Laden der gespeicherten Themes beim Start
+  useEffect(() => {
+    try {
+      const savedThemes = localStorage.getItem("themes");
+      if (savedThemes) {
+        const parsedThemes = JSON.parse(savedThemes);
+        setThemes(parsedThemes);
+      }
+    } catch (error) {
+      console.error("Fehler beim Laden der gespeicherten Themes:", error);
+    }
   }, []);
 
   // Globale Funktion, um den aktuellen Theme-Status für den Main-Prozess bereitzustellen
@@ -107,23 +148,16 @@ const App: React.FC = () => {
   // Event-Listener für Theme-Erstellung von ApplicationList
   useEffect(() => {
     const handleAddThemeEvent = (event: any) => {
-      console.log(
-        "App - handleAddThemeEvent called with event detail:",
-        event.detail
-      );
       if (event.detail) {
-        console.log("App - Calling handleAddTheme with theme:", event.detail);
         handleAddTheme(event.detail);
       }
     };
 
-    console.log("App - Adding addTheme event listener");
     window.addEventListener("addTheme", handleAddThemeEvent);
     return () => {
-      console.log("App - Removing addTheme event listener");
       window.removeEventListener("addTheme", handleAddThemeEvent);
     };
-  }, []);
+  }, [handleAddTheme]);
 
   // Tastaturkürzelevent-Listener für Theme-Aktivierung
   useEffect(() => {
@@ -147,8 +181,10 @@ const App: React.FC = () => {
   // Handler für Theme-Aktivierung durch Shortcuts
   useEffect(() => {
     const handleActivateThemeAndMinimize = (_: any, themeId: string) => {
-      console.log("Aktiviere Theme:", themeId);
+      console.log("==========================================");
+      console.log("Shortcut aktiviert für Theme:", themeId);
       console.log("Aktuelle aktive Themes:", activeThemes);
+      console.log("Focus Mode vor Aktivierung:", focusModeActive);
 
       // Ersetze alle aktiven Themes durch das neue Theme
       setActiveThemes([themeId]);
@@ -158,24 +194,35 @@ const App: React.FC = () => {
       setFocusModeActive(true);
 
       // Alle anderen Anwendungen minimieren
-      applyFocusMode(themeId, true);
+      try {
+        console.log("Versuche Focus Mode anzuwenden für:", themeId);
+        applyFocusMode(themeId, true);
+        console.log("Focus Mode erfolgreich angewendet");
+      } catch (error) {
+        console.error("Fehler beim Anwenden des Focus Mode:", error);
+      }
 
       console.log(
         `Theme ${themeId} durch Shortcut aktiviert, alle anderen Themes deaktiviert`
       );
+      console.log("==========================================");
     };
 
+    // Event-Listener registrieren
+    console.log("Registriere activate-theme-and-minimize Event-Listener");
     ipcRenderer.on(
       "activate-theme-and-minimize",
       handleActivateThemeAndMinimize
     );
+
     return () => {
+      console.log("Entferne activate-theme-and-minimize Event-Listener");
       ipcRenderer.removeListener(
         "activate-theme-and-minimize",
         handleActivateThemeAndMinimize
       );
     };
-  }, [themes, applications]);
+  }, [themes, applications, activeThemes, focusModeActive]);
 
   // Toggle Focus Mode via global shortcut
   useEffect(() => {
@@ -189,52 +236,43 @@ const App: React.FC = () => {
     };
   }, [focusModeActive, activeTheme]);
 
-  // Theme hinzufügen
-  const handleAddTheme = (newTheme: Theme) => {
-    console.log("App - handleAddTheme called with newTheme:", newTheme);
-    console.log("App - Current themes:", themes);
+  // Theme löschen (mit useCallback, damit es als Abhängigkeit verwendet werden kann)
+  const handleDeleteTheme = useCallback(
+    (themeId: string) => {
+      // Das Theme aus dem State entfernen
+      setThemes((prevThemes) =>
+        prevThemes.filter((theme) => theme.id !== themeId)
+      );
 
-    // Ensure we have a unique ID by using the current timestamp if not provided
-    const themeToAdd = {
-      ...newTheme,
-      id: newTheme.id || Date.now().toString(),
-      shortcut: newTheme.shortcut || "",
+      // Falls das gelöschte Theme aktiv war, inaktiv setzen
+      if (activeTheme === themeId) {
+        setActiveTheme(null);
+      }
+
+      // Aus der Liste der aktiven Themes entfernen
+      setActiveThemes((prevActiveThemes) =>
+        prevActiveThemes.filter((id) => id !== themeId)
+      );
+
+      // Wenn ein Shortcut für dieses Theme registriert war, diesen entfernen
+      ipcRenderer.invoke("unregister-shortcut", { themeId });
+    },
+    [activeTheme]
+  );
+
+  // Event-Listener für Theme-Löschung
+  useEffect(() => {
+    const handleDeleteThemeEvent = (event: any) => {
+      if (event.detail) {
+        handleDeleteTheme(event.detail);
+      }
     };
 
-    console.log("App - Prepared themeToAdd:", themeToAdd);
-
-    // Check if a theme with this ID already exists
-    const themeExists = themes.some((theme) => theme.id === themeToAdd.id);
-    console.log("App - Theme with this ID exists?", themeExists);
-
-    if (themeExists) {
-      // Generate a new unique ID to avoid conflicts
-      themeToAdd.id = Date.now().toString();
-      console.log("App - Generated new ID to avoid conflict:", themeToAdd.id);
-    }
-
-    // Add the new theme
-    console.log("App - Adding new theme to state");
-    setThemes((prevThemes) => {
-      const newThemes = [...prevThemes, themeToAdd];
-      console.log("App - New themes state will be:", newThemes);
-      return newThemes;
-    });
-  };
-
-  // Theme löschen
-  const handleDeleteTheme = (themeId: string) => {
-    setThemes(themes.filter((theme) => theme.id !== themeId));
-
-    // Remove from active themes if it was active
-    setActiveThemes((prev) => prev.filter((id) => id !== themeId));
-
-    // For backward compatibility
-    if (activeTheme === themeId) {
-      setActiveTheme(null);
-      setFocusModeActive(false);
-    }
-  };
+    window.addEventListener("deleteTheme", handleDeleteThemeEvent);
+    return () => {
+      window.removeEventListener("deleteTheme", handleDeleteThemeEvent);
+    };
+  }, [handleDeleteTheme]);
 
   // Anwendung zum Theme hinzufügen
   const handleAddToTheme = (themeId: string, applicationId: number) => {
@@ -463,10 +501,119 @@ const App: React.FC = () => {
     }
   };
 
+  // Speichert Themes im localStorage
+  useEffect(() => {
+    if (themes.length > 0) {
+      try {
+        const themesData = JSON.stringify(
+          themes.map((theme) => ({
+            id: theme.id,
+            name: theme.name,
+            applications: theme.applications,
+            shortcut: theme.shortcut || "",
+            color: theme.color || "#78d97c", // Speichere die Farbe
+          }))
+        );
+        localStorage.setItem("themes", themesData);
+      } catch (error) {
+        console.error("Fehler beim Speichern der Themes:", error);
+      }
+    }
+  }, [themes]);
+
+  // Kompaktmodus ändern und Größe anpassen
+  const toggleCompactMode = () => {
+    const newMode = !compactMode;
+    setCompactMode(newMode);
+    // Sende Event an Main Process
+    ipcRenderer.send("toggle-compact-mode", newMode);
+
+    // Im kompakten Modus zeigen wir nur Shortcuts an, deaktiviere das im normalen Modus
+    if (newMode) {
+      // In den kompakten/Shortcut-Modus wechseln
+      console.log("Aktiviere Kompaktmodus mit nur Shortcuts");
+    } else {
+      // Zurück zum Normalmodus
+      console.log("Deaktiviere Kompaktmodus, zeige alle Inhalte");
+    }
+  };
+
   return (
-    <div className="app-container-simple">
+    <div
+      className={`app-container-simple ${compactMode ? "compact-mode" : ""}`}
+    >
+      <div className="custom-titlebar">
+        <div className="drag-region"></div>
+        <div className="window-controls">
+          <button
+            className="compact-toggle-button"
+            onClick={toggleCompactMode}
+            title={compactMode ? "Vollständige Ansicht" : "Kompaktansicht"}
+          >
+            {compactMode ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                width="16"
+                height="16"
+              >
+                <path d="M12 9a3.75 3.75 0 100 7.5A3.75 3.75 0 0012 9z" />
+                <path
+                  fillRule="evenodd"
+                  d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3h-15a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0zm12-1.5a.75.75 0 100 1.5.75.75 0 000-1.5z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                width="16"
+                height="16"
+              >
+                <path d="M11.644 1.59a.75.75 0 01.712 0l9.75 5.25a.75.75 0 010 1.32l-9.75 5.25a.75.75 0 01-.712 0l-9.75-5.25a.75.75 0 010-1.32l9.75-5.25z" />
+                <path d="M3.265 10.602l7.668 4.129a2.25 2.25 0 002.134 0l7.668-4.13 1.37.739a.75.75 0 010 1.32l-9.75 5.25a.75.75 0 01-.71 0l-9.75-5.25a.75.75 0 010-1.32l1.37-.738z" />
+                <path d="M10.933 19.231l-7.668-4.13-1.37.739a.75.75 0 000 1.32l9.75 5.25c.221.12.489.12.71 0l9.75-5.25a.75.75 0 000-1.32l-1.37-.738-7.668 4.13a2.25 2.25 0 01-2.134-.001z" />
+              </svg>
+            )}
+          </button>
+          <button
+            className="minimize-button"
+            onClick={() => ipcRenderer.send("minimize-window")}
+            title="Minimieren"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <rect
+                fill="currentColor"
+                width="10"
+                height="1"
+                x="1"
+                y="6"
+              ></rect>
+            </svg>
+          </button>
+          <button
+            className="close-button"
+            onClick={() => ipcRenderer.send("close-window")}
+            title="Schließen"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <path
+                fill="currentColor"
+                d="M 1,1 L 11,11 M 1,11 L 11,1"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
       {loading ? (
-        <div className="loading">Lade Anwendungen...</div>
+        <div className="flex items-center justify-center h-full text-white">
+          <p>Lade Anwendungen...</p>
+        </div>
       ) : (
         <ApplicationList
           applications={applications}
@@ -477,6 +624,8 @@ const App: React.FC = () => {
           onRemoveFromTheme={handleRemoveFromTheme}
           onUpdateTheme={handleUpdateTheme}
           onToggleActiveTheme={toggleActiveTheme}
+          compactMode={compactMode}
+          showOnlyShortcuts={true}
         />
       )}
     </div>

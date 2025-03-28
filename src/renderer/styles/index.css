@@ -211,7 +211,36 @@
 
   /* Application List neu designt */
   .application-list {
-    @apply w-full;
+    @apply w-full h-full overflow-y-auto overflow-x-hidden p-4;
+    /* Sanftes Scrollen */
+    scroll-behavior: smooth;
+  }
+
+  /* Modern Scrollbar Styling */
+  .application-list::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .application-list::-webkit-scrollbar-track {
+    background: rgba(65, 65, 89, 0.2);
+    border-radius: 3px;
+  }
+
+  .application-list::-webkit-scrollbar-thumb {
+    background: rgba(120, 217, 124, 0.3);
+    border-radius: 3px;
+    transition: background 0.3s ease;
+  }
+
+  .application-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 217, 124, 0.5);
+  }
+
+  /* Entfernt zweite Scrollbar */
+  html,
+  body {
+    @apply overflow-hidden;
+    height: 100%;
   }
 
   .application-list-header {
@@ -377,7 +406,7 @@
 
   /* Basis-Styling */
   .app-container-simple {
-    @apply min-h-screen bg-[#414159] p-6;
+    @apply h-screen bg-[#414159] flex flex-col overflow-hidden;
   }
 
   /* Suchreihe und Filter */
@@ -397,25 +426,38 @@
     @apply text-sm text-gray-600;
   }
 
-  /* Gruppen-Sektion */
+  /* Gruppen-Sektion - kompakter */
   .groups-section {
-    @apply mb-8;
+    @apply sticky top-0 z-10 pt-2 pb-3 bg-[#414159];
+    margin-bottom: 0.5rem;
+    /* Fügt einen subtilen Schatten-Effekt am unteren Rand hinzu, wenn gescrollt wird */
+    box-shadow: 0 3px 8px -6px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Trennlinie zwischen Gruppen und Prozessen */
+  .section-divider {
+    @apply w-full h-px bg-[#78d97c]/20 my-1;
   }
 
   .groups-title {
-    @apply text-2xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide flex items-center gap-2;
+    @apply text-xl font-bold text-[#78d97c] mb-3 uppercase tracking-wide flex items-center gap-2;
   }
 
+  /* Verbesserter Gruppen-Container im Sticky-Header - kompakter */
   .groups-container {
-    @apply flex flex-wrap gap-4 mb-8;
+    @apply flex flex-wrap gap-3 py-2;
+    min-height: 90px; /* Kleinere Mindesthöhe für kompakteren Look */
   }
 
   .add-group-button {
-    @apply w-7 h-7 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center text-xl hover:bg-[#78d97c]/10 transition-colors ml-2;
+    @apply w-6 h-6 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center text-lg hover:bg-[#78d97c]/10 transition-colors ml-2;
   }
 
+  /* Gruppe mit fester Größe (quadratischer) */
   .group-item {
-    @apply px-5 py-3 rounded-md border-2 flex items-center justify-center cursor-pointer hover:bg-[#414159]/80 transition-colors;
+    @apply w-[80px] h-[80px] px-2 py-2 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all hover:shadow-md hover:translate-y-[-1px] relative;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 
   .group-item-work {
@@ -426,8 +468,10 @@
     @apply border-red-400 text-red-400;
   }
 
+  /* Aktiver Zustand ohne Häkchen - stattdessen dickere Border */
   .group-item-selected {
-    @apply bg-[#414159]/50 shadow-inner;
+    @apply border-4 shadow-md;
+    transform: scale(1.03);
   }
 
   .group-active-indicator {
@@ -440,19 +484,48 @@
   }
 
   .processes-title {
-    @apply text-2xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+    @apply text-xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
   }
 
   .process-list {
-    @apply flex flex-col gap-3;
+    @apply flex flex-col gap-3 px-1;
+    /* Moderne Scrollbar für Prozess-Liste */
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+  }
+
+  /* Scrollbar für die Prozess-Liste */
+  .process-list::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .process-list::-webkit-scrollbar-track {
+    background: rgba(65, 65, 89, 0.1);
+    border-radius: 3px;
+  }
+
+  .process-list::-webkit-scrollbar-thumb {
+    background: rgba(120, 217, 124, 0.2);
+    border-radius: 3px;
+  }
+
+  .process-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 217, 124, 0.4);
   }
 
   .process-item {
-    @apply flex items-center justify-between bg-transparent border-2 border-[#78d97c] rounded-full py-2 px-5;
+    @apply flex items-center justify-between bg-[#2d2d3f] border-none rounded-lg py-3 px-5 transition-all;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .process-item:hover {
+    @apply bg-[#353548];
+    transform: translateX(2px);
   }
 
   .process-name {
-    @apply text-white font-medium;
+    @apply text-white font-medium flex-grow;
   }
 
   .process-menu {
@@ -482,6 +555,137 @@
 
   /* Drag and Drop Styling */
   .process-item.dragging {
+    @apply opacity-80 scale-[1.02] shadow-xl bg-[#3a3a50] border-l-4 border-[#78d97c];
+    animation: float 1s infinite alternate ease-in-out;
+    rotate: 0.5deg;
+  }
+
+  @keyframes float {
+    from {
+      transform: translateY(0px);
+    }
+    to {
+      transform: translateY(-4px);
+    }
+  }
+
+  .process-drag-handle {
+    @apply flex items-center cursor-grab p-1;
+  }
+
+  .drag-handle-icon {
+    @apply text-[#78d97c]/70 hover:text-[#78d97c] transition-colors;
+  }
+
+  .no-processes {
+    @apply text-gray-400 py-4 text-center italic;
+  }
+
+  /* Verbesserte Drag-Over-Animation für Gruppen */
+  .group-item-active-drop {
+    @apply border-dashed bg-[#78d97c]/10 scale-105;
+    animation: pulse 1.5s infinite;
+    transform-origin: center;
+  }
+
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(120, 217, 124, 0.4);
+    }
+    70% {
+      box-shadow: 0 0 0 6px rgba(120, 217, 124, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(120, 217, 124, 0);
+    }
+  }
+
+  /* Shortcut-Styling */
+  .group-item-content {
+    @apply flex flex-col items-center justify-between w-full h-full;
+    gap: 0;
+    position: relative; /* Für korrekte Positionierung der Kindelemente */
+  }
+
+  .group-item-name {
+    @apply text-center font-medium text-xs truncate;
+    max-width: 100%;
+    white-space: nowrap; /* Verhindert den Zeilenumbruch */
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .group-item-actions {
+    @apply w-full flex flex-col items-center;
+    position: relative; /* Für korrekte Positionierung der Kindelemente */
+  }
+
+  /* Shortcut-Badge näher am Text */
+  .shortcut-badge {
+    @apply text-xs px-1.5 py-0.5 rounded-full cursor-pointer text-center transition-all;
+    background: rgba(65, 65, 89, 0.4);
+    backdrop-filter: blur(4px);
+    font-size: 0.6rem;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    position: relative; /* Stellt sicher, dass das Badge clickbar ist */
+    z-index: 5;
+  }
+
+  .shortcut-badge:hover {
+    @apply text-white;
+    background: rgba(65, 65, 89, 0.6);
+  }
+
+  .shortcut-editor {
+    @apply flex items-center w-full mt-1;
+    position: relative;
+    z-index: 20;
+  }
+
+  .shortcut-input {
+    @apply w-full bg-[#414159] text-white px-1.5 py-0.5 rounded-md border border-[#78d97c]/50 focus:outline-none focus:border-[#78d97c];
+    font-size: 0.6rem;
+    position: relative;
+    z-index: 25;
+  }
+
+  /* Verstecke die Buttons für Shortcut-Bearbeitung */
+  .shortcut-save,
+  .shortcut-cancel {
+    @apply hidden;
+  }
+
+  /* Process Tree Styling */
+  .process-tree {
+    @apply flex flex-col gap-2;
+  }
+
+  .process-node {
+    @apply flex flex-col w-full;
+  }
+
+  .process-children {
+    @apply flex flex-col pl-5 mt-1 border-l border-[#78d97c]/20 ml-3;
+  }
+
+  .process-expander {
+    @apply text-[#78d97c] cursor-pointer mr-2 w-5 h-5 flex items-center justify-center rounded-full bg-[#78d97c]/10 hover:bg-[#78d97c]/20 transition-colors;
+  }
+
+  .process-expander-placeholder {
+    @apply w-5 mr-2;
+  }
+
+  /* Process item with children */
+  .process-item.has-children {
+    @apply border-l-4 border-amber-400 bg-amber-400/5;
+  }
+
+  /* Dragging Styles */
+  .process-item.dragging {
     @apply opacity-60 border-2 border-dashed rotate-1 scale-105 shadow-lg bg-[#52825d];
   }
 
@@ -493,44 +697,199 @@
     @apply text-[#78d97c] hover:text-white transition-colors;
   }
 
-  .no-processes {
-    @apply text-gray-400 py-4 text-center italic;
+  /* Modernisierte Gruppeneingabe (Browser-Stil) - kompakter */
+  .group-input-container.browser-style {
+    @apply bg-[#2D2D3F] border border-[#414159]/50 rounded-lg p-3 flex flex-col items-center w-[200px] shadow-lg;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
   }
 
-  .group-item-active-drop {
-    @apply border-4 border-dashed bg-[#78d97c]/20 scale-110 shadow-lg;
+  .group-input-container.browser-style .group-input {
+    @apply w-full bg-[#212130]/60 border border-[#414159]/60 rounded-md text-white py-1 px-2 text-center text-sm mb-2 focus:border-[#78d97c] focus:outline-none;
+    backdrop-filter: blur(4px);
   }
 
-  /* Shortcut-Styling */
-  .group-item-content {
-    @apply flex flex-col items-center justify-between gap-1 w-full h-full;
+  .color-options {
+    @apply flex flex-wrap justify-center gap-1 mt-2;
   }
 
-  .group-item-name {
-    @apply text-center;
+  .color-option {
+    @apply w-5 h-5 rounded-full cursor-pointer transition-all hover:scale-110;
   }
 
-  .group-item-actions {
-    @apply w-full;
+  .color-option.selected {
+    @apply ring-1 ring-white ring-offset-1 ring-offset-[#2D2D3F] scale-110;
   }
 
-  .shortcut-badge {
-    @apply text-xs px-2 py-1 bg-[#414159] text-white/70 rounded-md cursor-pointer hover:bg-[#414159]/80 hover:text-white text-center mt-1 truncate transition-colors;
+  /* Verschiedene Farbvarianten für Gruppen */
+  .group-item-green {
+    @apply border-[#78d97c] text-[#78d97c];
   }
 
-  .shortcut-editor {
-    @apply flex items-center gap-1 mt-1;
+  .group-item-blue {
+    @apply border-[#3b82f6] text-[#3b82f6];
   }
 
-  .shortcut-input {
-    @apply flex-1 bg-[#414159] text-white text-xs px-2 py-1 rounded-md border border-[#78d97c]/50 focus:outline-none focus:border-[#78d97c];
+  .group-item-red {
+    @apply border-[#ef4444] text-[#ef4444];
   }
 
-  .shortcut-save {
-    @apply text-xs bg-[#78d97c] text-[#414159] w-5 h-5 rounded-md flex items-center justify-center hover:bg-[#62c966] transition-colors;
+  .group-item-orange {
+    @apply border-[#f59e0b] text-[#f59e0b];
   }
 
-  .shortcut-cancel {
-    @apply text-xs bg-red-400 text-[#414159] w-5 h-5 rounded-md flex items-center justify-center hover:bg-red-500 transition-colors;
+  .group-item-purple {
+    @apply border-[#8b5cf6] text-[#8b5cf6];
+  }
+
+  .group-item-pink {
+    @apply border-[#ec4899] text-[#ec4899];
+  }
+
+  .group-item-teal {
+    @apply border-[#14b8a6] text-[#14b8a6];
+  }
+
+  .group-item-orange-light {
+    @apply border-[#f97316] text-[#f97316];
+  }
+
+  .group-item-yellow {
+    @apply border-[#facc15] text-[#facc15];
+  }
+
+  /* Delete Button - oben rechts positioniert */
+  .delete-theme-button {
+    @apply opacity-0 w-4 h-4 rounded-full bg-gray-700/40 text-gray-400 hover:text-white flex items-center justify-center text-xs transition-all absolute top-0 right-0;
+    backdrop-filter: blur(8px);
+    z-index: 10;
+  }
+
+  .group-item:hover .delete-theme-button {
+    @apply opacity-100;
+  }
+
+  /* Titelleiste mit Kompaktmodus-Button */
+  .title-bar {
+    @apply hidden; /* Alte Titelleiste ausblenden */
+  }
+
+  .compact-toggle-button {
+    @apply w-6 h-6 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-[#78d97c]/20 transition-colors;
+  }
+
+  /* Kompaktmodus klar vom Normalmodus unterscheiden */
+  .compact-mode.app-container-simple {
+    min-height: 90px;
+    max-height: 150px;
+    @apply py-0 border-t-2 border-[#353548];
+  }
+
+  /* Normaler Modus - volle Größe */
+  .app-container-simple:not(.compact-mode) {
+    min-height: 600px;
+    height: 100vh;
+  }
+
+  /* Kompaktmodus für die Anwendungsliste */
+  .compact-mode .application-list {
+    @apply py-2 px-3;
+    min-height: 60px;
+    max-height: 120px;
+    overflow-y: visible;
+  }
+
+  .compact-mode .groups-section {
+    @apply pt-1 pb-2;
+    margin-bottom: 0;
+    box-shadow: none;
+  }
+
+  .compact-mode .groups-container {
+    @apply flex flex-wrap justify-center gap-4 py-1;
+    min-height: auto;
+  }
+
+  /* Shortcut-only Styling */
+  .shortcut-badge-only {
+    @apply text-center py-1.5 px-4 rounded-md font-medium;
+    background: rgba(50, 50, 70, 0.7);
+    backdrop-filter: blur(4px);
+    font-size: 0.8rem;
+  }
+
+  /* Klar unterscheidbare Gruppen im Kompaktmodus */
+  .compact-mode .group-item {
+    @apply h-auto w-auto px-4 py-2 shadow-md;
+    background: rgba(45, 45, 63, 0.95);
+    border-width: 2px !important;
+    min-width: 85px;
+    margin: 5px;
+  }
+
+  /* Aktiver Status im Kompaktmodus besonders hervorheben */
+  .compact-mode .group-item-selected {
+    @apply border-4 shadow-lg;
+    transform: translateY(-2px);
+    background: rgba(55, 55, 73, 0.95);
+  }
+
+  /* Gruppe für Shortcut-only Ansicht */
+  .compact-mode .group-item-content {
+    @apply flex flex-col items-center justify-center;
+  }
+
+  /* Frameless Titelleiste */
+  .custom-titlebar {
+    @apply flex justify-between items-center bg-[#2D2D3F] text-white;
+    height: 28px;
+    width: 100%;
+    -webkit-app-region: drag; /* Macht die Titelleiste draggable */
+  }
+
+  .drag-region {
+    @apply flex-grow h-full;
+  }
+
+  .window-controls {
+    @apply flex items-center;
+    -webkit-app-region: no-drag; /* Buttons sind nicht draggable */
+  }
+
+  .minimize-button {
+    @apply w-8 h-6 flex items-center justify-center text-white/80 hover:text-white hover:bg-[#333344] transition-colors;
+  }
+
+  .close-button {
+    @apply w-8 h-6 flex items-center justify-center text-white/80 hover:text-white hover:bg-red-600/90 transition-colors;
+  }
+
+  /* Shortcut-only Styling */
+  .shortcut-badge-only {
+    @apply text-center py-1 px-3 rounded-md text-sm font-medium;
+    background: rgba(65, 65, 89, 0.6);
+    backdrop-filter: blur(4px);
+  }
+
+  /* Kompakter Modus mit nur Shortcuts */
+  .compact-mode .groups-section {
+    @apply pt-1 pb-2;
+    box-shadow: none;
+  }
+
+  .compact-mode .groups-container {
+    @apply flex flex-wrap justify-center gap-2 py-1;
+    min-height: auto;
+  }
+
+  /* Gruppe für Shortcut-only Ansicht */
+  .compact-mode .group-item,
+  .group-item-shortcut-only {
+    @apply h-auto w-auto px-3 py-2 flex items-center justify-center;
+    transform: none;
+  }
+
+  .compact-mode .group-item-content {
+    @apply flex-row gap-1;
   }
 }

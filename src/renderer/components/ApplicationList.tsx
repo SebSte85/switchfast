@@ -1,17 +1,31 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ipcRenderer } from "electron";
 import { ProcessInfo, Theme, ApplicationListProps } from "../../types";
+import ProcessTree from "./ProcessTree";
 
-// New component for group input
+// New component for group input with color selection
 const NewGroupInput = ({
   onAdd,
   onCancel,
 }: {
-  onAdd: (name: string) => void;
+  onAdd: (name: string, color?: string) => void;
   onCancel: () => void;
 }) => {
   const [name, setName] = useState("");
+  const [selectedColor, setSelectedColor] = useState("#78d97c"); // Default grün
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const colorOptions = [
+    "#78d97c", // Grün (Standard)
+    "#3b82f6", // Blau
+    "#ef4444", // Rot
+    "#f59e0b", // Orange
+    "#8b5cf6", // Lila
+    "#ec4899", // Pink
+    "#14b8a6", // Türkis
+    "#f97316", // Helleres Orange
+    "#facc15", // Gelb
+  ];
 
   // Focus the input when component mounts
   useEffect(() => {
@@ -20,53 +34,37 @@ const NewGroupInput = ({
     }
   }, []);
 
-  console.log("NewGroupInput rendered with name:", name);
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    console.log("NewGroupInput keyDown:", e.key);
     if (e.key === "Enter" && name.trim()) {
-      console.log("NewGroupInput Enter pressed, calling onAdd with:", name);
-      onAdd(name);
+      onAdd(name, selectedColor);
     } else if (e.key === "Escape") {
-      console.log("NewGroupInput Escape pressed, calling onCancel");
       onCancel();
     }
   };
 
   return (
-    <div className="group-item group-input-container">
+    <div className="group-input-container browser-style">
       <input
         ref={inputRef}
         type="text"
         className="group-input"
         value={name}
-        onChange={(e) => {
-          console.log("NewGroupInput input changed to:", e.target.value);
-          setName(e.target.value);
-        }}
+        onChange={(e) => setName(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Gruppenname"
+        placeholder="Gruppe benennen"
+        autoFocus
       />
-      <div className="group-input-buttons">
-        <button
-          className="group-input-save"
-          onClick={() => {
-            console.log("NewGroupInput save button clicked with name:", name);
-            if (name.trim()) onAdd(name);
-          }}
-          disabled={!name.trim()}
-        >
-          ✓
-        </button>
-        <button
-          className="group-input-cancel"
-          onClick={() => {
-            console.log("NewGroupInput cancel button clicked");
-            onCancel();
-          }}
-        >
-          ✕
-        </button>
+      <div className="color-options">
+        {colorOptions.map((color) => (
+          <div
+            key={color}
+            className={`color-option ${
+              selectedColor === color ? "selected" : ""
+            }`}
+            style={{ backgroundColor: color }}
+            onClick={() => setSelectedColor(color)}
+          />
+        ))}
       </div>
     </div>
   );
@@ -81,6 +79,8 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   onRemoveFromTheme,
   onUpdateTheme = () => {},
   onToggleActiveTheme = () => {},
+  compactMode = false,
+  showOnlyShortcuts = false,
 }) => {
   const [draggedApp, setDraggedApp] = useState<number | null>(null);
   const [draggedOverTheme, setDraggedOverTheme] = useState<string | null>(null);
@@ -162,28 +162,22 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     }
   };
 
-  const createNewGroup = (groupName: string) => {
-    console.log("createNewGroup called with name:", groupName);
-
+  const createNewGroup = (groupName: string, color: string = "#78d97c") => {
     // Create a new theme with a unique timestamp-based ID
     const themeId = `theme_${Date.now()}`;
-    console.log("Generated new theme ID:", themeId);
 
     const newTheme = {
       id: themeId,
       name: groupName.trim(),
       applications: [],
       shortcut: "",
+      color: color, // Speichere die ausgewählte Farbe
     };
 
-    console.log("Created new theme object:", newTheme);
-
     // Dispatch event to add the new theme
-    console.log("Dispatching addTheme event with theme:", newTheme);
     window.dispatchEvent(new CustomEvent("addTheme", { detail: newTheme }));
 
     // Hide the input
-    console.log("Setting showNewGroupInput to false");
     setShowNewGroupInput(false);
   };
 
@@ -195,17 +189,31 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   };
 
   const saveShortcut = (themeId: string) => {
+    console.log("Saving shortcut:", themeId, currentShortcut);
     if (onUpdateTheme && themeId) {
       onUpdateTheme(themeId, { shortcut: currentShortcut });
 
       // Registriere Shortcut beim Main-Prozess
       if (currentShortcut) {
-        ipcRenderer.invoke("register-shortcut", {
+        console.log(
+          "Registering shortcut with main process:",
           themeId,
-          shortcut: currentShortcut,
-        });
+          currentShortcut
+        );
+        ipcRenderer
+          .invoke("register-shortcut", {
+            themeId,
+            shortcut: currentShortcut,
+          })
+          .then((result) => {
+            console.log("Shortcut registration result:", result);
+          })
+          .catch((err) => {
+            console.error("Error registering shortcut:", err);
+          });
       } else {
         // Wenn Shortcut leer ist, deregistriere ihn
+        console.log("Unregistering shortcut for theme:", themeId);
         ipcRenderer.invoke("unregister-shortcut", { themeId });
       }
     }
@@ -215,6 +223,16 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   const handleShortcutKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    console.log(
+      "Shortcut key down event:",
+      e.key,
+      "ctrlKey:",
+      e.ctrlKey,
+      "altKey:",
+      e.altKey,
+      "shiftKey:",
+      e.shiftKey
+    );
 
     // Wir erfassen Strg, Alt, Shift und normale Tasten
     const modifiers = [];
@@ -228,15 +246,21 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
       // Erstelle Shortcut-String (z.B. "Ctrl+Alt+S")
       const shortcut = [...modifiers, key].join("+");
+      console.log("Setting current shortcut to:", shortcut);
       setCurrentShortcut(shortcut);
 
       // Wenn Enter gedrückt wird, speichere den Shortcut
       if (e.key === "Enter" && editingShortcut) {
+        console.log(
+          "Enter pressed, saving shortcut for theme:",
+          editingShortcut
+        );
         saveShortcut(editingShortcut);
       }
 
       // Escape drücken bricht die Bearbeitung ab
       if (e.key === "Escape") {
+        console.log("Escape pressed, cancelling shortcut editing");
         setEditingShortcut(null);
       }
     }
@@ -259,159 +283,166 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     onToggleActiveTheme(themeId);
   };
 
+  // In der ApplicationList-Komponente fügen wir eine Löschfunktion hinzu
+  const handleDeleteTheme = (e: React.MouseEvent, themeId: string) => {
+    e.stopPropagation(); // Verhindern, dass der Theme-Click ausgelöst wird
+
+    // Direkt löschen ohne Bestätigungsdialog
+    window.dispatchEvent(new CustomEvent("deleteTheme", { detail: themeId }));
+  };
+
   return (
     <div className="application-list">
       {/* Gruppen-Sektion */}
       <section className="groups-section">
-        <h2 className="groups-title">
-          GRUPPEN
-          <button
-            className="add-group-button"
-            onClick={() => {
-              console.log(
-                "Add group button clicked, current showNewGroupInput:",
-                showNewGroupInput
-              );
-              console.log("Setting showNewGroupInput to true");
-              setShowNewGroupInput(true);
-            }}
-            title="Neue Gruppe erstellen"
-          >
-            +
-          </button>
-        </h2>
+        {!showOnlyShortcuts && (
+          <h2 className="groups-title">
+            GRUPPEN
+            <button
+              className="add-group-button"
+              onClick={() => {
+                console.log(
+                  "Add group button clicked, current showNewGroupInput:",
+                  showNewGroupInput
+                );
+                console.log("Setting showNewGroupInput to true");
+                setShowNewGroupInput(true);
+              }}
+              title="Neue Gruppe erstellen"
+            >
+              +
+            </button>
+          </h2>
+        )}
         <div className="groups-container">
           {/* Display a new group input at the beginning of the container */}
-          {showNewGroupInput && (
+          {showNewGroupInput && !showOnlyShortcuts && (
             <NewGroupInput
-              onAdd={(name) => {
-                console.log("NewGroupInput onAdd called with name:", name);
-                createNewGroup(name);
+              onAdd={(name, color) => {
+                createNewGroup(name, color);
               }}
               onCancel={() => {
-                console.log("NewGroupInput onCancel called");
-                console.log("Setting showNewGroupInput to false");
                 setShowNewGroupInput(false);
               }}
             />
           )}
 
           {/* Vorhandene Gruppen anzeigen */}
-          {themes.map((theme) => (
-            <div
-              key={theme.id}
-              className={`group-item ${
-                theme.name.toLowerCase().includes("arbeit")
-                  ? "group-item-work"
-                  : "group-item-project"
-              } ${
-                draggedOverTheme === theme.id ? "group-item-active-drop" : ""
-              } ${
-                activeThemes.includes(theme.id) ? "group-item-selected" : ""
-              }`}
-              onClick={(e) => handleThemeClick(e, theme.id)}
-              onDragOver={(e) => handleDragOver(e, theme.id)}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleThemeDrop(e, theme.id)}
-            >
-              <div className="group-item-content">
-                <div className="group-item-name">
-                  {theme.name} ({theme.applications.length})
-                  {activeThemes.includes(theme.id) && (
-                    <span className="group-active-indicator">✓</span>
-                  )}
-                </div>
-                <div className="group-item-actions">
-                  {editingShortcut === theme.id ? (
-                    <div className="shortcut-editor">
-                      <input
-                        type="text"
-                        className="shortcut-input"
-                        value={currentShortcut}
-                        onChange={(e) => setCurrentShortcut(e.target.value)}
-                        onKeyDown={handleShortcutKeyDown}
-                        placeholder="Tastenkombination drücken"
-                        autoFocus
-                      />
-                      <button
-                        className="shortcut-save"
-                        onClick={() => saveShortcut(theme.id)}
-                        title="Shortcut speichern"
-                      >
-                        ✓
-                      </button>
-                      <button
-                        className="shortcut-cancel"
-                        onClick={() => setEditingShortcut(null)}
-                        title="Abbrechen"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      className="shortcut-badge"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditingShortcut(theme.id);
-                      }}
-                      title="Shortcut bearbeiten"
-                    >
-                      {theme.shortcut || "Shortcut hinzufügen"}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+          {themes.map((theme) => {
+            const isOver = draggedOverTheme === theme.id;
+            const isActive = activeThemes.includes(theme.id);
 
-      {/* Prozesse-Sektion */}
-      <section className="processes-section">
-        <h2 className="processes-title">PROZESSE</h2>
+            // Bestimme die Farb-CSS-Klasse basierend auf dem Farbwert des Themes
+            const getColorClass = (color?: string) => {
+              if (!color) return "group-item-green"; // Standardfarbe
 
-        <div className="process-list">
-          {unassignedApplications.length > 0 ? (
-            unassignedApplications.map((app) => (
+              const colorMap: { [key: string]: string } = {
+                "#78d97c": "group-item-green",
+                "#3b82f6": "group-item-blue",
+                "#ef4444": "group-item-red",
+                "#f59e0b": "group-item-orange",
+                "#8b5cf6": "group-item-purple",
+                "#ec4899": "group-item-pink",
+                "#14b8a6": "group-item-teal",
+                "#f97316": "group-item-orange-light",
+                "#facc15": "group-item-yellow",
+              };
+
+              return colorMap[color] || "group-item-green";
+            };
+
+            return (
               <div
-                key={app.id}
-                className="process-item"
-                draggable
-                onDragStart={(e) => handleDragStart(e, app.id)}
-                onDragEnd={handleDragEnd}
+                key={theme.id}
+                className={`group-item ${getColorClass(theme.color)} ${
+                  isActive ? "group-item-selected" : ""
+                } ${isOver ? "group-item-active-drop" : ""}`}
+                onDragOver={(e) => handleDragOver(e, theme.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleThemeDrop(e, theme.id)}
+                onClick={(e) => handleThemeClick(e, theme.id)}
               >
-                <div className="process-name">{app.title}</div>
-                <div
-                  className="process-drag-handle"
-                  title="Ziehen, um zur Gruppe hinzuzufügen"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="drag-handle-icon"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <line x1="8" y1="6" x2="16" y2="6"></line>
-                    <line x1="8" y1="12" x2="16" y2="12"></line>
-                    <line x1="8" y1="18" x2="16" y2="18"></line>
-                  </svg>
+                <div className="group-item-content">
+                  {!showOnlyShortcuts && (
+                    <div className="group-item-name">
+                      {theme.name} ({theme.applications.length})
+                    </div>
+                  )}
+                  <div className="group-item-actions">
+                    {editingShortcut === theme.id ? (
+                      <div className="shortcut-editor">
+                        <input
+                          type="text"
+                          className="shortcut-input"
+                          value={currentShortcut}
+                          onChange={(e) => setCurrentShortcut(e.target.value)}
+                          onKeyDown={handleShortcutKeyDown}
+                          placeholder="Tastenkombination drücken"
+                          autoFocus
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className={`shortcut-badge ${
+                          showOnlyShortcuts ? "shortcut-badge-only" : ""
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditingShortcut(theme.id);
+                        }}
+                        title={
+                          showOnlyShortcuts ? theme.name : "Shortcut bearbeiten"
+                        }
+                      >
+                        {theme.shortcut ||
+                          (showOnlyShortcuts
+                            ? theme.name
+                            : "Shortcut hinzufügen")}
+                      </div>
+                    )}
+                    {!showOnlyShortcuts && (
+                      <button
+                        className="delete-theme-button"
+                        onClick={(e) => handleDeleteTheme(e, theme.id)}
+                        title="Gruppe löschen"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="no-processes">
-              Alle Prozesse sind Gruppen zugeordnet
-            </div>
-          )}
+            );
+          })}
         </div>
       </section>
+
+      {/* Im kompakten Modus oder nur-Shortcuts-Modus blenden wir die Prozesse aus */}
+      {!compactMode && !showOnlyShortcuts && (
+        <>
+          {/* Trennlinie zwischen Gruppen und Prozesse */}
+          <div className="section-divider"></div>
+
+          {/* Prozesse-Sektion */}
+          <section className="processes-section">
+            <h2 className="processes-title">PROZESSE</h2>
+
+            <div className="process-list">
+              {unassignedApplications.length > 0 ? (
+                <ProcessTree
+                  processes={unassignedApplications}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                />
+              ) : (
+                <div className="no-processes">
+                  Alle Prozesse sind Gruppen zugeordnet
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 };

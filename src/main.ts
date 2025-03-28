@@ -26,9 +26,12 @@ interface ProcessInfo {
   title: string;
   path?: string;
   icon?: string;
+  parentId?: number;
+  children?: ProcessInfo[];
 }
 
 const registeredShortcuts: Map<string, string> = new Map();
+let compactMode = false; // Zustand für den Kompaktmodus
 
 function createWindow() {
   // Sicherstellen, dass der assets-Ordner existiert
@@ -55,7 +58,13 @@ function createWindow() {
       contextIsolation: false,
     },
     icon: path.join(__dirname, "assets/icon.png"),
+    frame: false,
+    backgroundColor: "#414159",
+    alwaysOnTop: compactMode,
   });
+
+  // Menüleiste komplett entfernen
+  mainWindow.setMenu(null);
 
   // Load the app
   if (process.env.NODE_ENV === "development") {
@@ -162,9 +171,8 @@ function registerShortcuts() {
 
 function registerThemeShortcut(themeId: string, shortcut: string): boolean {
   try {
-    console.log(
-      `Versuche Shortcut ${shortcut} für Theme ${themeId} zu registrieren...`
-    );
+    console.log("==========================================");
+    console.log(`SHORTCUT REGISTRIERUNG: ${shortcut} für Theme ${themeId}`);
 
     // Wenn bereits ein Shortcut für dieses Theme existiert, entferne ihn zuerst
     if (registeredShortcuts.has(themeId)) {
@@ -173,34 +181,70 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         `Entferne alten Shortcut ${oldShortcut} für Theme ${themeId}`
       );
       if (oldShortcut) {
-        globalShortcut.unregister(oldShortcut);
+        try {
+          globalShortcut.unregister(oldShortcut);
+          console.log(`Alter Shortcut ${oldShortcut} erfolgreich entfernt`);
+        } catch (err) {
+          console.error(`Fehler beim Entfernen des alten Shortcuts:`, err);
+        }
       }
     }
 
+    // Prüfe, ob der Shortcut gültig ist
+    if (!shortcut || shortcut.trim() === "") {
+      console.error("Shortcut ist leer oder ungültig:", shortcut);
+      return false;
+    }
+
+    const formattedShortcut = formatShortcutForElectron(shortcut);
+    console.log(`Formatierter Shortcut für Electron: ${formattedShortcut}`);
+
+    // Überprüfen, ob Shortcut bereits registriert ist
+    if (globalShortcut.isRegistered(formattedShortcut)) {
+      console.log(
+        `Shortcut ${formattedShortcut} ist bereits registriert, wird entfernt`
+      );
+      globalShortcut.unregister(formattedShortcut);
+    }
+
     // Registriere den neuen Shortcut
-    const success = globalShortcut.register(shortcut, async () => {
-      console.log(`Shortcut ${shortcut} für Theme ${themeId} wurde ausgelöst!`);
+    const success = globalShortcut.register(formattedShortcut, () => {
+      console.log(
+        `Shortcut ${formattedShortcut} für Theme ${themeId} wurde ausgelöst!`
+      );
 
       if (!mainWindow) {
-        console.log("Hauptfenster nicht gefunden!");
+        console.error("Hauptfenster nicht gefunden, kann Event nicht senden!");
         return;
       }
 
       // Sende Benachrichtigung an Renderer
-      console.log("Sende activate-theme-and-minimize Event an Renderer...");
-      mainWindow.webContents.send("activate-theme-and-minimize", themeId);
+      console.log(
+        `Sende activate-theme-and-minimize Event für Theme ${themeId} an Renderer...`
+      );
+      try {
+        mainWindow.webContents.send("activate-theme-and-minimize", themeId);
+        console.log("Event erfolgreich gesendet");
+      } catch (err) {
+        console.error("Fehler beim Senden des Events:", err);
+      }
     });
 
     if (!success) {
-      console.error(`Konnte Shortcut ${shortcut} nicht registrieren!`);
+      console.error(`Konnte Shortcut ${formattedShortcut} nicht registrieren!`);
       return false;
     }
 
     // Speichere den registrierten Shortcut
-    registeredShortcuts.set(themeId, shortcut);
+    registeredShortcuts.set(themeId, formattedShortcut);
     console.log(
-      `Shortcut ${shortcut} für Theme ${themeId} erfolgreich registriert`
+      `Shortcut ${formattedShortcut} für Theme ${themeId} erfolgreich registriert`
     );
+    console.log(
+      "Aktuelle registrierte Shortcuts:",
+      Object.fromEntries(registeredShortcuts)
+    );
+    console.log("==========================================");
     return true;
   } catch (error) {
     console.error(`Fehler beim Registrieren des Shortcuts ${shortcut}:`, error);
@@ -208,16 +252,55 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
   }
 }
 
+// Funktion zum Konvertieren des Shortcut-Formats für Electron
+function formatShortcutForElectron(shortcut: string): string {
+  // Electron verwendet leicht andere Formate für Tastenkombinationen
+  // z.B.: "Ctrl+Alt+S" -> "CommandOrControl+Alt+S"
+  let formatted = shortcut;
+
+  // Ctrl zu CommandOrControl für plattformübergreifende Kompatibilität
+  if (formatted.includes("Ctrl+")) {
+    formatted = formatted.replace("Ctrl+", "CommandOrControl+");
+  }
+
+  // Sicherstellen, dass Modifier-Keys korrekt formatiert sind
+  formatted = formatted
+    .replace(/\s+/g, "") // Leerzeichen entfernen
+    .replace(/\+\+/g, "+"); // Doppelte + entfernen
+
+  console.log(`Shortcut konvertiert: "${shortcut}" -> "${formatted}"`);
+  return formatted;
+}
+
 function unregisterThemeShortcut(themeId: string): boolean {
   try {
+    console.log("==========================================");
+    console.log(`SHORTCUT DEREGISTRIERUNG für Theme ${themeId}`);
+
     if (registeredShortcuts.has(themeId)) {
       const shortcut = registeredShortcuts.get(themeId);
       if (shortcut) {
-        globalShortcut.unregister(shortcut);
-        registeredShortcuts.delete(themeId);
-        console.log(`Shortcut für Theme ${themeId} entfernt`);
+        console.log(`Entferne Shortcut ${shortcut} für Theme ${themeId}`);
+        try {
+          globalShortcut.unregister(shortcut);
+          console.log(`Shortcut ${shortcut} erfolgreich entfernt`);
+          registeredShortcuts.delete(themeId);
+          console.log(
+            "Aktuelle registrierte Shortcuts:",
+            Object.fromEntries(registeredShortcuts)
+          );
+        } catch (err) {
+          console.error(
+            `Fehler beim Entfernen des Shortcuts ${shortcut}:`,
+            err
+          );
+          return false;
+        }
       }
+    } else {
+      console.log(`Kein registrierter Shortcut für Theme ${themeId} gefunden`);
     }
+    console.log("==========================================");
     return true;
   } catch (error) {
     console.error(
@@ -229,131 +312,108 @@ function unregisterThemeShortcut(themeId: string): boolean {
 }
 
 /**
- * Ruft laufende Anwendungen ab
+ * Ruft alle laufenden Anwendungen mit ihren Fenstertiteln ab
  */
 async function getRunningApplications(): Promise<ProcessInfo[]> {
-  console.log("getRunningApplications() wird aufgerufen");
-
-  // Nur Windows wird unterstützt
-  if (process.platform !== "win32") {
-    console.warn("Prozesserkennung wird nur unter Windows unterstützt");
-    return [];
-  }
-
   try {
-    // Direkt die optimierte Methode verwenden
-    const processes = await getTaskManagerApps();
-    console.log(`${processes.length} Desktop-Anwendungen gefunden.`);
+    // Wir verwenden einen PowerShell-Befehl, um Prozesse hierarchisch abzurufen
+    const command = `
+      $processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine;
+      $results = @();
+      
+      foreach ($p in $processes) {
+        # Fenstertitel abrufen (wenn vorhanden)
+        $title = "";
+        
+        # Nur für Prozesse, die ein Fenster haben könnten
+        $process = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue;
+        if ($process -and $process.MainWindowHandle -ne 0) {
+          $title = $process.MainWindowTitle;
+          
+          # Falls kein Titel vorhanden ist, Prozessnamen verwenden
+          if (-not $title) {
+            $title = $p.Name;
+          }
+          
+          # Prozess in die Ergebnisse einfügen
+          $results += [PSCustomObject]@{
+            Id = $p.ProcessId;
+            ParentId = $p.ParentProcessId;
+            Name = $p.Name;
+            Title = $title;
+            CommandLine = $p.CommandLine;
+          }
+        }
+      }
+      
+      # Als JSON ausgeben
+      $results | ConvertTo-Json
+    `;
 
-    // Nach Namen sortieren
-    processes.sort((a, b) => a.name.localeCompare(b.name));
+    // PowerShell-Befehl ausführen und Ausgabe verarbeiten
+    const stdout = await runPowerShellCommand(command);
 
-    // Alle gefundenen Anwendungen im Log ausgeben
-    if (processes.length > 0) {
-      console.log(
-        "Gefundene Desktop-Anwendungen:",
-        processes.map((p) => p.name).join(", ")
-      );
+    if (!stdout || stdout.trim() === "") {
+      console.error("PowerShell-Ausgabe ist leer, verwende Mock-Daten");
+      return getMockApplications();
     }
 
-    return processes;
+    // JSON-Ausgabe parsen
+    const processData = JSON.parse(stdout);
+
+    // Prozesse mit IDs, Namen und Titeln extrahieren
+    const flatProcesses: ProcessInfo[] = processData.map((proc: any) => ({
+      id: proc.Id,
+      parentId: proc.ParentId,
+      name: formatAppName(proc.Name.toLowerCase().replace(".exe", "")),
+      title: proc.Title || proc.Name,
+      path: proc.CommandLine,
+    }));
+
+    // Baum aus Prozessen erstellen
+    const processTree = buildProcessTree(flatProcesses);
+
+    // Nach Namen sortieren
+    processTree.sort((a, b) => a.name.localeCompare(b.name));
+
+    console.log(`${processTree.length} Desktop-Anwendungen gefunden`);
+
+    return processTree;
   } catch (error) {
     console.error("Fehler beim Abrufen der laufenden Anwendungen:", error);
-    return getMockApplications(); // Bei Fehlern Mock-Daten zurückgeben
+    return getMockApplications();
   }
 }
 
 /**
- * Gibt ausschließlich echte Desktop-Anwendungen zurück, ähnlich dem Task Manager
+ * Erstellt eine hierarchische Prozessbaum-Struktur aus einer flachen Liste
  */
-function getTaskManagerApps(): Promise<ProcessInfo[]> {
-  return new Promise((resolve, reject) => {
-    // Dieser PowerShell-Befehl entspricht exakt der "Apps"-Kategorie im Task Manager
-    // Er filtert Prozesse nach vorhandenem Hauptfenster-Handle (sichtbares Fenster)
-    const command =
-      "Get-Process | Where-Object {$_.MainWindowHandle -ne 0} | Select-Object Id,ProcessName,MainWindowTitle | ConvertTo-Csv -NoTypeInformation";
+function buildProcessTree(processes: ProcessInfo[]): ProcessInfo[] {
+  // Map erstellen für schnellen Zugriff auf Prozesse nach ID
+  const processMap = new Map<number, ProcessInfo>();
+  processes.forEach((process) => {
+    processMap.set(process.id, { ...process, children: [] });
+  });
 
-    try {
-      console.log(
-        "Starte präzisen PowerShell-Befehl für Apps mit UI-Fenstern..."
-      );
-      exec(
-        'powershell -NoProfile -ExecutionPolicy Bypass -Command "' +
-          command +
-          '"',
-        (error, stdout, stderr) => {
-          if (error) {
-            console.error(
-              `Fehler beim Ausführen von PowerShell: ${error.message}`
-            );
-            console.error(`stderr: ${stderr}`);
-            console.log("Verwende Mock-Daten als Fallback...");
-            resolve(getMockApplications());
-            return;
-          }
+  // Root-Prozesse (Prozesse ohne Eltern oder mit nicht vorhandenen Eltern in der Liste)
+  const rootProcesses: ProcessInfo[] = [];
 
-          try {
-            console.log("PowerShell-Ausgabe erhalten, Länge:", stdout.length);
-
-            if (!stdout || stdout.trim() === "") {
-              console.error("PowerShell-Ausgabe ist leer, verwende Mock-Daten");
-              resolve(getMockApplications());
-              return;
-            }
-
-            const processes: ProcessInfo[] = [];
-            const lines = stdout.split("\n");
-
-            // Erste Zeile ist CSV-Header, überspringen
-            for (let i = 1; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (!line) continue;
-
-              // CSV-Format: "Id","ProcessName","MainWindowTitle"
-              const match = line.match(/"([^"]+)","([^"]+)","([^"]*)"/);
-              if (match && match.length >= 4) {
-                const pid = parseInt(match[1], 10);
-                const processName = match[2];
-                const windowTitle = match[3];
-
-                if (!isNaN(pid)) {
-                  processes.push({
-                    id: pid,
-                    name: formatAppName(processName.toLowerCase()),
-                    title: windowTitle || processName,
-                  });
-                }
-              }
-            }
-
-            // Nach Namen sortieren
-            processes.sort((a, b) => a.name.localeCompare(b.name));
-
-            console.log(
-              `${processes.length} echte Desktop-Anwendungen mit UI-Fenstern gefunden`
-            );
-            if (processes.length > 0) {
-              console.log(
-                "UI-Anwendungen:",
-                processes.map((p) => p.name).join(", ")
-              );
-            }
-
-            resolve(processes);
-          } catch (parseError) {
-            console.error(
-              "Fehler beim Parsen der PowerShell-Ausgabe:",
-              parseError
-            );
-            resolve(getMockApplications());
-          }
-        }
-      );
-    } catch (execError) {
-      console.error("Fehler beim Ausführen des PowerShell-Befehls:", execError);
-      resolve(getMockApplications());
+  // Für jeden Prozess
+  processMap.forEach((process) => {
+    // Wenn der Prozess ein Elternteil hat und dieses auch in der Liste ist
+    if (process.parentId && processMap.has(process.parentId)) {
+      // Prozess dem children-Array des Elternprozesses hinzufügen
+      const parent = processMap.get(process.parentId);
+      if (parent && parent.children) {
+        parent.children.push(process);
+      }
+    } else {
+      // Kein Elternteil oder Elternteil nicht in der Liste, als Root-Prozess betrachten
+      rootProcesses.push(process);
     }
   });
+
+  return rootProcesses;
 }
 
 /**
@@ -397,17 +457,71 @@ function formatAppName(name: string): string {
  * Gibt Mock-Anwendungsdaten zurück, falls keine echten Daten verfügbar sind
  */
 function getMockApplications(): ProcessInfo[] {
+  // Beispielhafte Prozesshierarchie
   return [
-    { id: 1, name: "Google Chrome", title: "Google Chrome" },
-    { id: 2, name: "Microsoft Edge", title: "Microsoft Edge" },
-    { id: 3, name: "Visual Studio Code", title: "Visual Studio Code" },
-    { id: 4, name: "Word", title: "Microsoft Word" },
-    { id: 5, name: "Excel", title: "Microsoft Excel" },
-    { id: 6, name: "PowerPoint", title: "Microsoft PowerPoint" },
-    { id: 7, name: "Outlook", title: "Microsoft Outlook" },
-    { id: 8, name: "Windows Explorer", title: "Windows Explorer" },
-    { id: 9, name: "Spotify", title: "Spotify" },
-    { id: 10, name: "Discord", title: "Discord" },
+    {
+      id: 1,
+      name: "System",
+      title: "System",
+      children: [
+        {
+          id: 2,
+          name: "Explorer",
+          title: "Windows Explorer",
+          parentId: 1,
+          children: [
+            {
+              id: 3,
+              name: "Google Chrome",
+              title: "Google Chrome",
+              parentId: 2,
+            },
+            {
+              id: 4,
+              name: "Microsoft Edge",
+              title: "Microsoft Edge",
+              parentId: 2,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 5,
+      name: "Visual Studio Code",
+      title: "Visual Studio Code",
+      children: [
+        {
+          id: 6,
+          name: "Terminal",
+          title: "Terminal",
+          parentId: 5,
+        },
+      ],
+    },
+    {
+      id: 7,
+      name: "Microsoft Teams",
+      title: "Microsoft Teams",
+      children: [
+        {
+          id: 8,
+          name: "Teams Webview",
+          title: "Teams Web Content",
+          parentId: 7,
+          children: [
+            {
+              id: 9,
+              name: "Teams Renderer",
+              title: "Teams Renderer",
+              parentId: 8,
+            },
+          ],
+        },
+      ],
+    },
+    { id: 10, name: "Spotify", title: "Spotify" },
+    { id: 11, name: "Discord", title: "Discord" },
   ];
 }
 
@@ -706,6 +820,15 @@ function setupIpcHandlers() {
   ipcMain.handle("unregister-shortcut", async (_, { themeId }) => {
     return unregisterThemeShortcut(themeId);
   });
+
+  // Add window control handlers
+  ipcMain.on("minimize-window", () => {
+    if (mainWindow) mainWindow.minimize();
+  });
+
+  ipcMain.on("close-window", () => {
+    if (mainWindow) mainWindow.close();
+  });
 }
 
 // Beim Beenden der App alle Shortcuts entfernen
@@ -726,4 +849,26 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+// Add compact mode handler
+ipcMain.on("toggle-compact-mode", (_, isCompact) => {
+  if (!mainWindow) return;
+
+  compactMode = isCompact; // Setze den Zustand
+
+  if (isCompact) {
+    // Speichere die ursprüngliche Größe, bevor wir in den kompakten Modus wechseln
+    const [width, height] = mainWindow.getSize();
+    mainWindow.setMinimumSize(300, 90);
+    mainWindow.setSize(width, 120); // Kleiner für den Kompaktmodus
+    mainWindow.setAlwaysOnTop(true); // Im Kompaktmodus immer zuoberst
+  } else {
+    // Zurück zum normal-Size
+    mainWindow.setMinimumSize(600, 400);
+    mainWindow.setSize(900, 680);
+    mainWindow.setAlwaysOnTop(false); // Im normalen Modus nicht zuoberst
+  }
+
+  console.log(`Fenstergröße auf Kompaktmodus angepasst: ${isCompact}`);
 });
