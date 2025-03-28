@@ -6,9 +6,14 @@ import {
   globalShortcut,
   ipcMain,
 } from "electron";
-import * as path from "path";
 import * as url from "url";
 import { exec } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { execFile } from "child_process";
+import { error } from "console";
+import { stderr } from "process";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -22,6 +27,8 @@ interface ProcessInfo {
   path?: string;
   icon?: string;
 }
+
+const registeredShortcuts: Map<string, string> = new Map();
 
 function createWindow() {
   // Sicherstellen, dass der assets-Ordner existiert
@@ -140,31 +147,104 @@ function createTray() {
 }
 
 function registerShortcuts() {
-  // Register global shortcut (Ctrl+Shift+F to toggle focus mode)
-  globalShortcut.register("CommandOrControl+Shift+F", () => {
-    if (mainWindow) {
-      mainWindow.webContents.send("toggle-focus-mode");
-    }
-  });
+  // Globaler Shortcut zum Umschalten des Focus Mode
+  try {
+    globalShortcut.register("Alt+F", () => {
+      if (mainWindow) {
+        mainWindow.webContents.send("toggle-focus-mode");
+      }
+    });
+    console.log("Globaler Fokus-Modus-Shortcut registriert");
+  } catch (error) {
+    console.error("Fehler beim Registrieren des globalen Shortcuts:", error);
+  }
+}
 
-  // Register custom shortcut for specific themes
-  globalShortcut.register("CommandOrControl+Shift+1", () => {
-    if (mainWindow) {
-      mainWindow.webContents.send("activate-theme", 0);
+function registerThemeShortcut(themeId: string, shortcut: string): boolean {
+  try {
+    // Wenn bereits ein Shortcut für dieses Theme existiert, entferne ihn zuerst
+    if (registeredShortcuts.has(themeId)) {
+      const oldShortcut = registeredShortcuts.get(themeId);
+      if (oldShortcut) {
+        globalShortcut.unregister(oldShortcut);
+      }
     }
-  });
 
-  globalShortcut.register("CommandOrControl+Shift+2", () => {
-    if (mainWindow) {
-      mainWindow.webContents.send("activate-theme", 1);
-    }
-  });
+    // Registriere den neuen Shortcut
+    globalShortcut.register(shortcut, async () => {
+      if (mainWindow) {
+        // Sende Benachrichtigung an Renderer
+        mainWindow.webContents.send("activate-theme-and-minimize", themeId);
 
-  globalShortcut.register("CommandOrControl+Shift+3", () => {
-    if (mainWindow) {
-      mainWindow.webContents.send("activate-theme", 2);
+        try {
+          // Hole die aktuelle Theme-Info vom Renderer
+          const themesInfo: any =
+            await mainWindow.webContents.executeJavaScript(
+              `window.getCurrentThemeInfo && window.getCurrentThemeInfo('${themeId}')`
+            );
+
+          if (
+            themesInfo &&
+            themesInfo.applications &&
+            themesInfo.applications.length > 0
+          ) {
+            // Verwende die Show Desktop Funktion mit allen Apps des Themes als Ausnahmen
+            console.log(
+              `Minimiere alle Fenster außer für Theme ${themeId} mit ${themesInfo.applications.length} Apps`
+            );
+
+            // Verwende die neue Methode, die alle Fenster minimiert außer die der Gruppe
+            await showDesktopExceptApps(themesInfo.applications);
+          } else {
+            console.log(
+              `Theme ${themeId} hat keine Anwendungen oder konnte nicht abgerufen werden`
+            );
+            // Benachrichtige den Benutzer
+            if (mainWindow) {
+              mainWindow.webContents.send("show-notification", {
+                title: "Gruppe hat keine Anwendungen",
+                message:
+                  "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert.",
+              });
+            }
+          }
+        } catch (error) {
+          console.error(
+            `Fehler beim Minimieren von Anwendungen für Theme ${themeId}:`,
+            error
+          );
+        }
+      }
+    });
+
+    // Speichere den registrierten Shortcut
+    registeredShortcuts.set(themeId, shortcut);
+    console.log(`Shortcut ${shortcut} für Theme ${themeId} registriert`);
+    return true;
+  } catch (error) {
+    console.error(`Fehler beim Registrieren des Shortcuts ${shortcut}:`, error);
+    return false;
+  }
+}
+
+function unregisterThemeShortcut(themeId: string): boolean {
+  try {
+    if (registeredShortcuts.has(themeId)) {
+      const shortcut = registeredShortcuts.get(themeId);
+      if (shortcut) {
+        globalShortcut.unregister(shortcut);
+        registeredShortcuts.delete(themeId);
+        console.log(`Shortcut für Theme ${themeId} entfernt`);
+      }
     }
-  });
+    return true;
+  } catch (error) {
+    console.error(
+      `Fehler beim Entfernen des Shortcuts für Theme ${themeId}:`,
+      error
+    );
+    return false;
+  }
 }
 
 /**
@@ -365,7 +445,7 @@ async function minimizeApplications(processIds: number[]): Promise<boolean> {
 }
 
 /**
- * Minimiert eine einzelne Anwendung über PowerShell
+ * Minimiert eine einzelne Anwendung über PowerShell mit dem Windows API ShowWindowAsync Befehl
  */
 async function minimizeApplication(processId: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -377,8 +457,8 @@ async function minimizeApplication(processId: number): Promise<boolean> {
       return;
     }
 
-    // Sehr einfaches PowerShell-Skript zum Minimieren von Fenstern
-    // Verwendet nur die grundlegendsten Windows API-Funktionen
+    // Nutze direkt die Windows ShowWindowAsync API via PowerShell
+    // Dies ist effektiver als die Enumeration aller Fenster
     const command = `
       Add-Type @"
       using System;
@@ -387,21 +467,56 @@ async function minimizeApplication(processId: number): Promise<boolean> {
       
       public class WindowUtils {
           [DllImport("user32.dll")]
+          [return: MarshalAs(UnmanagedType.Bool)]
           public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
           
-          public const int SW_MINIMIZE = 6;
+          [DllImport("user32.dll")]
+          public static extern IntPtr GetForegroundWindow();
           
-          public static bool MinimizeProcessWindow(int processId) {
+          [DllImport("user32.dll")]
+          public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+          
+          [DllImport("user32.dll")]
+          public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+          
+          public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+          
+          [DllImport("user32.dll")]
+          public static extern bool IsWindowVisible(IntPtr hWnd);
+          
+          public const int SW_MINIMIZE = 6;
+          public const int SW_SHOWNORMAL = 1;
+          
+          public static bool MinimizeProcessWindow(int targetProcessId) {
+              // Finde alle sichtbaren Fenster des Prozesses und minimiere sie
+              bool success = false;
+              uint foregroundProcessId = 0;
+              IntPtr foregroundWindow = GetForegroundWindow();
+              GetWindowThreadProcessId(foregroundWindow, out foregroundProcessId);
+              
+              // Wenn wir selbst im Vordergrund sind, nicht minimieren
+              if (foregroundProcessId == targetProcessId) {
+                  Console.WriteLine($"Process {targetProcessId} ist im Vordergrund und wird nicht minimiert");
+                  return false;
+              }
+              
               try {
-                  Process proc = Process.GetProcessById(processId);
-                  if (proc != null && proc.MainWindowHandle != IntPtr.Zero) {
-                      return ShowWindowAsync(proc.MainWindowHandle, SW_MINIMIZE);
+                  Process process = Process.GetProcessById(targetProcessId);
+                  IntPtr mainWindowHandle = process.MainWindowHandle;
+                  
+                  if (mainWindowHandle != IntPtr.Zero && IsWindowVisible(mainWindowHandle)) {
+                      // Direkt die Windows API nutzen
+                      success = ShowWindowAsync(mainWindowHandle, SW_MINIMIZE);
+                      Console.WriteLine($"Minimiere Hauptfenster von Prozess {targetProcessId}: {success}");
+                      return success;
+                  } else {
+                      Console.WriteLine($"Prozess {targetProcessId} hat kein sichtbares Hauptfenster");
                   }
+              } catch (Exception ex) {
+                  Console.WriteLine($"Fehler beim Minimieren von Prozess {targetProcessId}: {ex.Message}");
               }
-              catch (Exception) {
-                  // Ignoriere Fehler
-              }
-              return false;
+              
+              return success;
           }
       }
 "@
@@ -426,9 +541,7 @@ async function minimizeApplication(processId: number): Promise<boolean> {
           if (success) {
             console.log(`Prozess ${processId} erfolgreich minimiert`);
           } else {
-            console.log(
-              `Prozess ${processId} hat kein Hauptfenster oder es wurde nicht gefunden`
-            );
+            console.log(`Prozess ${processId} konnte nicht minimiert werden`);
           }
           resolve(success);
         }
@@ -443,16 +556,199 @@ async function minimizeApplication(processId: number): Promise<boolean> {
   });
 }
 
-// This method will be called when Electron has finished initialization
-app.whenReady().then(() => {
-  createWindow();
+/**
+ * Minimiert alle Anwendungen außer der angegebenen Anwendung
+ * Diese Funktion nutzt denselben Mechanismus wie showDesktopExceptApps, aber für einen einzelnen Prozess
+ */
+async function minimizeAllExcept(exceptProcessId: number): Promise<boolean> {
+  // Wir verwenden einfach die vorhandene Funktion mit einem einzelnen Prozess
+  return showDesktopExceptApps([exceptProcessId]);
+}
 
-  app.on("activate", () => {
-    // On macOS it's common to re-create a window when the dock icon is clicked
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+/**
+ * Minimiert alle Fenster außer der angegebenen Anwendungen
+ * Stark vereinfachte Version basierend auf dem Vorschlag des Benutzers
+ */
+async function showDesktopExceptApps(
+  appIdsToRestore: number[]
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (process.platform !== "win32") {
+      console.warn("Diese Funktion wird nur unter Windows unterstützt");
+      resolve(false);
+      return;
+    }
+
+    console.log(
+      `Minimiere alle Fenster außer für Prozesse: ${appIdsToRestore.join(", ")}`
+    );
+
+    // Direkte und einfache PowerShell-Implementierung ohne komplexe String-Verkettung
+    const psScript = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Diagnostics;
+using System.Collections.Generic;
+
+public class WindowUtils {
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+    
+    public const int SW_MINIMIZE = 6;
+    
+    public static void MinimizeAllExcept(int[] protectedPids) {
+        // Erstelle HashSet für schnelle Suche
+        HashSet<int> protectedSet = new HashSet<int>(protectedPids);
+        int minimizedCount = 0;
+        
+        // Alle laufenden Prozesse durchlaufen
+        foreach (Process proc in Process.GetProcesses()) {
+            try {
+                // Nur Prozesse mit einem Hauptfenster berücksichtigen
+                if (proc.MainWindowHandle != IntPtr.Zero) {
+                    // Prüfen, ob der Prozess geschützt ist
+                    if (!protectedSet.Contains(proc.Id)) {
+                        // Fenster minimieren
+                        ShowWindowAsync(proc.MainWindowHandle, SW_MINIMIZE);
+                        minimizedCount++;
+                        Console.WriteLine("Minimiert: " + proc.ProcessName + " (PID " + proc.Id + ")");
+                    } else {
+                        Console.WriteLine("Geschützt: " + proc.ProcessName + " (PID " + proc.Id + ")");
+                    }
+                }
+            } catch (Exception ex) {
+                Console.WriteLine("Fehler bei Prozess " + proc.Id + ": " + ex.Message);
+            }
+        }
+        
+        Console.WriteLine("MINIMIERUNG ABGESCHLOSSEN");
+        Console.WriteLine("=========================");
+        Console.WriteLine("Minimierte Fenster: " + minimizedCount);
+    }
+}
+"@
+
+# Geschützte Prozess-IDs als Array
+$protectedPids = @(${appIdsToRestore.join(",")})
+Write-Host "Geschützte Prozess-IDs: $protectedPids"
+
+# Alle Fenster außer den geschützten minimieren
+[WindowUtils]::MinimizeAllExcept($protectedPids)
+
+# Immer Erfolg zurückgeben, da wir die Funktion vereinfacht haben
+$true
+`;
+
+    try {
+      // Erstelle temporäre Datei mit UTF-8 Encoding
+      const tempFilePath = path.join(
+        os.tmpdir(),
+        `minimize-windows-${Date.now()}.ps1`
+      );
+      fs.writeFileSync(tempFilePath, psScript, { encoding: "utf8" });
+      console.log(
+        `PowerShell-Skript in temporäre Datei geschrieben: ${tempFilePath}`
+      );
+
+      // Führe PowerShell-Skript aus mit explizitem UTF-8 Encoding
+      console.log("Starte PowerShell-Skript...");
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempFilePath],
+        { encoding: "utf8" },
+        (error, stdout, stderr) => {
+          // Datei aufräumen
+          try {
+            fs.unlinkSync(tempFilePath);
+            console.log("Temporäre Skriptdatei gelöscht");
+          } catch (unlinkError: unknown) {
+            const error = unlinkError as Error;
+            console.warn(
+              `Konnte temporäre Datei nicht löschen: ${error.message}`
+            );
+          }
+
+          if (error) {
+            console.error(
+              `Fehler beim Ausführen des PowerShell-Skripts: ${error.message}`
+            );
+            console.error(`stderr: ${stderr}`);
+            resolve(false);
+            return;
+          }
+
+          console.log("=== DIAGNOSE DER FENSTERMINIMIERUNG ===");
+          console.log(stdout.trim());
+          console.log("=======================================");
+
+          // Bei dieser vereinfachten Version geben wir immer Erfolg zurück
+          resolve(true);
+        }
+      );
+    } catch (fileError: unknown) {
+      const error = fileError as Error;
+      console.error(
+        `Fehler beim Erstellen der temporären Skriptdatei: ${error.message}`
+      );
+      resolve(false);
     }
   });
+}
+
+// Initialisiere IPC-Kommunikation
+function setupIpcHandlers() {
+  // Laufende Anwendungen abrufen
+  ipcMain.handle("get-running-applications", async () => {
+    console.log("getRunningApplications() wird aufgerufen");
+    return await getRunningApplications();
+  });
+
+  // Anwendungen minimieren
+  ipcMain.handle("minimize-applications", async (_, appIds: number[]) => {
+    let success = true;
+    for (const appId of appIds) {
+      const result = await minimizeApplication(appId);
+      if (!result) success = false;
+    }
+    return success;
+  });
+
+  // Alle Anwendungen außer der angegebenen minimieren
+  ipcMain.handle("minimize-all-except", async (_, processId: number) => {
+    return await minimizeAllExcept(processId);
+  });
+
+  // Show Desktop und Apps wiederherstellen
+  ipcMain.handle(
+    "show-desktop-except",
+    async (_, appIdsToRestore: number[]) => {
+      return await showDesktopExceptApps(appIdsToRestore);
+    }
+  );
+
+  // Shortcut für ein Theme registrieren
+  ipcMain.handle("register-shortcut", async (_, { themeId, shortcut }) => {
+    return registerThemeShortcut(themeId, shortcut);
+  });
+
+  // Shortcut für ein Theme entfernen
+  ipcMain.handle("unregister-shortcut", async (_, { themeId }) => {
+    return unregisterThemeShortcut(themeId);
+  });
+}
+
+// Beim Beenden der App alle Shortcuts entfernen
+app.on("will-quit", () => {
+  // Unregister all shortcuts
+  globalShortcut.unregisterAll();
+  console.log("Alle globalen Shortcuts entfernt");
+});
+
+// App bereit-Event
+app.on("ready", () => {
+  createWindow();
+  setupIpcHandlers(); // IPC-Handler initialisieren
 });
 
 // Quit when all windows are closed, except on macOS
@@ -460,18 +756,4 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
-});
-
-// Clean up shortcuts when app is about to quit
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
-});
-
-// IPC Handlers for process communication
-ipcMain.handle("get-running-applications", async () => {
-  return await getRunningApplications();
-});
-
-ipcMain.handle("minimize-applications", async (_, appIds: number[]) => {
-  return await minimizeApplications(appIds);
 });

@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ipcRenderer } from "electron";
 import "./styles/index.css";
-import Sidebar from "./components/Sidebar";
-import Dashboard from "./components/Dashboard";
 import ApplicationList from "./components/ApplicationList";
 
 // Typdefinitionen
@@ -18,6 +16,7 @@ interface Theme {
   id: string;
   name: string;
   applications: number[];
+  shortcut: string;
 }
 
 const App: React.FC = () => {
@@ -54,6 +53,70 @@ const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, []);
 
+  // Globale Funktion, um den aktuellen Theme-Status für den Main-Prozess bereitzustellen
+  useEffect(() => {
+    // Diese Funktion gibt das angeforderte Theme zurück
+    (window as any).getCurrentThemeInfo = (themeId: string) => {
+      const theme = themes.find((t) => t.id === themeId);
+      if (theme) {
+        return {
+          id: theme.id,
+          name: theme.name,
+          applications: theme.applications,
+          shortcut: theme.shortcut,
+        };
+      }
+      return null;
+    };
+
+    // Funktion zum Abrufen des aktiven Themes
+    (window as any).getActiveThemeInfo = () => {
+      if (!activeTheme) return null;
+
+      const theme = themes.find((t) => t.id === activeTheme);
+      if (theme) {
+        return {
+          id: theme.id,
+          name: theme.name,
+          applications: theme.applications,
+          shortcut: theme.shortcut,
+        };
+      }
+      return null;
+    };
+
+    // Funktion zum Abrufen aller Themes
+    (window as any).getAllThemesInfo = () => {
+      return themes.map((theme) => ({
+        id: theme.id,
+        name: theme.name,
+        applications: theme.applications,
+        shortcut: theme.shortcut,
+      }));
+    };
+
+    return () => {
+      // Cleanup
+      delete (window as any).getCurrentThemeInfo;
+      delete (window as any).getActiveThemeInfo;
+      delete (window as any).getAllThemesInfo;
+    };
+  }, [themes, activeTheme]);
+
+  // Event-Listener für Theme-Erstellung von ApplicationList
+  useEffect(() => {
+    const handleAddThemeEvent = (event: any) => {
+      if (event.detail) {
+        handleAddTheme(event.detail);
+      }
+    };
+
+    window.addEventListener("addTheme", handleAddThemeEvent);
+    return () => {
+      window.removeEventListener("addTheme", handleAddThemeEvent);
+    };
+  }, []);
+
   // Tastaturkürzelevent-Listener für Theme-Aktivierung
   useEffect(() => {
     const handleActivateTheme = (_: any, themeIndex: number) => {
@@ -72,6 +135,33 @@ const App: React.FC = () => {
       ipcRenderer.removeListener("activate-theme", handleActivateTheme);
     };
   }, [themes]);
+
+  // Handler für Theme-Aktivierung durch Shortcuts
+  useEffect(() => {
+    const handleActivateThemeAndMinimize = (_: any, themeId: string) => {
+      // Theme aktivieren
+      setActiveTheme(themeId);
+      setFocusModeActive(true);
+
+      // Alle anderen Anwendungen minimieren
+      applyFocusMode(themeId, true);
+
+      console.log(
+        `Theme ${themeId} durch Shortcut aktiviert und andere Apps minimiert`
+      );
+    };
+
+    ipcRenderer.on(
+      "activate-theme-and-minimize",
+      handleActivateThemeAndMinimize
+    );
+    return () => {
+      ipcRenderer.removeListener(
+        "activate-theme-and-minimize",
+        handleActivateThemeAndMinimize
+      );
+    };
+  }, [themes, applications]);
 
   // Toggle Focus Mode via global shortcut
   useEffect(() => {
@@ -131,6 +221,21 @@ const App: React.FC = () => {
     );
   };
 
+  // Theme aktualisieren (für Shortcut-Änderungen)
+  const handleUpdateTheme = (themeId: string, updatedTheme: Partial<Theme>) => {
+    setThemes(
+      themes.map((theme) => {
+        if (theme.id === themeId) {
+          return {
+            ...theme,
+            ...updatedTheme,
+          };
+        }
+        return theme;
+      })
+    );
+  };
+
   // Aktiviere Theme
   const handleActivateTheme = (themeId: string | null) => {
     setActiveTheme(themeId);
@@ -160,69 +265,144 @@ const App: React.FC = () => {
     }
 
     const theme = themes.find((t) => t.id === themeId);
-    if (!theme) return;
+    if (!theme) {
+      console.error(`Theme mit ID ${themeId} nicht gefunden`);
+      return;
+    }
+
+    console.log(
+      `Focus Mode für Theme "${theme.name}" (ID: ${themeId}) aktiviert`
+    );
+    console.log(`Anwendungen in dieser Gruppe: ${theme.applications.length}`);
+
+    if (theme.applications.length === 0) {
+      // Zeige dem Benutzer einen Hinweis, dass keine Apps in der Gruppe sind
+      alert(
+        "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert."
+      );
+      console.log("Keine Anwendungen in dieser Gruppe, nichts zu minimieren");
+      return;
+    }
+
+    try {
+      // Neue Methode: "Show Desktop" und dann Apps wiederherstellen
+      console.log("Sende Anfrage für 'Show Desktop except Apps'...");
+      const success = await ipcRenderer.invoke(
+        "show-desktop-except",
+        theme.applications
+      );
+
+      if (success) {
+        console.log("'Show Desktop'-Funktion erfolgreich ausgeführt");
+      } else {
+        console.warn("Problem beim Ausführen der 'Show Desktop'-Funktion");
+
+        // Fallback auf die alten Methoden, falls die neue nicht funktioniert
+        fallbackFocusMode(theme);
+      }
+    } catch (error) {
+      console.error(
+        "Fehler beim Ausführen der 'Show Desktop'-Funktion:",
+        error
+      );
+
+      // Fallback auf die alten Methoden, falls die neue nicht funktioniert
+      fallbackFocusMode(theme);
+    }
+  };
+
+  // Fallback-Methode, die verschiedene andere Minimierungsmethoden ausprobiert
+  const fallbackFocusMode = async (theme: Theme) => {
+    console.log("Verwende Fallback-Methoden für Focus Mode");
+
+    try {
+      // Methode 1: Versuche Minimieren aller außer der ersten App
+      if (theme.applications.length > 0) {
+        const primaryAppId = theme.applications[0];
+        console.log(
+          `Versuche alle außer Primäranwendung ${primaryAppId} zu minimieren`
+        );
+
+        const success = await ipcRenderer.invoke(
+          "minimize-all-except",
+          primaryAppId
+        );
+
+        if (success) {
+          console.log("Fenster erfolgreich minimiert");
+          return;
+        }
+      }
+
+      // Methode 2: Versuche die alte Minimierungsmethode (einzeln)
+      fallbackMinimizeOtherApps(theme, applications);
+    } catch (error) {
+      console.error("Fehler im Fallback Focus Mode:", error);
+    }
+  };
+
+  // Fallback-Methode, die die alte Minimierungsmethode verwendet
+  const fallbackMinimizeOtherApps = async (
+    theme: Theme,
+    allApps: ProcessInfo[]
+  ) => {
+    console.log(
+      "Verwende Fallback-Methode zum Minimieren einzelner Anwendungen"
+    );
 
     // Bestimme, welche Anwendungen minimiert werden sollen
-    const appsToMinimize = applications
+    const appsToMinimize = allApps
       .filter((app) => !theme.applications.includes(app.id))
       .map((app) => app.id);
 
-    console.log(`${appsToMinimize.length} Anwendungen werden minimiert`);
-    if (appsToMinimize.length === 0) return;
+    // Debug-Informationen anzeigen
+    console.log(
+      `${appsToMinimize.length} Anwendungen werden einzeln minimiert`
+    );
+
+    const appsToMinimizeDetails = allApps
+      .filter((app) => !theme.applications.includes(app.id))
+      .map((app) => `${app.title} (ID: ${app.id})`);
+
+    console.log("Zu minimierende Anwendungen:", appsToMinimizeDetails);
+
+    if (appsToMinimize.length === 0) {
+      console.log("Keine Anwendungen zu minimieren");
+      return;
+    }
 
     // Minimiere alle Anwendungen, die nicht zum aktiven Theme gehören
     try {
+      console.log("Sende Minimierungsanfrage an Main-Prozess...");
       const success = await ipcRenderer.invoke(
         "minimize-applications",
         appsToMinimize
       );
-      console.log(
-        success
-          ? "Anwendungen erfolgreich minimiert"
-          : "Fehler beim Minimieren der Anwendungen"
-      );
+
+      if (success) {
+        console.log("Alle Anwendungen wurden erfolgreich minimiert");
+      } else {
+        console.warn("Einige Anwendungen konnten nicht minimiert werden");
+      }
     } catch (error) {
       console.error("Fehler beim Minimieren der Anwendungen:", error);
     }
   };
 
   return (
-    <div className="app-container">
-      <Sidebar
-        themes={themes}
-        activeTheme={activeTheme}
-        onAddTheme={handleAddTheme}
-        onDeleteTheme={handleDeleteTheme}
-        onActivateTheme={handleActivateTheme}
-        focusModeActive={focusModeActive}
-        onToggleFocusMode={toggleFocusMode}
-      />
-      <div className="main-content">
-        <Dashboard
-          applicationCount={applications.length}
-          themeCount={themes.length}
-          activeTheme={
-            activeTheme
-              ? themes.find((t) => t.id === activeTheme) || null
-              : null
-          }
-          focusModeActive={focusModeActive}
+    <div className="app-container-simple">
+      {loading ? (
+        <div className="loading">Lade Anwendungen...</div>
+      ) : (
+        <ApplicationList
+          applications={applications}
+          themes={themes}
+          activeTheme={activeTheme}
+          onAddToTheme={handleAddToTheme}
+          onRemoveFromTheme={handleRemoveFromTheme}
+          onUpdateTheme={handleUpdateTheme}
         />
-        <div className="content-section">
-          <h2>Application Management</h2>
-          {loading ? (
-            <div className="loading">Lade Anwendungen...</div>
-          ) : (
-            <ApplicationList
-              applications={applications}
-              themes={themes}
-              activeTheme={activeTheme}
-              onAddToTheme={handleAddToTheme}
-              onRemoveFromTheme={handleRemoveFromTheme}
-            />
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -14,12 +14,30 @@ export interface Theme {
   id: string;
   name: string;
   applications: number[]; // Array von Prozess-IDs
+  shortcut?: string; // Tastaturkombination zum Aktivieren des Themes
+}
+
+// ApplicationListProps Interface
+export interface ApplicationListProps {
+  applications: ProcessInfo[];
+  themes: Theme[];
+  activeTheme: string | null;
+  onAddToTheme: (themeId: string, applicationId: number) => void;
+  onRemoveFromTheme: (themeId: string, applicationId: number) => void;
+  onUpdateTheme?: (themeId: string, updatedTheme: Partial<Theme>) => void;
 }
 
 // IPC-Kommunikation zwischen Main und Renderer
 export interface IpcMainHandlers {
   "get-running-applications": () => Promise<ProcessInfo[]>;
   "minimize-applications": (appIds: number[]) => Promise<boolean>;
+  "register-shortcut": (shortcutData: {
+    themeId: string;
+    shortcut: string;
+  }) => Promise<boolean>;
+  "unregister-shortcut": (shortcutData: {
+    themeId: string;
+  }) => Promise<boolean>;
 }
 
 export interface IpcRendererEvents {

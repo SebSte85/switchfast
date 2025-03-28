@@ -24,6 +24,15 @@
     @apply min-h-screen flex bg-gray-100;
   }
 
+  /* Fullwidth layout ohne Sidebar */
+  .app-container-fullwidth {
+    @apply min-h-screen bg-gray-100;
+  }
+
+  .main-content-full {
+    @apply p-6;
+  }
+
   /* Sidebar */
   .sidebar {
     @apply w-64 bg-gray-800 text-white flex flex-col h-screen sticky top-0;
@@ -66,8 +75,36 @@
   }
 
   /* Main content area */
-  .app-content {
-    @apply flex-1 overflow-auto p-6;
+  .main-content {
+    @apply flex-1 flex flex-col p-6 overflow-auto;
+  }
+
+  .content-section {
+    @apply flex-1;
+  }
+
+  .section-header {
+    @apply flex flex-col md:flex-row items-start md:items-center justify-between mb-4;
+  }
+
+  .section-title {
+    @apply text-2xl font-semibold text-gray-800 mb-6;
+  }
+
+  .active-theme-indicator {
+    @apply flex items-center gap-2 mt-2 md:mt-0 bg-primary/10 py-1 px-3 rounded-full;
+  }
+
+  .active-theme-label {
+    @apply text-sm text-gray-600;
+  }
+
+  .active-theme-name {
+    @apply text-sm font-semibold text-primary;
+  }
+
+  .loading {
+    @apply flex items-center justify-center h-40 text-gray-500;
   }
 
   /* Dashboard */
@@ -135,10 +172,6 @@
     @apply bg-white rounded-lg shadow p-6 mb-6;
   }
 
-  .section-title {
-    @apply text-lg font-semibold text-gray-800 mb-4;
-  }
-
   /* Theme Selector (updated) */
   .theme-selector {
     @apply bg-gray-700 rounded-md shadow;
@@ -176,102 +209,320 @@
     @apply border-primary bg-gray-600 shadow-md;
   }
 
-  /* Application List (updated) */
+  /* Application List neu designt */
   .application-list {
-    @apply mt-2;
+    @apply w-full;
   }
 
   .application-list-header {
-    @apply mb-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3;
+    @apply mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4;
   }
 
   .search-container {
-    @apply relative w-full md:w-64;
-  }
-
-  .filter-toggle {
-    @apply mt-2 md:mt-0;
-  }
-
-  .filter-label {
-    @apply flex items-center gap-2 text-sm text-gray-600 cursor-pointer;
-  }
-
-  .filter-checkbox {
-    @apply h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary;
-  }
-
-  .filter-text {
-    @apply text-sm text-gray-600;
+    @apply relative w-full md:w-1/2;
   }
 
   .search-input {
-    @apply w-full py-2 pl-10 pr-4 rounded-md border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent shadow-sm;
+    @apply flex-1 px-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
   }
 
-  .search-icon {
-    @apply absolute left-3 top-2.5 w-5 h-5 text-gray-400;
+  .create-group-button {
+    @apply flex items-center justify-center bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors;
   }
 
-  .applications-grid {
-    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4;
+  .plus-icon {
+    @apply mr-2 text-lg;
   }
 
-  .application-item {
-    @apply flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors relative;
+  .section-subtitle {
+    @apply text-xl font-medium text-gray-800 mt-6 mb-4;
   }
 
-  .application-item.in-theme {
-    @apply bg-blue-50 border-primary;
+  /* Anwendungskarten-Grid */
+  .application-grid {
+    @apply grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4;
   }
 
-  .application-item.in-theme::before {
-    content: "";
-    @apply absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white;
+  .application-card {
+    @apply bg-white rounded-md border border-gray-200 p-4 flex flex-col justify-between shadow-sm hover:shadow-md transition;
   }
 
-  .app-icon {
-    @apply w-12 h-12 flex items-center justify-center bg-gray-200 rounded-full overflow-hidden;
+  .application-card.in-active-theme {
+    @apply bg-blue-50 border-blue-300;
   }
 
-  .icon-placeholder {
-    @apply text-2xl font-bold text-gray-500;
+  .application-card.dragging {
+    @apply opacity-50 scale-95 shadow-lg;
   }
 
-  .app-info {
-    @apply flex-1 overflow-hidden;
-  }
-
-  .app-name {
-    @apply font-medium truncate;
-  }
-
-  .app-window-title {
-    @apply text-sm text-gray-500 truncate max-w-full;
-  }
-
-  .app-action {
-    @apply ml-2;
+  .application-title {
+    @apply font-medium text-gray-800 mb-3;
   }
 
   .toggle-button {
-    @apply text-xs py-1 px-2 rounded text-white transition-colors;
+    @apply w-full py-1.5 px-2 rounded-md text-sm font-medium text-center transition-colors;
   }
 
   .toggle-button.add {
-    @apply bg-primary hover:bg-primary-dark;
+    @apply bg-blue-500 text-white hover:bg-blue-600;
   }
 
   .toggle-button.remove {
-    @apply bg-red-500 hover:bg-red-600;
+    @apply bg-red-500 text-white hover:bg-red-600;
+  }
+
+  .no-applications {
+    @apply text-center py-10 text-gray-500;
+  }
+
+  /* Section styles */
+  .themes-section,
+  .applications-section {
+    @apply mb-8;
+  }
+
+  .no-themes-message {
+    @apply bg-gray-50 p-6 text-center text-gray-500 rounded-lg border border-gray-200;
+  }
+
+  /* Theme drop zones for drag and drop */
+  .theme-drop-zones {
+    @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6;
+  }
+
+  .theme-drop-zone {
+    @apply bg-white shadow-sm hover:shadow transition-shadow p-4 rounded-lg min-h-[120px] border border-gray-200 relative;
+  }
+
+  .theme-drop-zone-header {
+    @apply flex items-center justify-between mb-2;
+  }
+
+  .theme-drop-zone.active-theme {
+    @apply border-primary;
+  }
+
+  .theme-drop-zone.active-drop {
+    @apply border-2 border-primary bg-primary/5;
+  }
+
+  .app-count-badge {
+    @apply text-xs bg-gray-200 px-2 py-0.5 rounded-full;
+  }
+
+  .theme-apps {
+    @apply mt-2 max-h-[150px] overflow-y-auto;
+  }
+
+  .theme-app-list {
+    @apply pl-2 space-y-1;
+  }
+
+  .theme-app-item {
+    @apply flex items-center justify-between rounded p-1 hover:bg-gray-100;
+  }
+
+  .remove-app-button {
+    @apply text-xs text-red-500 hover:text-red-700 hover:bg-red-50 h-5 w-5 flex items-center justify-center rounded-full;
+  }
+
+  .empty-theme-message {
+    @apply text-gray-500 text-xs italic text-center py-2;
+  }
+
+  /* Application Items */
+  .application-items {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3;
+  }
+
+  .application-item {
+    @apply flex items-center justify-between p-3 bg-white rounded-md shadow hover:shadow-md transition-shadow border-l-4 border-transparent cursor-grab active:cursor-grabbing;
+  }
+
+  .application-item.dragging {
+    @apply opacity-50 scale-95 shadow-lg;
+  }
+
+  .application-item.in-active-theme {
+    @apply border-l-4 border-primary bg-primary/5;
+  }
+
+  .application-name {
+    @apply text-gray-800 font-medium truncate max-w-[70%];
+  }
+
+  .application-controls {
+    @apply mt-2;
+  }
+
+  .toggle-button {
+    @apply px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors;
+  }
+
+  .toggle-button.add {
+    @apply bg-green-100 text-green-700 hover:bg-green-200;
+  }
+
+  .toggle-button.remove {
+    @apply bg-red-100 text-red-700 hover:bg-red-200;
   }
 
   .info-message {
-    @apply mt-4 text-sm text-gray-600 text-center;
+    @apply text-xs text-gray-500 mt-4 text-center;
   }
 
-  .no-themes,
   .no-applications {
-    @apply text-gray-500 italic text-center py-4;
+    @apply bg-gray-50 p-8 text-center text-gray-500 rounded-lg border border-gray-200;
+  }
+
+  /* Basis-Styling */
+  .app-container-simple {
+    @apply min-h-screen bg-[#414159] p-6;
+  }
+
+  /* Suchreihe und Filter */
+  .search-row {
+    @apply flex flex-col md:flex-row gap-4 mb-3;
+  }
+
+  .filter-container {
+    @apply flex items-center mb-6;
+  }
+
+  .filter-checkbox {
+    @apply h-4 w-4 mr-2 text-blue-600 rounded border-gray-300 focus:ring-blue-500;
+  }
+
+  .filter-label {
+    @apply text-sm text-gray-600;
+  }
+
+  /* Gruppen-Sektion */
+  .groups-section {
+    @apply mb-8;
+  }
+
+  .groups-title {
+    @apply text-2xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+  }
+
+  .groups-container {
+    @apply flex flex-wrap gap-4 mb-8;
+  }
+
+  .add-group-button {
+    @apply w-14 h-14 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center text-3xl hover:bg-[#78d97c]/10 transition-colors;
+  }
+
+  .group-item {
+    @apply px-5 py-3 rounded-md border-2 flex items-center justify-center;
+  }
+
+  .group-item-work {
+    @apply border-amber-400 text-amber-400;
+  }
+
+  .group-item-project {
+    @apply border-red-400 text-red-400;
+  }
+
+  /* Prozesse-Sektion */
+  .processes-section {
+    @apply mb-6;
+  }
+
+  .processes-title {
+    @apply text-2xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+  }
+
+  .process-list {
+    @apply flex flex-col gap-3;
+  }
+
+  .process-item {
+    @apply flex items-center justify-between bg-transparent border-2 border-[#78d97c] rounded-full py-2 px-5;
+  }
+
+  .process-name {
+    @apply text-white font-medium;
+  }
+
+  .process-menu {
+    @apply text-[#78d97c] cursor-pointer text-2xl;
+  }
+
+  /* Gruppen-Eingabefeld */
+  .group-input-container {
+    @apply flex flex-col gap-2 p-3 rounded-md border-2 border-[#78d97c] bg-[#414159];
+  }
+
+  .group-input {
+    @apply px-3 py-2 w-full bg-[#2e2e3d] text-white border-none rounded focus:outline-none focus:ring-1 focus:ring-[#78d97c];
+  }
+
+  .group-input-buttons {
+    @apply flex gap-2 justify-end;
+  }
+
+  .group-input-save {
+    @apply w-8 h-8 flex items-center justify-center text-lg rounded-full bg-[#78d97c] text-[#414159] hover:bg-[#62c966] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .group-input-cancel {
+    @apply w-8 h-8 flex items-center justify-center text-lg rounded-full bg-red-400 text-[#414159] hover:bg-red-500;
+  }
+
+  /* Drag and Drop Styling */
+  .process-item.dragging {
+    @apply opacity-60 border-2 border-dashed rotate-1 scale-105 shadow-lg bg-[#52825d];
+  }
+
+  .process-drag-handle {
+    @apply flex items-center cursor-grab;
+  }
+
+  .drag-handle-icon {
+    @apply text-[#78d97c] hover:text-white transition-colors;
+  }
+
+  .no-processes {
+    @apply text-gray-400 py-4 text-center italic;
+  }
+
+  .group-item-active-drop {
+    @apply border-4 border-dashed bg-[#78d97c]/20 scale-110 shadow-lg;
+  }
+
+  /* Shortcut-Styling */
+  .group-item-content {
+    @apply flex flex-col items-center justify-between gap-1 w-full h-full;
+  }
+
+  .group-item-name {
+    @apply text-center;
+  }
+
+  .group-item-actions {
+    @apply w-full;
+  }
+
+  .shortcut-badge {
+    @apply text-xs px-2 py-1 bg-[#414159] text-white/70 rounded-md cursor-pointer hover:bg-[#414159]/80 hover:text-white text-center mt-1 truncate transition-colors;
+  }
+
+  .shortcut-editor {
+    @apply flex items-center gap-1 mt-1;
+  }
+
+  .shortcut-input {
+    @apply flex-1 bg-[#414159] text-white text-xs px-2 py-1 rounded-md border border-[#78d97c]/50 focus:outline-none focus:border-[#78d97c];
+  }
+
+  .shortcut-save {
+    @apply text-xs bg-[#78d97c] text-[#414159] w-5 h-5 rounded-md flex items-center justify-center hover:bg-[#62c966] transition-colors;
+  }
+
+  .shortcut-cancel {
+    @apply text-xs bg-red-400 text-[#414159] w-5 h-5 rounded-md flex items-center justify-center hover:bg-red-500 transition-colors;
   }
 }
