@@ -162,64 +162,45 @@ function registerShortcuts() {
 
 function registerThemeShortcut(themeId: string, shortcut: string): boolean {
   try {
+    console.log(
+      `Versuche Shortcut ${shortcut} für Theme ${themeId} zu registrieren...`
+    );
+
     // Wenn bereits ein Shortcut für dieses Theme existiert, entferne ihn zuerst
     if (registeredShortcuts.has(themeId)) {
       const oldShortcut = registeredShortcuts.get(themeId);
+      console.log(
+        `Entferne alten Shortcut ${oldShortcut} für Theme ${themeId}`
+      );
       if (oldShortcut) {
         globalShortcut.unregister(oldShortcut);
       }
     }
 
     // Registriere den neuen Shortcut
-    globalShortcut.register(shortcut, async () => {
-      if (mainWindow) {
-        // Sende Benachrichtigung an Renderer
-        mainWindow.webContents.send("activate-theme-and-minimize", themeId);
+    const success = globalShortcut.register(shortcut, async () => {
+      console.log(`Shortcut ${shortcut} für Theme ${themeId} wurde ausgelöst!`);
 
-        try {
-          // Hole die aktuelle Theme-Info vom Renderer
-          const themesInfo: any =
-            await mainWindow.webContents.executeJavaScript(
-              `window.getCurrentThemeInfo && window.getCurrentThemeInfo('${themeId}')`
-            );
-
-          if (
-            themesInfo &&
-            themesInfo.applications &&
-            themesInfo.applications.length > 0
-          ) {
-            // Verwende die Show Desktop Funktion mit allen Apps des Themes als Ausnahmen
-            console.log(
-              `Minimiere alle Fenster außer für Theme ${themeId} mit ${themesInfo.applications.length} Apps`
-            );
-
-            // Verwende die neue Methode, die alle Fenster minimiert außer die der Gruppe
-            await showDesktopExceptApps(themesInfo.applications);
-          } else {
-            console.log(
-              `Theme ${themeId} hat keine Anwendungen oder konnte nicht abgerufen werden`
-            );
-            // Benachrichtige den Benutzer
-            if (mainWindow) {
-              mainWindow.webContents.send("show-notification", {
-                title: "Gruppe hat keine Anwendungen",
-                message:
-                  "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert.",
-              });
-            }
-          }
-        } catch (error) {
-          console.error(
-            `Fehler beim Minimieren von Anwendungen für Theme ${themeId}:`,
-            error
-          );
-        }
+      if (!mainWindow) {
+        console.log("Hauptfenster nicht gefunden!");
+        return;
       }
+
+      // Sende Benachrichtigung an Renderer
+      console.log("Sende activate-theme-and-minimize Event an Renderer...");
+      mainWindow.webContents.send("activate-theme-and-minimize", themeId);
     });
+
+    if (!success) {
+      console.error(`Konnte Shortcut ${shortcut} nicht registrieren!`);
+      return false;
+    }
 
     // Speichere den registrierten Shortcut
     registeredShortcuts.set(themeId, shortcut);
-    console.log(`Shortcut ${shortcut} für Theme ${themeId} registriert`);
+    console.log(
+      `Shortcut ${shortcut} für Theme ${themeId} erfolgreich registriert`
+    );
     return true;
   } catch (error) {
     console.error(`Fehler beim Registrieren des Shortcuts ${shortcut}:`, error);
@@ -566,133 +547,122 @@ async function minimizeAllExcept(exceptProcessId: number): Promise<boolean> {
 }
 
 /**
- * Minimiert alle Fenster außer der angegebenen Anwendungen
- * Stark vereinfachte Version basierend auf dem Vorschlag des Benutzers
+ * Minimiert alle Fenster außer die angegebenen Apps und stellt diese wieder her
  */
 async function showDesktopExceptApps(
-  appIdsToRestore: number[]
+  appIdsToProtect: number[]
 ): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (process.platform !== "win32") {
-      console.warn("Diese Funktion wird nur unter Windows unterstützt");
-      resolve(false);
-      return;
-    }
+  try {
+    // Füge die Process ID unserer Electron App hinzu
+    const ourProcessId = process.pid;
+    const protectedIds = [...appIdsToProtect, ourProcessId];
 
     console.log(
-      `Minimiere alle Fenster außer für Prozesse: ${appIdsToRestore.join(", ")}`
+      `Minimiere alle Fenster außer Apps: ${protectedIds.join(
+        ", "
+      )} (inkl. unserer App ${ourProcessId})`
     );
 
-    // Direkte und einfache PowerShell-Implementierung ohne komplexe String-Verkettung
+    // PowerShell-Skript, das alle Fenster minimiert außer die angegebenen
     const psScript = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Diagnostics;
-using System.Collections.Generic;
+      Add-Type @"
+        using System;
+        using System.Runtime.InteropServices;
+        public class Win32 {
+          [DllImport("user32.dll")]
+          [return: MarshalAs(UnmanagedType.Bool)]
+          public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+          
+          [DllImport("user32.dll")]
+          [return: MarshalAs(UnmanagedType.Bool)]
+          public static extern bool IsWindowVisible(IntPtr hWnd);
 
-public class WindowUtils {
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
-    
-    public const int SW_MINIMIZE = 6;
-    
-    public static void MinimizeAllExcept(int[] protectedPids) {
-        // Erstelle HashSet für schnelle Suche
-        HashSet<int> protectedSet = new HashSet<int>(protectedPids);
-        int minimizedCount = 0;
-        
-        // Alle laufenden Prozesse durchlaufen
-        foreach (Process proc in Process.GetProcesses()) {
-            try {
-                // Nur Prozesse mit einem Hauptfenster berücksichtigen
-                if (proc.MainWindowHandle != IntPtr.Zero) {
-                    // Prüfen, ob der Prozess geschützt ist
-                    if (!protectedSet.Contains(proc.Id)) {
-                        // Fenster minimieren
-                        ShowWindowAsync(proc.MainWindowHandle, SW_MINIMIZE);
-                        minimizedCount++;
-                        Console.WriteLine("Minimiert: " + proc.ProcessName + " (PID " + proc.Id + ")");
-                    } else {
-                        Console.WriteLine("Geschützt: " + proc.ProcessName + " (PID " + proc.Id + ")");
-                    }
-                }
-            } catch (Exception ex) {
-                Console.WriteLine("Fehler bei Prozess " + proc.Id + ": " + ex.Message);
-            }
+          [DllImport("user32.dll")]
+          public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+          [DllImport("user32.dll")]
+          public static extern bool BringWindowToTop(IntPtr hWnd);
+
+          [DllImport("user32.dll")]
+          public static extern bool SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
         }
-        
-        Console.WriteLine("MINIMIERUNG ABGESCHLOSSEN");
-        Console.WriteLine("=========================");
-        Console.WriteLine("Minimierte Fenster: " + minimizedCount);
-    }
-}
 "@
 
-# Geschützte Prozess-IDs als Array
-$protectedPids = @(${appIdsToRestore.join(",")})
-Write-Host "Geschützte Prozess-IDs: $protectedPids"
-
-# Alle Fenster außer den geschützten minimieren
-[WindowUtils]::MinimizeAllExcept($protectedPids)
-
-# Immer Erfolg zurückgeben, da wir die Funktion vereinfacht haben
-$true
-`;
-
-    try {
-      // Erstelle temporäre Datei mit UTF-8 Encoding
-      const tempFilePath = path.join(
-        os.tmpdir(),
-        `minimize-windows-${Date.now()}.ps1`
-      );
-      fs.writeFileSync(tempFilePath, psScript, { encoding: "utf8" });
-      console.log(
-        `PowerShell-Skript in temporäre Datei geschrieben: ${tempFilePath}`
-      );
-
-      // Führe PowerShell-Skript aus mit explizitem UTF-8 Encoding
-      console.log("Starte PowerShell-Skript...");
-      execFile(
-        "powershell.exe",
-        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempFilePath],
-        { encoding: "utf8" },
-        (error, stdout, stderr) => {
-          // Datei aufräumen
-          try {
-            fs.unlinkSync(tempFilePath);
-            console.log("Temporäre Skriptdatei gelöscht");
-          } catch (unlinkError: unknown) {
-            const error = unlinkError as Error;
-            console.warn(
-              `Konnte temporäre Datei nicht löschen: ${error.message}`
-            );
-          }
-
-          if (error) {
-            console.error(
-              `Fehler beim Ausführen des PowerShell-Skripts: ${error.message}`
-            );
-            console.error(`stderr: ${stderr}`);
-            resolve(false);
-            return;
-          }
-
-          console.log("=== DIAGNOSE DER FENSTERMINIMIERUNG ===");
-          console.log(stdout.trim());
-          console.log("=======================================");
-
-          // Bei dieser vereinfachten Version geben wir immer Erfolg zurück
-          resolve(true);
+      # Hole alle Fenster
+      $windows = Get-Process | Where-Object {$_.MainWindowHandle -ne 0} | ForEach-Object {
+        @{
+          Id = $_.Id
+          Handle = $_.MainWindowHandle
+          Title = $_.MainWindowTitle
         }
-      );
-    } catch (fileError: unknown) {
-      const error = fileError as Error;
-      console.error(
-        `Fehler beim Erstellen der temporären Skriptdatei: ${error.message}`
-      );
-      resolve(false);
-    }
+      }
+
+      # IDs der zu schützenden Apps
+      $protectedIds = @(${protectedIds.join(",")})
+
+      # Minimiere zuerst alle nicht geschützten Fenster (SW_MINIMIZE = 6)
+      $windows | Where-Object { $protectedIds -notcontains $_.Id } | ForEach-Object {
+        Write-Host "Minimiere Fenster: $($_.Title) (ID: $($_.Id))"
+        [Win32]::ShowWindow($_.Handle, 6)
+      }
+
+      # Warte kurz, damit Windows Zeit hat, die Fenster zu minimieren
+      Start-Sleep -Milliseconds 100
+
+      # Stelle geschützte Fenster wieder her und bringe sie in den Vordergrund
+      $windows | Where-Object { $protectedIds -contains $_.Id } | ForEach-Object {
+        Write-Host "Aktiviere Fenster: $($_.Title) (ID: $($_.Id))"
+        
+        # Stelle sicher, dass das Fenster nicht minimiert ist (SW_RESTORE = 9)
+        [Win32]::ShowWindow($_.Handle, 9)
+        
+        # Bringe das Fenster in den Vordergrund
+        [Win32]::SetForegroundWindow($_.Handle)
+        [Win32]::BringWindowToTop($_.Handle)
+        [Win32]::SwitchToThisWindow($_.Handle, $true)
+        
+        # Warte kurz zwischen den Fenstern
+        Start-Sleep -Milliseconds 50
+      }
+    `;
+
+    const result = await runPowerShellCommand(psScript);
+    console.log("PowerShell-Skript ausgeführt:", result);
+    return true;
+  } catch (error) {
+    console.error("Fehler beim Ausführen des PowerShell-Skripts:", error);
+    return false;
+  }
+}
+
+// Hilfsfunktion zum Ausführen von PowerShell-Befehlen
+function runPowerShellCommand(script: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // Erstelle temporäre Datei mit UTF-8 Encoding
+    const tempFilePath = path.join(os.tmpdir(), `ps-script-${Date.now()}.ps1`);
+    fs.writeFileSync(tempFilePath, script, { encoding: "utf8" });
+
+    // Führe PowerShell-Skript aus
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempFilePath],
+      { encoding: "utf8" },
+      (error, stdout, stderr) => {
+        // Lösche temporäre Datei
+        try {
+          fs.unlinkSync(tempFilePath);
+        } catch (e) {
+          console.warn("Konnte temporäre Datei nicht löschen:", e);
+        }
+
+        if (error) {
+          reject(new Error(`PowerShell error: ${error.message}\n${stderr}`));
+          return;
+        }
+
+        resolve(stdout);
+      }
+    );
   });
 }
 

@@ -23,6 +23,7 @@ const App: React.FC = () => {
   const [applications, setApplications] = useState<ProcessInfo[]>([]);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
+  const [activeThemes, setActiveThemes] = useState<string[]>([]);
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -106,13 +107,20 @@ const App: React.FC = () => {
   // Event-Listener für Theme-Erstellung von ApplicationList
   useEffect(() => {
     const handleAddThemeEvent = (event: any) => {
+      console.log(
+        "App - handleAddThemeEvent called with event detail:",
+        event.detail
+      );
       if (event.detail) {
+        console.log("App - Calling handleAddTheme with theme:", event.detail);
         handleAddTheme(event.detail);
       }
     };
 
+    console.log("App - Adding addTheme event listener");
     window.addEventListener("addTheme", handleAddThemeEvent);
     return () => {
+      console.log("App - Removing addTheme event listener");
       window.removeEventListener("addTheme", handleAddThemeEvent);
     };
   }, []);
@@ -139,7 +147,13 @@ const App: React.FC = () => {
   // Handler für Theme-Aktivierung durch Shortcuts
   useEffect(() => {
     const handleActivateThemeAndMinimize = (_: any, themeId: string) => {
-      // Theme aktivieren
+      console.log("Aktiviere Theme:", themeId);
+      console.log("Aktuelle aktive Themes:", activeThemes);
+
+      // Ersetze alle aktiven Themes durch das neue Theme
+      setActiveThemes([themeId]);
+
+      // For backward compatibility
       setActiveTheme(themeId);
       setFocusModeActive(true);
 
@@ -147,7 +161,7 @@ const App: React.FC = () => {
       applyFocusMode(themeId, true);
 
       console.log(
-        `Theme ${themeId} durch Shortcut aktiviert und andere Apps minimiert`
+        `Theme ${themeId} durch Shortcut aktiviert, alle anderen Themes deaktiviert`
       );
     };
 
@@ -177,12 +191,45 @@ const App: React.FC = () => {
 
   // Theme hinzufügen
   const handleAddTheme = (newTheme: Theme) => {
-    setThemes([...themes, newTheme]);
+    console.log("App - handleAddTheme called with newTheme:", newTheme);
+    console.log("App - Current themes:", themes);
+
+    // Ensure we have a unique ID by using the current timestamp if not provided
+    const themeToAdd = {
+      ...newTheme,
+      id: newTheme.id || Date.now().toString(),
+      shortcut: newTheme.shortcut || "",
+    };
+
+    console.log("App - Prepared themeToAdd:", themeToAdd);
+
+    // Check if a theme with this ID already exists
+    const themeExists = themes.some((theme) => theme.id === themeToAdd.id);
+    console.log("App - Theme with this ID exists?", themeExists);
+
+    if (themeExists) {
+      // Generate a new unique ID to avoid conflicts
+      themeToAdd.id = Date.now().toString();
+      console.log("App - Generated new ID to avoid conflict:", themeToAdd.id);
+    }
+
+    // Add the new theme
+    console.log("App - Adding new theme to state");
+    setThemes((prevThemes) => {
+      const newThemes = [...prevThemes, themeToAdd];
+      console.log("App - New themes state will be:", newThemes);
+      return newThemes;
+    });
   };
 
   // Theme löschen
   const handleDeleteTheme = (themeId: string) => {
     setThemes(themes.filter((theme) => theme.id !== themeId));
+
+    // Remove from active themes if it was active
+    setActiveThemes((prev) => prev.filter((id) => id !== themeId));
+
+    // For backward compatibility
     if (activeTheme === themeId) {
       setActiveTheme(null);
       setFocusModeActive(false);
@@ -236,10 +283,27 @@ const App: React.FC = () => {
     );
   };
 
-  // Aktiviere Theme
-  const handleActivateTheme = (themeId: string | null) => {
-    setActiveTheme(themeId);
-    if (focusModeActive && themeId) {
+  // Toggle theme activation (add to or remove from active themes)
+  const toggleActiveTheme = (themeId: string) => {
+    setActiveThemes((prev) => {
+      if (prev.includes(themeId)) {
+        // If already active, remove it
+        return prev.filter((id) => id !== themeId);
+      } else {
+        // If not active, add it
+        return [...prev, themeId];
+      }
+    });
+
+    // For backward compatibility with single activeTheme
+    if (activeTheme === themeId) {
+      setActiveTheme(null);
+    } else {
+      setActiveTheme(themeId);
+    }
+
+    // If focus mode is active, update it with the new set of active themes
+    if (focusModeActive) {
       applyFocusMode(themeId, true);
     }
   };
@@ -248,48 +312,54 @@ const App: React.FC = () => {
   const toggleFocusMode = () => {
     console.log("Focus Mode Toggle: ", !focusModeActive);
 
-    if (!activeTheme) {
-      console.log("Kein aktives Theme ausgewählt.");
+    if (activeThemes.length === 0) {
+      console.log("Keine aktiven Gruppen ausgewählt.");
       return;
     }
 
     setFocusModeActive(!focusModeActive);
-    applyFocusMode(activeTheme, !focusModeActive);
+
+    // If there's at least one active theme, use the first one for compatibility
+    if (activeThemes.length > 0) {
+      applyFocusMode(activeThemes[0], !focusModeActive);
+    }
   };
 
-  // Focus Mode anwenden
+  // Modified to support multiple themes
   const applyFocusMode = async (themeId: string, active: boolean) => {
     if (!active) {
       console.log("Focus Mode deaktiviert");
       return;
     }
 
-    const theme = themes.find((t) => t.id === themeId);
-    if (!theme) {
-      console.error(`Theme mit ID ${themeId} nicht gefunden`);
+    // Finde das aktuelle Theme
+    const currentTheme = themes.find((t) => t.id === themeId);
+    if (!currentTheme) {
+      console.log("Theme nicht gefunden");
       return;
     }
 
-    console.log(
-      `Focus Mode für Theme "${theme.name}" (ID: ${themeId}) aktiviert`
-    );
-    console.log(`Anwendungen in dieser Gruppe: ${theme.applications.length}`);
+    console.log(`Aktiviere exklusiv Theme: ${currentTheme.name}`);
 
-    if (theme.applications.length === 0) {
-      // Zeige dem Benutzer einen Hinweis, dass keine Apps in der Gruppe sind
+    // Verwende nur die Apps des aktuellen Themes
+    const appIdsToProtect = currentTheme.applications;
+
+    if (appIdsToProtect.length === 0) {
       alert(
         "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert."
       );
-      console.log("Keine Anwendungen in dieser Gruppe, nichts zu minimieren");
+      console.log("Keine Anwendungen in der Gruppe, nichts zu minimieren");
       return;
     }
 
     try {
       // Neue Methode: "Show Desktop" und dann Apps wiederherstellen
-      console.log("Sende Anfrage für 'Show Desktop except Apps'...");
+      console.log(
+        `Sende Anfrage für 'Show Desktop except Apps' für ${appIdsToProtect.length} Anwendungen aus Theme "${currentTheme.name}"...`
+      );
       const success = await ipcRenderer.invoke(
         "show-desktop-except",
-        theme.applications
+        appIdsToProtect
       );
 
       if (success) {
@@ -297,8 +367,10 @@ const App: React.FC = () => {
       } else {
         console.warn("Problem beim Ausführen der 'Show Desktop'-Funktion");
 
-        // Fallback auf die alten Methoden, falls die neue nicht funktioniert
-        fallbackFocusMode(theme);
+        // Fallback auf die alten Methoden mit dem einzelnen aktiven Theme
+        if (currentTheme) {
+          fallbackFocusMode(currentTheme);
+        }
       }
     } catch (error) {
       console.error(
@@ -306,8 +378,10 @@ const App: React.FC = () => {
         error
       );
 
-      // Fallback auf die alten Methoden, falls die neue nicht funktioniert
-      fallbackFocusMode(theme);
+      // Fallback auf die alten Methoden
+      if (currentTheme) {
+        fallbackFocusMode(currentTheme);
+      }
     }
   };
 
@@ -398,9 +472,11 @@ const App: React.FC = () => {
           applications={applications}
           themes={themes}
           activeTheme={activeTheme}
+          activeThemes={activeThemes}
           onAddToTheme={handleAddToTheme}
           onRemoveFromTheme={handleRemoveFromTheme}
           onUpdateTheme={handleUpdateTheme}
+          onToggleActiveTheme={toggleActiveTheme}
         />
       )}
     </div>

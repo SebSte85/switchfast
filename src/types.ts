@@ -22,9 +22,11 @@ export interface ApplicationListProps {
   applications: ProcessInfo[];
   themes: Theme[];
   activeTheme: string | null;
+  activeThemes: string[]; // Array of active theme IDs
   onAddToTheme: (themeId: string, applicationId: number) => void;
   onRemoveFromTheme: (themeId: string, applicationId: number) => void;
   onUpdateTheme?: (themeId: string, updatedTheme: Partial<Theme>) => void;
+  onToggleActiveTheme?: (themeId: string) => void; // Toggle theme activation
 }
 
 // IPC-Kommunikation zwischen Main und Renderer

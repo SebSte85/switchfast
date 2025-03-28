@@ -403,7 +403,7 @@
   }
 
   .groups-title {
-    @apply text-2xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+    @apply text-2xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide flex items-center gap-2;
   }
 
   .groups-container {
@@ -411,11 +411,11 @@
   }
 
   .add-group-button {
-    @apply w-14 h-14 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center text-3xl hover:bg-[#78d97c]/10 transition-colors;
+    @apply w-7 h-7 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center text-xl hover:bg-[#78d97c]/10 transition-colors ml-2;
   }
 
   .group-item {
-    @apply px-5 py-3 rounded-md border-2 flex items-center justify-center;
+    @apply px-5 py-3 rounded-md border-2 flex items-center justify-center cursor-pointer hover:bg-[#414159]/80 transition-colors;
   }
 
   .group-item-work {
@@ -424,6 +424,14 @@
 
   .group-item-project {
     @apply border-red-400 text-red-400;
+  }
+
+  .group-item-selected {
+    @apply bg-[#414159]/50 shadow-inner;
+  }
+
+  .group-active-indicator {
+    @apply ml-2 text-[#78d97c] font-bold;
   }
 
   /* Prozesse-Sektion */
@@ -453,11 +461,11 @@
 
   /* Gruppen-Eingabefeld */
   .group-input-container {
-    @apply flex flex-col gap-2 p-3 rounded-md border-2 border-[#78d97c] bg-[#414159];
+    @apply border-dashed border-blue-400 text-blue-400 min-w-[250px] flex-col;
   }
 
   .group-input {
-    @apply px-3 py-2 w-full bg-[#2e2e3d] text-white border-none rounded focus:outline-none focus:ring-1 focus:ring-[#78d97c];
+    @apply w-full bg-transparent border-none outline-none text-white p-2 mb-2;
   }
 
   .group-input-buttons {
@@ -465,11 +473,11 @@
   }
 
   .group-input-save {
-    @apply w-8 h-8 flex items-center justify-center text-lg rounded-full bg-[#78d97c] text-[#414159] hover:bg-[#62c966] disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center hover:bg-green-700 transition-colors;
   }
 
   .group-input-cancel {
-    @apply w-8 h-8 flex items-center justify-center text-lg rounded-full bg-red-400 text-[#414159] hover:bg-red-500;
+    @apply w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors;
   }
 
   /* Drag and Drop Styling */

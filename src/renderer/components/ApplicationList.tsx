@@ -1,19 +1,90 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { ipcRenderer } from "electron";
 import { ProcessInfo, Theme, ApplicationListProps } from "../../types";
+
+// New component for group input
+const NewGroupInput = ({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (name: string) => void;
+  onCancel: () => void;
+}) => {
+  const [name, setName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the input when component mounts
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, []);
+
+  console.log("NewGroupInput rendered with name:", name);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    console.log("NewGroupInput keyDown:", e.key);
+    if (e.key === "Enter" && name.trim()) {
+      console.log("NewGroupInput Enter pressed, calling onAdd with:", name);
+      onAdd(name);
+    } else if (e.key === "Escape") {
+      console.log("NewGroupInput Escape pressed, calling onCancel");
+      onCancel();
+    }
+  };
+
+  return (
+    <div className="group-item group-input-container">
+      <input
+        ref={inputRef}
+        type="text"
+        className="group-input"
+        value={name}
+        onChange={(e) => {
+          console.log("NewGroupInput input changed to:", e.target.value);
+          setName(e.target.value);
+        }}
+        onKeyDown={handleKeyDown}
+        placeholder="Gruppenname"
+      />
+      <div className="group-input-buttons">
+        <button
+          className="group-input-save"
+          onClick={() => {
+            console.log("NewGroupInput save button clicked with name:", name);
+            if (name.trim()) onAdd(name);
+          }}
+          disabled={!name.trim()}
+        >
+          ✓
+        </button>
+        <button
+          className="group-input-cancel"
+          onClick={() => {
+            console.log("NewGroupInput cancel button clicked");
+            onCancel();
+          }}
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const ApplicationList: React.FC<ApplicationListProps> = ({
   applications,
   themes,
   activeTheme,
+  activeThemes = [],
   onAddToTheme,
   onRemoveFromTheme,
   onUpdateTheme = () => {},
+  onToggleActiveTheme = () => {},
 }) => {
   const [draggedApp, setDraggedApp] = useState<number | null>(null);
   const [draggedOverTheme, setDraggedOverTheme] = useState<string | null>(null);
-  const [showGroupInput, setShowGroupInput] = useState(false);
-  const [newGroupName, setNewGroupName] = useState("");
+  const [showNewGroupInput, setShowNewGroupInput] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [currentShortcut, setCurrentShortcut] = useState<string>("");
 
@@ -91,26 +162,29 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     }
   };
 
-  const createNewGroup = () => {
-    if (newGroupName.trim()) {
-      const newTheme = {
-        id: Date.now().toString(),
-        name: newGroupName.trim(),
-        applications: [],
-      };
-      window.dispatchEvent(new CustomEvent("addTheme", { detail: newTheme }));
-      setNewGroupName("");
-      setShowGroupInput(false);
-    }
-  };
+  const createNewGroup = (groupName: string) => {
+    console.log("createNewGroup called with name:", groupName);
 
-  const handleGroupInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      createNewGroup();
-    } else if (e.key === "Escape") {
-      setShowGroupInput(false);
-      setNewGroupName("");
-    }
+    // Create a new theme with a unique timestamp-based ID
+    const themeId = `theme_${Date.now()}`;
+    console.log("Generated new theme ID:", themeId);
+
+    const newTheme = {
+      id: themeId,
+      name: groupName.trim(),
+      applications: [],
+      shortcut: "",
+    };
+
+    console.log("Created new theme object:", newTheme);
+
+    // Dispatch event to add the new theme
+    console.log("Dispatching addTheme event with theme:", newTheme);
+    window.dispatchEvent(new CustomEvent("addTheme", { detail: newTheme }));
+
+    // Hide the input
+    console.log("Setting showNewGroupInput to false");
+    setShowNewGroupInput(false);
   };
 
   // Shortcut-Funktionen
@@ -168,51 +242,58 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     }
   };
 
+  // Add this function to handle theme activation via clicking
+  const handleThemeClick = (e: React.MouseEvent, themeId: string) => {
+    // If dragging, handle drop instead
+    if (draggedApp !== null) {
+      if (!isApplicationInTheme(themeId, draggedApp)) {
+        onAddToTheme(themeId, draggedApp);
+      }
+      setDraggedApp(null);
+      setDraggedOverTheme(null);
+      return;
+    }
+
+    // Otherwise, toggle theme activation
+    e.stopPropagation();
+    onToggleActiveTheme(themeId);
+  };
+
   return (
     <div className="application-list">
       {/* Gruppen-Sektion */}
       <section className="groups-section">
-        <h2 className="groups-title">Gruppen</h2>
+        <h2 className="groups-title">
+          GRUPPEN
+          <button
+            className="add-group-button"
+            onClick={() => {
+              console.log(
+                "Add group button clicked, current showNewGroupInput:",
+                showNewGroupInput
+              );
+              console.log("Setting showNewGroupInput to true");
+              setShowNewGroupInput(true);
+            }}
+            title="Neue Gruppe erstellen"
+          >
+            +
+          </button>
+        </h2>
         <div className="groups-container">
-          {/* Button zum Hinzufügen einer neuen Gruppe */}
-          {!showGroupInput ? (
-            <button
-              className="add-group-button"
-              onClick={() => setShowGroupInput(true)}
-              title="Neue Gruppe erstellen"
-            >
-              +
-            </button>
-          ) : (
-            <div className="group-input-container">
-              <input
-                type="text"
-                className="group-input"
-                value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
-                onKeyDown={handleGroupInputKeyDown}
-                placeholder="Gruppenname"
-                autoFocus
-              />
-              <div className="group-input-buttons">
-                <button
-                  className="group-input-save"
-                  onClick={createNewGroup}
-                  disabled={!newGroupName.trim()}
-                >
-                  ✓
-                </button>
-                <button
-                  className="group-input-cancel"
-                  onClick={() => {
-                    setShowGroupInput(false);
-                    setNewGroupName("");
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
+          {/* Display a new group input at the beginning of the container */}
+          {showNewGroupInput && (
+            <NewGroupInput
+              onAdd={(name) => {
+                console.log("NewGroupInput onAdd called with name:", name);
+                createNewGroup(name);
+              }}
+              onCancel={() => {
+                console.log("NewGroupInput onCancel called");
+                console.log("Setting showNewGroupInput to false");
+                setShowNewGroupInput(false);
+              }}
+            />
           )}
 
           {/* Vorhandene Gruppen anzeigen */}
@@ -225,12 +306,10 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   : "group-item-project"
               } ${
                 draggedOverTheme === theme.id ? "group-item-active-drop" : ""
+              } ${
+                activeThemes.includes(theme.id) ? "group-item-selected" : ""
               }`}
-              onClick={() =>
-                activeTheme && draggedApp
-                  ? onAddToTheme(theme.id, draggedApp)
-                  : null
-              }
+              onClick={(e) => handleThemeClick(e, theme.id)}
               onDragOver={(e) => handleDragOver(e, theme.id)}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleThemeDrop(e, theme.id)}
@@ -238,6 +317,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
               <div className="group-item-content">
                 <div className="group-item-name">
                   {theme.name} ({theme.applications.length})
+                  {activeThemes.includes(theme.id) && (
+                    <span className="group-active-indicator">✓</span>
+                  )}
                 </div>
                 <div className="group-item-actions">
                   {editingShortcut === theme.id ? (
@@ -287,7 +369,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
       {/* Prozesse-Sektion */}
       <section className="processes-section">
-        <h2 className="processes-title">Prozesse</h2>
+        <h2 className="processes-title">PROZESSE</h2>
 
         <div className="process-list">
           {unassignedApplications.length > 0 ? (
