@@ -484,6 +484,12 @@
     min-height: 70px;
     backdrop-filter: blur(8px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    background: rgba(45, 45, 63, 0.95);
+  }
+
+  .group-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
   }
 
   .group-item-work {
@@ -667,7 +673,7 @@
 
   /* Shortcut-Badge anpassen */
   .shortcut-badge {
-    @apply text-xs px-2 py-1 rounded-md cursor-pointer text-center transition-all;
+    @apply text-xs px-2 py-1 rounded-md cursor-pointer text-center transition-all font-bold;
     background: rgba(65, 65, 89, 0.4);
     backdrop-filter: blur(4px);
     font-size: 0.75rem;
@@ -713,7 +719,7 @@
   }
 
   .process-children {
-    @apply flex flex-col pl-5 mt-1 border-l border-[#78d97c]/20 ml-3;
+    @apply flex flex-col gap-2 pl-5 mt-2 border-l border-[#78d97c]/20 ml-3;
   }
 
   .process-expander {
@@ -866,10 +872,12 @@
 
   /* Shortcut-only Styling */
   .shortcut-badge-only {
-    @apply text-center py-1.5 px-4 rounded-md font-medium;
+    @apply text-center py-1.5 px-4 rounded-md font-bold;
     background: rgba(50, 50, 70, 0.7);
     backdrop-filter: blur(4px);
     font-size: 0.8rem;
+    /* Inherit the text color from the parent group-item */
+    color: inherit;
   }
 
   /* Klar unterscheidbare Gruppen im Kompaktmodus */
@@ -881,6 +889,8 @@
     min-height: auto;
     margin: 3px;
     transition: all 0.2s ease-in-out;
+    /* Remove the default white text color to allow color inheritance */
+    color: inherit;
   }
 
   .compact-mode .group-item:hover {
@@ -893,6 +903,7 @@
     @apply border-4 shadow-lg;
     transform: translateY(-2px);
     background: rgba(55, 55, 73, 0.95);
+    border-width: 4px !important;
   }
 
   /* Gruppe für Shortcut-only Ansicht */
@@ -927,7 +938,7 @@
 
   /* Shortcut-only Styling */
   .shortcut-badge-only {
-    @apply text-center py-1 px-3 rounded-md text-sm font-medium;
+    @apply text-center py-1 px-3 rounded-md text-sm font-bold;
     background: rgba(65, 65, 89, 0.6);
     backdrop-filter: blur(4px);
   }
@@ -1044,5 +1055,148 @@
     50% {
       opacity: 0.7;
     }
+  }
+
+  /* Tooltip für Prozessanzeige */
+  .group-processes-tooltip {
+    @apply invisible opacity-0 absolute left-full ml-2 p-3 rounded-lg min-w-[200px] max-w-[300px] z-50 transform transition-all duration-200 ease-out;
+    background: rgba(45, 45, 63, 0.98);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .group-item:hover .group-processes-tooltip {
+    @apply visible opacity-100;
+  }
+
+  .tooltip-header {
+    @apply text-sm font-bold mb-2 pb-2 border-b border-white/10;
+    color: inherit;
+  }
+
+  .tooltip-process-list {
+    @apply flex flex-col gap-1.5 max-h-[200px] overflow-y-auto;
+  }
+
+  .tooltip-process-item {
+    @apply flex items-center gap-2 text-sm py-1;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .tooltip-process-icon {
+    @apply w-3 h-3;
+    color: inherit;
+  }
+
+  /* Wenn der Tooltip am rechten Rand des Bildschirms nicht passt */
+  .group-item:hover .group-processes-tooltip.right-overflow {
+    @apply left-auto right-full mr-2;
+  }
+
+  /* Scrollbar für die Prozessliste im Tooltip */
+  .tooltip-process-list::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .tooltip-process-list::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+  }
+
+  .tooltip-process-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+  }
+
+  .tooltip-process-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Action buttons für Gruppen */
+  .group-action-buttons {
+    @apply opacity-0 flex gap-1 absolute top-1.5 right-1.5 transition-opacity z-10;
+  }
+
+  .group-item:hover .group-action-buttons {
+    @apply opacity-100;
+  }
+
+  .group-action-button {
+    @apply w-6 h-6 rounded-full bg-[#2D2D3F]/90 text-gray-400 hover:text-white flex items-center justify-center text-sm transition-all;
+    backdrop-filter: blur(8px);
+  }
+
+  .group-action-button:hover {
+    @apply bg-[#2D2D3F];
+    transform: scale(1.1);
+  }
+
+  .group-action-button.delete:hover {
+    @apply text-red-400;
+  }
+
+  .group-action-button.show-processes:hover {
+    @apply text-[#78d97c];
+  }
+
+  /* Process Popup */
+  .process-popup-overlay {
+    @apply fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50;
+  }
+
+  .process-popup {
+    @apply bg-[#2D2D3F] rounded-lg shadow-xl w-[90%] max-w-[500px] max-h-[80vh] flex flex-col;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .process-popup-header {
+    @apply flex items-center justify-between px-4 py-3 border-b border-white/10;
+  }
+
+  .process-popup-title {
+    @apply text-lg font-bold text-white;
+  }
+
+  .process-popup-close {
+    @apply w-8 h-8 rounded-full hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-colors;
+  }
+
+  .process-popup-content {
+    @apply p-4 overflow-y-auto;
+    max-height: calc(80vh - 120px);
+  }
+
+  .popup-process-list {
+    @apply flex flex-col gap-2;
+  }
+
+  .popup-process-item {
+    @apply flex items-center justify-between bg-[#414159] rounded-lg px-4 py-2.5 text-white;
+  }
+
+  .popup-process-remove {
+    @apply text-gray-400 hover:text-red-400 transition-colors cursor-pointer;
+  }
+
+  /* Scrollbar für das Popup */
+  .process-popup-content::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .process-popup-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+  }
+
+  .process-popup-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+  }
+
+  .process-popup-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
   }
 }

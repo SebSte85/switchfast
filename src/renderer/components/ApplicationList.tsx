@@ -105,6 +105,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   const [showNewGroupInput, setShowNewGroupInput] = useState(false);
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [currentShortcut, setCurrentShortcut] = useState<string>("");
+  const [showProcessPopup, setShowProcessPopup] = useState<string | null>(null);
 
   // Debug-Ausgabe der empfangenen Anwendungsliste
   useEffect(() => {
@@ -340,9 +341,8 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       return;
     }
 
-    // Otherwise, toggle theme activation
+    // Otherwise, do nothing - removed theme activation on click
     e.stopPropagation();
-    onToggleActiveTheme(themeId);
   };
 
   // In der ApplicationList-Komponente fügen wir eine Löschfunktion hinzu
@@ -351,6 +351,68 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
     // Direkt löschen ohne Bestätigungsdialog
     window.dispatchEvent(new CustomEvent("deleteTheme", { detail: themeId }));
+  };
+
+  // Process popup handling
+  const handleShowProcesses = (e: React.MouseEvent, themeId: string) => {
+    e.stopPropagation();
+    setShowProcessPopup(themeId);
+  };
+
+  const handleCloseProcessPopup = () => {
+    setShowProcessPopup(null);
+  };
+
+  const handleRemoveProcess = (themeId: string, processId: number) => {
+    onRemoveFromTheme(themeId, processId);
+  };
+
+  // Render process popup
+  const renderProcessPopup = () => {
+    if (!showProcessPopup) return null;
+
+    const theme = themes.find((t) => t.id === showProcessPopup);
+    if (!theme) return null;
+
+    const themeProcesses = applications.filter((app) =>
+      theme.applications.includes(app.id)
+    );
+
+    return (
+      <div className="process-popup-overlay" onClick={handleCloseProcessPopup}>
+        <div className="process-popup" onClick={(e) => e.stopPropagation()}>
+          <div className="process-popup-header">
+            <div className="process-popup-title">Prozesse in {theme.name}</div>
+            <button
+              className="process-popup-close"
+              onClick={handleCloseProcessPopup}
+            >
+              ×
+            </button>
+          </div>
+          <div className="process-popup-content">
+            <div className="popup-process-list">
+              {themeProcesses.map((process) => (
+                <div key={process.id} className="popup-process-item">
+                  <span>{process.title || process.name}</span>
+                  <span
+                    className="popup-process-remove"
+                    onClick={() => handleRemoveProcess(theme.id, process.id)}
+                  >
+                    ×
+                  </span>
+                </div>
+              ))}
+              {themeProcesses.length === 0 && (
+                <div className="text-gray-400 text-center py-4">
+                  Keine Prozesse in dieser Gruppe
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -460,6 +522,23 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   onDrop={(e) => handleThemeDrop(e, theme.id)}
                   onClick={(e) => handleThemeClick(e, theme.id)}
                 >
+                  {/* Action Buttons */}
+                  <div className="group-action-buttons">
+                    <button
+                      className="group-action-button delete"
+                      onClick={(e) => handleDeleteTheme(e, theme.id)}
+                      title="Gruppe löschen"
+                    >
+                      ×
+                    </button>
+                    <button
+                      className="group-action-button show-processes"
+                      onClick={(e) => handleShowProcesses(e, theme.id)}
+                      title="Prozesse anzeigen"
+                    >
+                      •••
+                    </button>
+                  </div>
                   <div className="group-item-content">
                     {!showOnlyShortcuts && (
                       <div className="group-item-name">
@@ -500,15 +579,6 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                               : "Shortcut hinzufügen")}
                         </div>
                       )}
-                      {!showOnlyShortcuts && (
-                        <button
-                          className="delete-theme-button"
-                          onClick={(e) => handleDeleteTheme(e, theme.id)}
-                          title="Gruppe löschen"
-                        >
-                          ×
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -544,6 +614,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           </section>
         </>
       )}
+      {renderProcessPopup()}
     </div>
   );
 };
