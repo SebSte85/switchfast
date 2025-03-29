@@ -67,6 +67,32 @@ const App: React.FC = () => {
           JSON.stringify(apps?.slice(0, 3), null, 2),
           apps?.length > 3 ? "... und weitere" : ""
         );
+
+        // Erstelle eine Map aller App-IDs (inkl. Kinder)
+        const getAllAppIds = (app: ProcessInfo): number[] => {
+          const ids = [app.id];
+          if (app.children) {
+            app.children.forEach((child: ProcessInfo) => {
+              ids.push(...getAllAppIds(child));
+            });
+          }
+          return ids;
+        };
+
+        const runningAppIds = new Set(
+          apps.flatMap((app: ProcessInfo) => getAllAppIds(app))
+        );
+
+        // Cleanup themes by removing only truly closed applications
+        setThemes((prevThemes) =>
+          prevThemes.map((theme) => ({
+            ...theme,
+            applications: theme.applications.filter((appId) =>
+              runningAppIds.has(appId)
+            ),
+          }))
+        );
+
         setApplications(apps || []);
         setLoading(false);
       } catch (error) {
@@ -552,31 +578,12 @@ const App: React.FC = () => {
             title={compactMode ? "Vollständige Ansicht" : "Kompaktansicht"}
           >
             {compactMode ? (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                width="16"
-                height="16"
-              >
-                <path d="M12 9a3.75 3.75 0 100 7.5A3.75 3.75 0 0012 9z" />
-                <path
-                  fillRule="evenodd"
-                  d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3h-15a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0zm12-1.5a.75.75 0 100 1.5.75.75 0 000-1.5z"
-                  clipRule="evenodd"
-                />
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <path fill="currentColor" d="M 6,2 L 10,6 L 2,6 Z" />
               </svg>
             ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                width="16"
-                height="16"
-              >
-                <path d="M11.644 1.59a.75.75 0 01.712 0l9.75 5.25a.75.75 0 010 1.32l-9.75 5.25a.75.75 0 01-.712 0l-9.75-5.25a.75.75 0 010-1.32l9.75-5.25z" />
-                <path d="M3.265 10.602l7.668 4.129a2.25 2.25 0 002.134 0l7.668-4.13 1.37.739a.75.75 0 010 1.32l-9.75 5.25a.75.75 0 01-.71 0l-9.75-5.25a.75.75 0 010-1.32l1.37-.738z" />
-                <path d="M10.933 19.231l-7.668-4.13-1.37.739a.75.75 0 000 1.32l9.75 5.25c.221.12.489.12.71 0l9.75-5.25a.75.75 0 000-1.32l-1.37-.738-7.668 4.13a2.25 2.25 0 01-2.134-.001z" />
+              <svg width="12" height="12" viewBox="0 0 12 12">
+                <path fill="currentColor" d="M 6,10 L 10,6 L 2,6 Z" />
               </svg>
             )}
           </button>
@@ -612,8 +619,18 @@ const App: React.FC = () => {
         </div>
       </div>
       {loading ? (
-        <div className="flex items-center justify-center h-full text-white">
-          <p>Lade Anwendungen...</p>
+        <div className="loading-animation">
+          <div className="loading-spinner">
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+          </div>
+          <div className="loading-text">Lade Anwendungen...</div>
         </div>
       ) : (
         <ApplicationList

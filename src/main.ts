@@ -51,7 +51,7 @@ function createWindow() {
 
   // Create the browser window
   mainWindow = new BrowserWindow({
-    width: 900,
+    width: 600,
     height: 680,
     webPreferences: {
       nodeIntegration: true,
@@ -851,32 +851,37 @@ app.on("window-all-closed", () => {
   }
 });
 
-// Add compact mode handler
-ipcMain.on("toggle-compact-mode", (_, isCompact, groupCount = 0) => {
-  if (!mainWindow) return;
+// Toggle zwischen Kompakt- und Normalansicht
+ipcMain.on("toggle-compact-mode", (_, isCompact, groupCount) => {
+  console.log(
+    `Ändere zu ${
+      isCompact ? "Kompakt" : "Normal"
+    }-Modus (Gruppen: ${groupCount})`
+  );
 
-  compactMode = isCompact; // Setze den Zustand
+  // Berechne dynamische Breite basierend auf Gruppenanzahl
+  let width = 300; // Mindestbreite
+  if (isCompact && groupCount > 0) {
+    // Pro Gruppe etwa 120px, aber maximal 4 Gruppen pro Zeile
+    const groupsPerRow = Math.min(groupCount, 4);
+    width = Math.max(300, groupsPerRow * 120 + 80); // 80px für Padding/Margins
+  }
 
-  if (isCompact) {
-    // Berechne die Breite basierend auf der Anzahl der Gruppen
-    // Wir nehmen an, dass jede Gruppe etwa 90px breit ist, plus etwas Padding
-    const minWidth = 300; // Mindestbreite
-    // Maximal 4 Gruppen pro Zeile, danach umbrechen
-    const itemsPerRow = Math.min(groupCount, 4);
-    const dynamicWidth = Math.max(minWidth, itemsPerRow * 90 + 40); // 40px für Padding
+  // Neue Fenstergröße für Kompaktmodus
+  const newSize = isCompact
+    ? { width, height: 120, alwaysOnTop: true }
+    : { width: 600, height: 680, alwaysOnTop: false };
 
-    // Speichere die ursprüngliche Größe, bevor wir in den kompakten Modus wechseln
-    mainWindow.setMinimumSize(minWidth, 90);
-    mainWindow.setSize(dynamicWidth, 120); // Kleiner für den Kompaktmodus
-    mainWindow.setAlwaysOnTop(true); // Im Kompaktmodus immer zuoberst
+  console.log(`Neue Fenstergröße: ${JSON.stringify(newSize)}`);
 
-    console.log(
-      `Fenstergröße auf Kompaktmodus angepasst: ${dynamicWidth}x120 für ${groupCount} Gruppen`
-    );
-  } else {
-    // Zurück zum normal-Size
-    mainWindow.setMinimumSize(600, 400);
-    mainWindow.setSize(900, 680);
-    mainWindow.setAlwaysOnTop(false); // Im normalen Modus nicht zuoberst
+  // Fenstereigenschaften anpassen und Übergang berücksichtigen
+  if (mainWindow) {
+    // Aktiviere/deaktiviere "immer im Vordergrund" sofort
+    mainWindow.setAlwaysOnTop(newSize.alwaysOnTop);
+
+    // Verzögere die Größenänderung leicht, damit die CSS-Transition sichtbar ist
+    setTimeout(() => {
+      mainWindow?.setSize(newSize.width, newSize.height, true);
+    }, 50); // Kleine Verzögerung für bessere Animation
   }
 });

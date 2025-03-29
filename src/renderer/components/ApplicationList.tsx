@@ -14,6 +14,7 @@ const NewGroupInput = ({
   const [name, setName] = useState("");
   const [selectedColor, setSelectedColor] = useState("#78d97c"); // Default grün
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const colorOptions = [
     "#78d97c", // Grün (Standard)
@@ -26,6 +27,23 @@ const NewGroupInput = ({
     "#f97316", // Helleres Orange
     "#facc15", // Gelb
   ];
+
+  // Click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        onCancel();
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [onCancel]);
 
   // Focus the input when component mounts
   useEffect(() => {
@@ -43,7 +61,7 @@ const NewGroupInput = ({
   };
 
   return (
-    <div className="group-input-container browser-style">
+    <div ref={containerRef} className="group-input-container browser-style">
       <input
         ref={inputRef}
         type="text"
@@ -99,10 +117,49 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   }, [applications]);
 
   // Filtere die Anwendungen, um nur die zu zeigen, die keiner Gruppe zugeordnet sind
-  const unassignedApplications = applications.filter((app) => {
-    // Prüfe, ob diese Anwendung in irgendeiner Gruppe vorkommt
-    return !themes.some((theme) => theme.applications.includes(app.id));
-  });
+  const unassignedApplications = applications
+    .map((app) => {
+      // Rekursive Funktion zum Filtern von Unterprozessen
+      const filterAssignedApps = (
+        currentApp: ProcessInfo
+      ): ProcessInfo | null => {
+        // Prüfe, ob die aktuelle App in einer Gruppe ist
+        const isAssigned = themes.some((theme) =>
+          theme.applications.includes(currentApp.id)
+        );
+        if (isAssigned) return null;
+
+        // Wenn die App Kinder hat, filtere diese rekursiv
+        if (currentApp.children && currentApp.children.length > 0) {
+          const filteredChildren = currentApp.children
+            .map((child) => filterAssignedApps(child))
+            .filter((child): child is ProcessInfo => child !== null);
+
+          // Wenn nach dem Filtern noch Kinder übrig sind, gib die App mit gefilterten Kindern zurück
+          if (filteredChildren.length > 0) {
+            return {
+              ...currentApp,
+              children: filteredChildren,
+            };
+          }
+          // Wenn keine Kinder mehr übrig sind und die App selbst nicht zugeordnet ist,
+          // zeige sie ohne children an
+          else if (!isAssigned) {
+            return {
+              ...currentApp,
+              children: undefined,
+            };
+          }
+        }
+
+        // Wenn die App keine Kinder hat und nicht zugeordnet ist, zeige sie an
+        return isAssigned ? null : currentApp;
+      };
+
+      // Filtere die App und ihre Unterprozesse
+      return filterAssignedApps(app);
+    })
+    .filter((app): app is ProcessInfo => app !== null);
 
   const isApplicationInTheme = (
     themeId: string,
@@ -242,9 +299,14 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
     // Beachte: Hier wollen wir nur echte Tasten und keine Modifizierer
     if (e.key !== "Control" && e.key !== "Alt" && e.key !== "Shift") {
-      const key = e.key === " " ? "Space" : e.key;
+      let key = e.key === " " ? "Space" : e.key;
 
-      // Erstelle Shortcut-String (z.B. "Ctrl+Alt+S")
+      // Konvertiere die Taste in Kleinbuchstaben, wenn es ein einzelner Buchstabe ist
+      if (key.length === 1) {
+        key = key.toLowerCase();
+      }
+
+      // Erstelle Shortcut-String (z.B. "Ctrl+n")
       const shortcut = [...modifiers, key].join("+");
       console.log("Setting current shortcut to:", shortcut);
       setCurrentShortcut(shortcut);
@@ -296,7 +358,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       {/* Gruppen-Sektion */}
       <section className="groups-section">
         {!showOnlyShortcuts && (
-          <h2 className="groups-title">
+          <h2 className="groups-title font-extrabold">
             GRUPPEN
             <button
               className="add-group-button"
@@ -354,7 +416,6 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                       className="shortcut-badge text-white"
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Wenn Theme aktiviert wird, sendet es ein Event
                         onToggleActiveTheme(theme.id);
                       }}
                     >
@@ -465,7 +526,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
           {/* Prozesse-Sektion */}
           <section className="processes-section">
-            <h2 className="processes-title">PROZESSE</h2>
+            <h2 className="processes-title font-extrabold">PROZESSE</h2>
 
             <div className="process-list">
               {unassignedApplications.length > 0 ? (
