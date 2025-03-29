@@ -193,7 +193,6 @@ const App: React.FC = () => {
     const handleActivateTheme = (_: any, themeIndex: number) => {
       if (themeIndex >= 0 && themeIndex < themes.length) {
         const theme = themes[themeIndex];
-        console.log(`Theme aktiviert: ${theme.name}`);
         setActiveTheme(theme.id);
 
         // Automatisch Focus-Modus einschalten
@@ -210,12 +209,6 @@ const App: React.FC = () => {
   // Handler für Theme-Aktivierung durch Shortcuts
   useEffect(() => {
     const handleActivateThemeAndMinimize = (_: any, themeId: string) => {
-      console.log("==========================================");
-      console.log("Shortcut aktiviert für Theme:", themeId);
-      console.log("Aktuelle aktive Themes:", activeThemes);
-      console.log("Focus Mode vor Aktivierung:", focusModeActive);
-
-      // Ersetze alle aktiven Themes durch das neue Theme
       setActiveThemes([themeId]);
 
       // For backward compatibility
@@ -224,28 +217,19 @@ const App: React.FC = () => {
 
       // Alle anderen Anwendungen minimieren
       try {
-        console.log("Versuche Focus Mode anzuwenden für:", themeId);
         applyFocusMode(themeId, true);
-        console.log("Focus Mode erfolgreich angewendet");
       } catch (error) {
         console.error("Fehler beim Anwenden des Focus Mode:", error);
       }
-
-      console.log(
-        `Theme ${themeId} durch Shortcut aktiviert, alle anderen Themes deaktiviert`
-      );
-      console.log("==========================================");
     };
 
     // Event-Listener registrieren
-    console.log("Registriere activate-theme-and-minimize Event-Listener");
     ipcRenderer.on(
       "activate-theme-and-minimize",
       handleActivateThemeAndMinimize
     );
 
     return () => {
-      console.log("Entferne activate-theme-and-minimize Event-Listener");
       ipcRenderer.removeListener(
         "activate-theme-and-minimize",
         handleActivateThemeAndMinimize
@@ -373,13 +357,6 @@ const App: React.FC = () => {
 
   // Focus Mode umschalten
   const toggleFocusMode = () => {
-    console.log("Focus Mode Toggle: ", !focusModeActive);
-
-    if (activeThemes.length === 0) {
-      console.log("Keine aktiven Gruppen ausgewählt.");
-      return;
-    }
-
     setFocusModeActive(!focusModeActive);
 
     // If there's at least one active theme, use the first one for compatibility
@@ -416,17 +393,7 @@ const App: React.FC = () => {
       (currentTheme as any).windows &&
       (currentTheme as any).windows.length > 0
     ) {
-      console.log(
-        `[WINDOWS_DEBUG] Theme hat ${
-          (currentTheme as any).windows.length
-        } Fenster`
-      );
-
       (currentTheme as any).windows.forEach((window: WindowInfo) => {
-        console.log(
-          `[WINDOWS_DEBUG] Fenster: hwnd=${window.hwnd}, PID=${window.processId}, Titel="${window.title}"`
-        );
-
         if (window.hwnd && !appIdsToProtect.includes(window.hwnd)) {
           appIdsToProtect.push(window.hwnd);
         }
@@ -434,15 +401,9 @@ const App: React.FC = () => {
           appIdsToProtect.push(window.processId);
         }
       });
-    } else {
-      console.log(`[WINDOWS_DEBUG] Theme hat keine Fenster im windows-Array`);
     }
 
     // 3. Prüfe, ob wir überhaupt etwas zu schützen haben
-    console.log(
-      `[FOCUS_MODE] Zu schützende IDs: ${appIdsToProtect.join(", ")}`
-    );
-
     if (appIdsToProtect.length === 0) {
       alert(
         "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert."
@@ -452,14 +413,10 @@ const App: React.FC = () => {
 
     try {
       // Neue Methode: "Show Desktop" und dann Apps wiederherstellen
-      console.log(
-        `[FOCUS_MODE] Sende ${appIdsToProtect.length} IDs an show-desktop-except`
-      );
       const success = await ipcRenderer.invoke(
         "show-desktop-except",
         appIdsToProtect
       );
-      console.log(`[FOCUS_MODE] show-desktop-except Ergebnis: ${success}`);
 
       if (!success) {
         // Fallback auf die alten Methoden mit dem einzelnen aktiven Theme
@@ -468,7 +425,6 @@ const App: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error(`[FOCUS_MODE] Fehler: ${error}`);
       // Fallback auf die alten Methoden
       if (currentTheme) {
         fallbackFocusMode(currentTheme);
@@ -478,23 +434,16 @@ const App: React.FC = () => {
 
   // Fallback-Methode, die verschiedene andere Minimierungsmethoden ausprobiert
   const fallbackFocusMode = async (theme: Theme) => {
-    console.log("Verwende Fallback-Methoden für Focus Mode");
-
     try {
       // Methode 1: Versuche Minimieren aller außer der ersten App
       if (theme.applications.length > 0) {
         const primaryAppId = theme.applications[0];
-        console.log(
-          `Versuche alle außer Primäranwendung ${primaryAppId} zu minimieren`
-        );
-
         const success = await ipcRenderer.invoke(
           "minimize-all-except",
           primaryAppId
         );
 
         if (success) {
-          console.log("Fenster erfolgreich minimiert");
           return;
         }
       }
@@ -511,43 +460,24 @@ const App: React.FC = () => {
     theme: Theme,
     allApps: ProcessInfo[]
   ) => {
-    console.log(
-      "Verwende Fallback-Methode zum Minimieren einzelner Anwendungen"
-    );
-
     // Bestimme, welche Anwendungen minimiert werden sollen
     const appsToMinimize = allApps
       .filter((app) => !theme.applications.includes(app.id))
       .map((app) => app.id);
 
-    // Debug-Informationen anzeigen
-    console.log(
-      `${appsToMinimize.length} Anwendungen werden einzeln minimiert`
-    );
-
-    const appsToMinimizeDetails = allApps
-      .filter((app) => !theme.applications.includes(app.id))
-      .map((app) => `${app.title} (ID: ${app.id})`);
-
-    console.log("Zu minimierende Anwendungen:", appsToMinimizeDetails);
-
     if (appsToMinimize.length === 0) {
-      console.log("Keine Anwendungen zu minimieren");
       return;
     }
 
     // Minimiere alle Anwendungen, die nicht zum aktiven Theme gehören
     try {
-      console.log("Sende Minimierungsanfrage an Main-Prozess...");
       const success = await ipcRenderer.invoke(
         "minimize-applications",
         appsToMinimize
       );
 
       if (success) {
-        console.log("Alle Anwendungen wurden erfolgreich minimiert");
-      } else {
-        console.warn("Einige Anwendungen konnten nicht minimiert werden");
+        return;
       }
     } catch (error) {
       console.error("Fehler beim Minimieren der Anwendungen:", error);
@@ -565,10 +495,8 @@ const App: React.FC = () => {
     // Im kompakten Modus zeigen wir nur Shortcuts an, deaktiviere das im normalen Modus
     if (newMode) {
       // In den kompakten/Shortcut-Modus wechseln
-      console.log("Aktiviere Kompaktmodus mit nur Shortcuts");
     } else {
       // Zurück zum Normalmodus
-      console.log("Deaktiviere Kompaktmodus, zeige alle Inhalte");
     }
   };
 

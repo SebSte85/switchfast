@@ -170,85 +170,52 @@ function registerShortcuts() {
 
 function registerThemeShortcut(themeId: string, shortcut: string): boolean {
   try {
-    console.log(
-      `Starte Shortcut-Registrierung für Theme ${themeId}: "${shortcut}"`
-    );
-
     // Wenn bereits ein Shortcut für dieses Theme existiert, entferne ihn zuerst
     if (registeredShortcuts.has(themeId)) {
       const oldShortcut = registeredShortcuts.get(themeId);
-      console.log(
-        `Entferne alten Shortcut ${oldShortcut} für Theme ${themeId}`
-      );
       if (oldShortcut) {
         try {
           globalShortcut.unregister(oldShortcut);
-          console.log(`Alter Shortcut ${oldShortcut} erfolgreich entfernt`);
         } catch (err) {
-          console.error(`Fehler beim Entfernen des alten Shortcuts:`, err);
+          // Error handling
         }
       }
     }
 
     // Prüfe, ob der Shortcut gültig ist
     if (!shortcut || shortcut.trim() === "") {
-      console.error("Shortcut ist leer oder ungültig:", shortcut);
       return false;
     }
 
     const formattedShortcut = formatShortcutForElectron(shortcut);
-    console.log(`Formatierter Shortcut für Electron: "${formattedShortcut}"`);
 
     // Überprüfen, ob Shortcut bereits registriert ist
     if (globalShortcut.isRegistered(formattedShortcut)) {
-      console.log(
-        `Shortcut ${formattedShortcut} ist bereits registriert, wird entfernt`
-      );
       globalShortcut.unregister(formattedShortcut);
     }
 
     // Registriere den neuen Shortcut
-    console.log(
-      `Registriere Shortcut ${formattedShortcut} für Theme ${themeId}`
-    );
     const success = globalShortcut.register(formattedShortcut, () => {
-      console.log(
-        `Shortcut ${formattedShortcut} für Theme ${themeId} wurde ausgelöst!`
-      );
-
       if (!mainWindow) {
-        console.error("Hauptfenster nicht gefunden, kann Event nicht senden!");
         return;
       }
 
       // Sende Benachrichtigung an Renderer
       try {
         mainWindow.webContents.send("activate-theme-and-minimize", themeId);
-        console.log(
-          `Event activate-theme-and-minimize für Theme ${themeId} gesendet`
-        );
       } catch (err) {
-        console.error("Fehler beim Senden des Events:", err);
+        // Error handling
       }
     });
 
     if (!success) {
-      console.error(`Konnte Shortcut ${formattedShortcut} nicht registrieren!`);
       return false;
     }
 
     // Speichere den registrierten Shortcut
     registeredShortcuts.set(themeId, formattedShortcut);
-    console.log(
-      `Shortcut ${formattedShortcut} für Theme ${themeId} erfolgreich registriert`
-    );
-    console.log(
-      `Aktuell registrierte Shortcuts:`,
-      Object.fromEntries(registeredShortcuts)
-    );
     return true;
   } catch (error) {
-    console.error(`Fehler beim Registrieren des Shortcuts ${shortcut}:`, error);
     return false;
   }
 }
@@ -685,16 +652,9 @@ export async function showDesktopExceptApps(
   appIdsToProtect: number[]
 ): Promise<boolean> {
   try {
-    console.log(`[SHOW_DESKTOP] Schütze Apps: ${appIdsToProtect.join(", ")}`);
-
     // Teile die IDs in PIDs und Fenster-Handles auf
     const protectedPids = appIdsToProtect.filter((id) => id < 100000);
     const protectedHandles = appIdsToProtect.filter((id) => id >= 100000);
-
-    console.log(`[SHOW_DESKTOP] Geschützte PIDs: ${protectedPids.join(", ")}`);
-    console.log(
-      `[SHOW_DESKTOP] Geschützte Fenster: ${protectedHandles.join(", ")}`
-    );
 
     // Für PIDs: hole alle zugehörigen Fenster-Handles
     let allWindowsFromPids: number[] = [];
@@ -745,11 +705,6 @@ export async function showDesktopExceptApps(
           .split(",")
           .map((h) => parseInt(h.trim()))
           .filter((id) => !isNaN(id)); // Filtere NaN-Werte heraus
-        console.log(
-          `[SHOW_DESKTOP] Fenster von geschützten PIDs: ${allWindowsFromPids.join(
-            ", "
-          )}`
-        );
       }
     }
 
@@ -867,14 +822,8 @@ export async function showDesktopExceptApps(
     `;
 
     const result = await runPowerShellCommand(psScript);
-    console.log(
-      `[SHOW_DESKTOP] PowerShell-Ausgabe: ${result.substring(0, 500)}${
-        result.length > 500 ? "..." : ""
-      }`
-    );
     return true;
   } catch (error) {
-    console.error(`[SHOW_DESKTOP] Fehler: ${error}`);
     return false;
   }
 }
@@ -1135,21 +1084,13 @@ function setupIpcHandlers() {
 
   // Shortcut für ein Theme registrieren
   ipcMain.handle("register-shortcut", async (_, { themeId, shortcut }) => {
-    console.log(`Registriere Shortcut für Theme ${themeId}: "${shortcut}"`);
     const success = registerThemeShortcut(themeId, shortcut);
-    console.log(
-      `Shortcut-Registrierung ${success ? "erfolgreich" : "fehlgeschlagen"}`
-    );
     return success;
   });
 
   // Shortcut für ein Theme entfernen
   ipcMain.handle("unregister-shortcut", async (_, { themeId }) => {
-    console.log(`Entferne Shortcut für Theme ${themeId}`);
     const success = unregisterThemeShortcut(themeId);
-    console.log(
-      `Shortcut-Entfernung ${success ? "erfolgreich" : "fehlgeschlagen"}`
-    );
     return success;
   });
 

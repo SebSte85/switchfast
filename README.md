@@ -49,14 +49,6 @@ npm run build
 - Einige Anwendungen erfordern erhöhte Berechtigungen für die Interaktion
 - Das Fenster-Fokus-Verhalten kann je nach Anwendungstyp variieren
 
-## Geplante Verbesserungen
-
-- Verbesserte Prozesserkennung nach System-Neustart
-- Drag-and-Drop-Unterstützung für Prozessgruppierung
-- Theme-Farbanpassung
-- Autostart-Funktion
-- Schnellzugriffe über das System-Tray
-
 ## Technologie-Stack
 
 - **Frontend**: React, TypeScript, Electron, CSS Modules

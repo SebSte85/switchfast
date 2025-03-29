@@ -25,7 +25,6 @@ try {
   // Provide mock implementations for testing/development
   windowsProcessManager = {
     getRunningApplications: () => {
-      console.warn("Using mock implementation of getRunningApplications");
       return [
         {
           id: 1,
@@ -48,9 +47,6 @@ try {
       ];
     },
     minimizeApplication: (processId: number) => {
-      console.warn(
-        `Using mock implementation of minimizeApplication for process ${processId}`
-      );
       return true;
     },
   };

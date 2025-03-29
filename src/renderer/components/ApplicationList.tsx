@@ -110,16 +110,6 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     Array<number | string>
   >([]);
 
-  // Debug-Ausgabe der empfangenen Anwendungsliste
-  useEffect(() => {
-    console.log(
-      "ApplicationList - Eingegangene Anwendungen:",
-      applications?.length || 0,
-      JSON.stringify(applications?.slice(0, 3), null, 2),
-      applications?.length > 3 ? "... und weitere" : ""
-    );
-  }, [applications]);
-
   // Filtere die Anwendungen, um nur die zu zeigen, die keiner Gruppe zugeordnet sind
   const unassignedApplications = applications
     .map((app) => {
@@ -456,11 +446,6 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
             <button
               className="add-group-button"
               onClick={() => {
-                console.log(
-                  "Add group button clicked, current showNewGroupInput:",
-                  showNewGroupInput
-                );
-                console.log("Setting showNewGroupInput to true");
                 setShowNewGroupInput(true);
               }}
               title="Neue Gruppe erstellen"
