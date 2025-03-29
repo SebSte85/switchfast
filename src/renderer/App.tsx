@@ -525,8 +525,9 @@ const App: React.FC = () => {
   const toggleCompactMode = () => {
     const newMode = !compactMode;
     setCompactMode(newMode);
-    // Sende Event an Main Process
-    ipcRenderer.send("toggle-compact-mode", newMode);
+
+    // Sende Event an Main Process mit der Anzahl der Gruppen
+    ipcRenderer.send("toggle-compact-mode", newMode, themes.length);
 
     // Im kompakten Modus zeigen wir nur Shortcuts an, deaktiviere das im normalen Modus
     if (newMode) {
@@ -625,7 +626,7 @@ const App: React.FC = () => {
           onUpdateTheme={handleUpdateTheme}
           onToggleActiveTheme={toggleActiveTheme}
           compactMode={compactMode}
-          showOnlyShortcuts={true}
+          showOnlyShortcuts={compactMode}
         />
       )}
     </div>

@@ -852,23 +852,31 @@ app.on("window-all-closed", () => {
 });
 
 // Add compact mode handler
-ipcMain.on("toggle-compact-mode", (_, isCompact) => {
+ipcMain.on("toggle-compact-mode", (_, isCompact, groupCount = 0) => {
   if (!mainWindow) return;
 
   compactMode = isCompact; // Setze den Zustand
 
   if (isCompact) {
+    // Berechne die Breite basierend auf der Anzahl der Gruppen
+    // Wir nehmen an, dass jede Gruppe etwa 90px breit ist, plus etwas Padding
+    const minWidth = 300; // Mindestbreite
+    // Maximal 4 Gruppen pro Zeile, danach umbrechen
+    const itemsPerRow = Math.min(groupCount, 4);
+    const dynamicWidth = Math.max(minWidth, itemsPerRow * 90 + 40); // 40px für Padding
+
     // Speichere die ursprüngliche Größe, bevor wir in den kompakten Modus wechseln
-    const [width, height] = mainWindow.getSize();
-    mainWindow.setMinimumSize(300, 90);
-    mainWindow.setSize(width, 120); // Kleiner für den Kompaktmodus
+    mainWindow.setMinimumSize(minWidth, 90);
+    mainWindow.setSize(dynamicWidth, 120); // Kleiner für den Kompaktmodus
     mainWindow.setAlwaysOnTop(true); // Im Kompaktmodus immer zuoberst
+
+    console.log(
+      `Fenstergröße auf Kompaktmodus angepasst: ${dynamicWidth}x120 für ${groupCount} Gruppen`
+    );
   } else {
     // Zurück zum normal-Size
     mainWindow.setMinimumSize(600, 400);
     mainWindow.setSize(900, 680);
     mainWindow.setAlwaysOnTop(false); // Im normalen Modus nicht zuoberst
   }
-
-  console.log(`Fenstergröße auf Kompaktmodus angepasst: ${isCompact}`);
 });

@@ -439,8 +439,23 @@
     @apply w-full h-px bg-[#78d97c]/20 my-1;
   }
 
+  /* Modernere Gruppenüberschrift */
   .groups-title {
-    @apply text-xl font-bold text-[#78d97c] mb-3 uppercase tracking-wide flex items-center gap-2;
+    @apply text-lg font-bold text-[#78d97c] mb-3 uppercase tracking-wide flex items-center gap-1;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    position: relative;
+    padding-left: 10px;
+  }
+
+  .groups-title::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    height: 18px;
+    width: 3px;
+    background: #78d97c;
+    border-radius: 2px;
   }
 
   /* Verbesserter Gruppen-Container im Sticky-Header - kompakter */
@@ -449,13 +464,19 @@
     min-height: 90px; /* Kleinere Mindesthöhe für kompakteren Look */
   }
 
+  /* Zentriertes Plus-Icon im Kreis */
   .add-group-button {
-    @apply w-6 h-6 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center text-lg hover:bg-[#78d97c]/10 transition-colors ml-2;
+    @apply w-6 h-6 rounded-full border-2 border-[#78d97c] text-[#78d97c] flex items-center justify-center hover:bg-[#78d97c]/10 transition-colors ml-2;
+    font-size: 18px;
+    line-height: 0;
+    padding-bottom: 2px; /* Optische Zentrierung des + Zeichens */
   }
 
-  /* Gruppe mit fester Größe (quadratischer) */
+  /* Größere, rechteckige Gruppen-Elemente, ähnlich wie das Eingabefeld */
   .group-item {
-    @apply w-[80px] h-[80px] px-2 py-2 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all hover:shadow-md hover:translate-y-[-1px] relative;
+    @apply px-4 py-3 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition-all hover:shadow-md hover:translate-y-[-1px] relative;
+    min-width: 140px;
+    min-height: 70px;
     backdrop-filter: blur(8px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   }
@@ -483,8 +504,25 @@
     @apply mb-6;
   }
 
+  /* Prozesse-Überschrift modernisieren */
   .processes-title {
-    @apply text-xl font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+    @apply text-lg font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    position: relative;
+    padding-left: 10px;
+  }
+
+  .processes-title::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 18px;
+    width: 3px;
+    background: #78d97c;
+    border-radius: 2px;
   }
 
   .process-list {
@@ -607,8 +645,10 @@
     position: relative; /* Für korrekte Positionierung der Kindelemente */
   }
 
+  /* Gruppennamen größer machen */
   .group-item-name {
-    @apply text-center font-medium text-xs truncate;
+    @apply text-center font-bold truncate;
+    font-size: 1.1rem;
     max-width: 100%;
     white-space: nowrap; /* Verhindert den Zeilenumbruch */
     overflow: hidden;
@@ -620,17 +660,17 @@
     position: relative; /* Für korrekte Positionierung der Kindelemente */
   }
 
-  /* Shortcut-Badge näher am Text */
+  /* Shortcut-Badge anpassen */
   .shortcut-badge {
-    @apply text-xs px-1.5 py-0.5 rounded-full cursor-pointer text-center transition-all;
+    @apply text-xs px-2 py-1 rounded-md cursor-pointer text-center transition-all;
     background: rgba(65, 65, 89, 0.4);
     backdrop-filter: blur(4px);
-    font-size: 0.6rem;
+    font-size: 0.75rem;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    position: relative; /* Stellt sicher, dass das Badge clickbar ist */
+    position: relative;
     z-index: 5;
   }
 
@@ -760,7 +800,10 @@
 
   /* Delete Button - oben rechts positioniert */
   .delete-theme-button {
-    @apply opacity-0 w-4 h-4 rounded-full bg-gray-700/40 text-gray-400 hover:text-white flex items-center justify-center text-xs transition-all absolute top-0 right-0;
+    @apply opacity-0 w-5 h-5 rounded-full bg-gray-700/40 text-gray-400 hover:text-white flex items-center justify-center text-xs transition-all;
+    position: absolute;
+    top: 2px;
+    right: 2px;
     backdrop-filter: blur(8px);
     z-index: 10;
   }
@@ -797,16 +840,19 @@
     min-height: 60px;
     max-height: 120px;
     overflow-y: visible;
+    display: flex;
+    justify-content: center;
   }
 
   .compact-mode .groups-section {
     @apply pt-1 pb-2;
     margin-bottom: 0;
     box-shadow: none;
+    width: auto;
   }
 
   .compact-mode .groups-container {
-    @apply flex flex-wrap justify-center gap-4 py-1;
+    @apply flex flex-wrap justify-center gap-3 py-1;
     min-height: auto;
   }
 
@@ -820,11 +866,18 @@
 
   /* Klar unterscheidbare Gruppen im Kompaktmodus */
   .compact-mode .group-item {
-    @apply h-auto w-auto px-4 py-2 shadow-md;
+    @apply h-auto px-4 py-2 shadow-md;
     background: rgba(45, 45, 63, 0.95);
     border-width: 2px !important;
-    min-width: 85px;
-    margin: 5px;
+    min-width: 110px;
+    min-height: auto;
+    margin: 3px;
+    transition: all 0.2s ease-in-out;
+  }
+
+  .compact-mode .group-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
   }
 
   /* Aktiver Status im Kompaktmodus besonders hervorheben */

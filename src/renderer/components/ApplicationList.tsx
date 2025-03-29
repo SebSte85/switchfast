@@ -328,92 +328,132 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           )}
 
           {/* Vorhandene Gruppen anzeigen */}
-          {themes.map((theme) => {
-            const isOver = draggedOverTheme === theme.id;
-            const isActive = activeThemes.includes(theme.id);
-
-            // Bestimme die Farb-CSS-Klasse basierend auf dem Farbwert des Themes
-            const getColorClass = (color?: string) => {
-              if (!color) return "group-item-green"; // Standardfarbe
-
-              const colorMap: { [key: string]: string } = {
-                "#78d97c": "group-item-green",
-                "#3b82f6": "group-item-blue",
-                "#ef4444": "group-item-red",
-                "#f59e0b": "group-item-orange",
-                "#8b5cf6": "group-item-purple",
-                "#ec4899": "group-item-pink",
-                "#14b8a6": "group-item-teal",
-                "#f97316": "group-item-orange-light",
-                "#facc15": "group-item-yellow",
-              };
-
-              return colorMap[color] || "group-item-green";
-            };
-
-            return (
-              <div
-                key={theme.id}
-                className={`group-item ${getColorClass(theme.color)} ${
-                  isActive ? "group-item-selected" : ""
-                } ${isOver ? "group-item-active-drop" : ""}`}
-                onDragOver={(e) => handleDragOver(e, theme.id)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleThemeDrop(e, theme.id)}
-                onClick={(e) => handleThemeClick(e, theme.id)}
-              >
-                <div className="group-item-content">
-                  {!showOnlyShortcuts && (
-                    <div className="group-item-name">
-                      {theme.name} ({theme.applications.length})
+          {showOnlyShortcuts ? (
+            <div
+              className={`flex flex-wrap justify-center items-start gap-2 p-2 ${
+                compactMode ? "compact-mode" : ""
+              }`}
+            >
+              {themes.map((theme) => (
+                <div
+                  key={theme.id}
+                  className="group-item relative flex flex-col items-center justify-center transition-all border border-gray-700"
+                  style={{
+                    borderColor: theme.color,
+                    boxShadow: compactMode
+                      ? `0 0 10px ${theme.color}40`
+                      : "none",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleActiveTheme(theme.id);
+                  }}
+                >
+                  {theme.shortcut && (
+                    <div
+                      className="shortcut-badge text-white"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Wenn Theme aktiviert wird, sendet es ein Event
+                        onToggleActiveTheme(theme.id);
+                      }}
+                    >
+                      {theme.shortcut}
                     </div>
                   )}
-                  <div className="group-item-actions">
-                    {editingShortcut === theme.id ? (
-                      <div className="shortcut-editor">
-                        <input
-                          type="text"
-                          className="shortcut-input"
-                          value={currentShortcut}
-                          onChange={(e) => setCurrentShortcut(e.target.value)}
-                          onKeyDown={handleShortcutKeyDown}
-                          placeholder="Tastenkombination drücken"
-                          autoFocus
-                        />
-                      </div>
-                    ) : (
-                      <div
-                        className={`shortcut-badge ${
-                          showOnlyShortcuts ? "shortcut-badge-only" : ""
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEditingShortcut(theme.id);
-                        }}
-                        title={
-                          showOnlyShortcuts ? theme.name : "Shortcut bearbeiten"
-                        }
-                      >
-                        {theme.shortcut ||
-                          (showOnlyShortcuts
-                            ? theme.name
-                            : "Shortcut hinzufügen")}
-                      </div>
-                    )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            themes.map((theme) => {
+              const isOver = draggedOverTheme === theme.id;
+              const isActive = activeThemes.includes(theme.id);
+
+              // Bestimme die Farb-CSS-Klasse basierend auf dem Farbwert des Themes
+              const getColorClass = (color?: string) => {
+                if (!color) return "group-item-green"; // Standardfarbe
+
+                const colorMap: { [key: string]: string } = {
+                  "#78d97c": "group-item-green",
+                  "#3b82f6": "group-item-blue",
+                  "#ef4444": "group-item-red",
+                  "#f59e0b": "group-item-orange",
+                  "#8b5cf6": "group-item-purple",
+                  "#ec4899": "group-item-pink",
+                  "#14b8a6": "group-item-teal",
+                  "#f97316": "group-item-orange-light",
+                  "#facc15": "group-item-yellow",
+                };
+
+                return colorMap[color] || "group-item-green";
+              };
+
+              return (
+                <div
+                  key={theme.id}
+                  className={`group-item ${getColorClass(theme.color)} ${
+                    isActive ? "group-item-selected" : ""
+                  } ${isOver ? "group-item-active-drop" : ""}`}
+                  onDragOver={(e) => handleDragOver(e, theme.id)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleThemeDrop(e, theme.id)}
+                  onClick={(e) => handleThemeClick(e, theme.id)}
+                >
+                  <div className="group-item-content">
                     {!showOnlyShortcuts && (
-                      <button
-                        className="delete-theme-button"
-                        onClick={(e) => handleDeleteTheme(e, theme.id)}
-                        title="Gruppe löschen"
-                      >
-                        ×
-                      </button>
+                      <div className="group-item-name">
+                        {theme.name} ({theme.applications.length})
+                      </div>
                     )}
+                    <div className="group-item-actions">
+                      {editingShortcut === theme.id ? (
+                        <div className="shortcut-editor">
+                          <input
+                            type="text"
+                            className="shortcut-input"
+                            value={currentShortcut}
+                            onChange={(e) => setCurrentShortcut(e.target.value)}
+                            onKeyDown={handleShortcutKeyDown}
+                            placeholder="Tastenkombination drücken"
+                            autoFocus
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          className={`shortcut-badge ${
+                            showOnlyShortcuts ? "shortcut-badge-only" : ""
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingShortcut(theme.id);
+                          }}
+                          title={
+                            showOnlyShortcuts
+                              ? theme.name
+                              : "Shortcut bearbeiten"
+                          }
+                        >
+                          {theme.shortcut ||
+                            (showOnlyShortcuts
+                              ? theme.name
+                              : "Shortcut hinzufügen")}
+                        </div>
+                      )}
+                      {!showOnlyShortcuts && (
+                        <button
+                          className="delete-theme-button"
+                          onClick={(e) => handleDeleteTheme(e, theme.id)}
+                          title="Gruppe löschen"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </section>
 
