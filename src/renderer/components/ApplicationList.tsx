@@ -341,8 +341,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       return;
     }
 
-    // Otherwise, do nothing - removed theme activation on click
+    // Otherwise, toggle theme activation
     e.stopPropagation();
+    onToggleActiveTheme(themeId);
   };
 
   // In der ApplicationList-Komponente fügen wir eine Löschfunktion hinzu
@@ -525,18 +526,18 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   {/* Action Buttons */}
                   <div className="group-action-buttons">
                     <button
-                      className="group-action-button delete"
-                      onClick={(e) => handleDeleteTheme(e, theme.id)}
-                      title="Gruppe löschen"
-                    >
-                      ×
-                    </button>
-                    <button
                       className="group-action-button show-processes"
                       onClick={(e) => handleShowProcesses(e, theme.id)}
                       title="Prozesse anzeigen"
                     >
                       •••
+                    </button>
+                    <button
+                      className="group-action-button delete"
+                      onClick={(e) => handleDeleteTheme(e, theme.id)}
+                      title="Gruppe löschen"
+                    >
+                      ×
                     </button>
                   </div>
                   <div className="group-item-content">

@@ -428,24 +428,28 @@
 
   /* Gruppen-Sektion - kompakter */
   .groups-section {
-    @apply sticky top-0 z-10 pt-2 pb-3 bg-[#414159];
-    margin-bottom: 0.5rem;
+    @apply sticky top-0 z-10 bg-[#414159];
+    padding-top: 8px;
+    padding-bottom: 12px;
+    margin-bottom: 0;
     /* Fügt einen subtilen Schatten-Effekt am unteren Rand hinzu, wenn gescrollt wird */
     box-shadow: 0 3px 8px -6px rgba(0, 0, 0, 0.3);
   }
 
   /* Trennlinie zwischen Gruppen und Prozessen */
   .section-divider {
-    @apply w-full h-px bg-[#78d97c]/20 my-1;
+    @apply w-full h-px bg-[#78d97c]/20;
+    margin: 0;
   }
 
   /* Modernere Gruppenüberschrift */
   .groups-title {
-    @apply text-lg font-bold text-[#78d97c] mb-3 uppercase tracking-wide flex items-center gap-1;
+    @apply text-lg font-bold text-[#78d97c] uppercase tracking-wide flex items-center gap-1;
     letter-spacing: 0.05em;
     font-weight: 600;
     position: relative;
     padding-left: 10px;
+    margin-bottom: 12px;
   }
 
   .mode-indicator {
@@ -512,16 +516,17 @@
 
   /* Prozesse-Sektion */
   .processes-section {
-    @apply mb-6;
+    padding-top: 8px;
   }
 
   /* Prozesse-Überschrift modernisieren */
   .processes-title {
-    @apply text-lg font-bold text-[#78d97c] mb-4 uppercase tracking-wide;
+    @apply text-lg font-bold text-[#78d97c] uppercase tracking-wide;
     letter-spacing: 0.05em;
     font-weight: 600;
     position: relative;
     padding-left: 10px;
+    margin-bottom: 12px;
   }
 
   .processes-title::before {
@@ -539,27 +544,28 @@
   /* Process List */
   .process-list {
     @apply flex flex-col gap-3 px-1;
-    max-height: calc(100vh - 220px);
+    max-height: calc(100vh - 250px);
     overflow-y: auto;
+    padding-bottom: 24px; /* Extra padding at the bottom to ensure visibility of last items */
   }
 
   /* Scrollbar für die Prozess-Liste */
   .process-list::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
   }
 
   .process-list::-webkit-scrollbar-track {
-    background: rgba(65, 65, 89, 0.1);
+    background: rgba(120, 217, 124, 0.1);
     border-radius: 3px;
   }
 
   .process-list::-webkit-scrollbar-thumb {
-    background: rgba(120, 217, 124, 0.2);
+    background: rgba(120, 217, 124, 0.3);
     border-radius: 3px;
   }
 
   .process-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(120, 217, 124, 0.4);
+    background: rgba(120, 217, 124, 0.5);
   }
 
   .process-item {
@@ -1148,7 +1154,8 @@
   }
 
   .process-popup {
-    @apply bg-[#2D2D3F] rounded-lg shadow-xl w-[90%] max-w-[500px] max-h-[80vh] flex flex-col;
+    @apply bg-[#2D2D3F] rounded-lg shadow-xl w-[90%] max-w-[500px] flex flex-col;
+    max-height: 85vh;
     border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
@@ -1157,7 +1164,7 @@
   }
 
   .process-popup-title {
-    @apply text-lg font-bold text-white;
+    @apply text-lg font-bold text-[#78d97c];
   }
 
   .process-popup-close {
@@ -1166,11 +1173,12 @@
 
   .process-popup-content {
     @apply p-4 overflow-y-auto;
-    max-height: calc(80vh - 120px);
+    height: calc(85vh - 60px);
   }
 
   .popup-process-list {
     @apply flex flex-col gap-2;
+    padding-bottom: 8px;
   }
 
   .popup-process-item {
@@ -1183,20 +1191,20 @@
 
   /* Scrollbar für das Popup */
   .process-popup-content::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
   }
 
   .process-popup-content::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
+    @apply bg-[#2D2D3F];
+    border-radius: 3px;
   }
 
   .process-popup-content::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
+    @apply bg-[#414159];
+    border-radius: 3px;
   }
 
   .process-popup-content::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
+    @apply bg-[#515169];
   }
 }
