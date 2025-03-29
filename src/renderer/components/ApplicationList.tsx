@@ -95,8 +95,8 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   activeThemes = [],
   onAddToTheme,
   onRemoveFromTheme,
-  onUpdateTheme = () => {},
-  onToggleActiveTheme = () => {},
+  onUpdateTheme,
+  onToggleActiveTheme,
   compactMode = false,
   showOnlyShortcuts = false,
 }) => {
@@ -106,6 +106,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [currentShortcut, setCurrentShortcut] = useState<string>("");
   const [showProcessPopup, setShowProcessPopup] = useState<string | null>(null);
+  const [selectedProcessIds, setSelectedProcessIds] = useState<
+    Array<number | string>
+  >([]);
 
   // Debug-Ausgabe der empfangenen Anwendungsliste
   useEffect(() => {
@@ -206,18 +209,16 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     setDraggedOverTheme(null);
   };
 
-  const handleThemeDrop = (
-    e: React.DragEvent<HTMLDivElement>,
-    themeId: string
-  ) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, themeId: string) => {
     e.preventDefault();
-    if (draggedApp !== null) {
-      if (!isApplicationInTheme(themeId, draggedApp)) {
-        onAddToTheme(themeId, draggedApp);
-      }
-      setDraggedApp(null);
-      setDraggedOverTheme(null);
+    const draggedApp = e.dataTransfer.getData("application");
+    if (draggedApp && onAddToTheme) {
+      onAddToTheme(
+        themeId,
+        draggedApp.startsWith("w") ? draggedApp : parseInt(draggedApp)
+      );
     }
+    setDraggedOverTheme(null);
   };
 
   const createNewGroup = (groupName: string, color: string = "#78d97c") => {
@@ -246,104 +247,38 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     setCurrentShortcut(theme?.shortcut || "");
   };
 
-  const saveShortcut = (themeId: string) => {
-    console.log("Saving shortcut:", themeId, currentShortcut);
-    if (onUpdateTheme && themeId) {
-      onUpdateTheme(themeId, { shortcut: currentShortcut });
-
-      // Registriere Shortcut beim Main-Prozess
-      if (currentShortcut) {
-        console.log(
-          "Registering shortcut with main process:",
-          themeId,
-          currentShortcut
-        );
-        ipcRenderer
-          .invoke("register-shortcut", {
-            themeId,
-            shortcut: currentShortcut,
-          })
-          .then((result) => {
-            console.log("Shortcut registration result:", result);
-          })
-          .catch((err) => {
-            console.error("Error registering shortcut:", err);
-          });
-      } else {
-        // Wenn Shortcut leer ist, deregistriere ihn
-        console.log("Unregistering shortcut for theme:", themeId);
-        ipcRenderer.invoke("unregister-shortcut", { themeId });
-      }
+  const handleShortcutSave = (themeId: string, currentShortcut: string) => {
+    const theme = themes.find((t) => t.id === themeId);
+    if (theme && onUpdateTheme) {
+      onUpdateTheme({
+        ...theme,
+        shortcut: currentShortcut,
+      });
     }
-    setEditingShortcut(null);
   };
 
-  const handleShortcutKeyDown = (e: React.KeyboardEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    console.log(
-      "Shortcut key down event:",
-      e.key,
-      "ctrlKey:",
-      e.ctrlKey,
-      "altKey:",
-      e.altKey,
-      "shiftKey:",
-      e.shiftKey
-    );
-
-    // Wir erfassen Strg, Alt, Shift und normale Tasten
-    const modifiers = [];
-    if (e.ctrlKey) modifiers.push("Ctrl");
-    if (e.altKey) modifiers.push("Alt");
-    if (e.shiftKey) modifiers.push("Shift");
-
-    // Beachte: Hier wollen wir nur echte Tasten und keine Modifizierer
-    if (e.key !== "Control" && e.key !== "Alt" && e.key !== "Shift") {
-      let key = e.key === " " ? "Space" : e.key;
-
-      // Konvertiere die Taste in Kleinbuchstaben, wenn es ein einzelner Buchstabe ist
-      if (key.length === 1) {
-        key = key.toLowerCase();
+  const handleShortcutKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && editingShortcut) {
+      e.preventDefault();
+      if (onUpdateTheme) {
+        const theme = themes.find((t) => t.id === editingShortcut);
+        if (theme) {
+          onUpdateTheme({
+            ...theme,
+            shortcut: currentShortcut,
+          });
+        }
       }
-
-      // Erstelle Shortcut-String (z.B. "Ctrl+n")
-      const shortcut = [...modifiers, key].join("+");
-      console.log("Setting current shortcut to:", shortcut);
-      setCurrentShortcut(shortcut);
-
-      // Wenn Enter gedrückt wird, speichere den Shortcut
-      if (e.key === "Enter" && editingShortcut) {
-        console.log(
-          "Enter pressed, saving shortcut for theme:",
-          editingShortcut
-        );
-        saveShortcut(editingShortcut);
-      }
-
-      // Escape drücken bricht die Bearbeitung ab
-      if (e.key === "Escape") {
-        console.log("Escape pressed, cancelling shortcut editing");
-        setEditingShortcut(null);
-      }
+      setEditingShortcut(null);
     }
   };
 
   // Add this function to handle theme activation via clicking
   const handleThemeClick = (e: React.MouseEvent, themeId: string) => {
-    // If dragging, handle drop instead
-    if (draggedApp !== null) {
-      if (!isApplicationInTheme(themeId, draggedApp)) {
-        onAddToTheme(themeId, draggedApp);
-      }
-      setDraggedApp(null);
-      setDraggedOverTheme(null);
-      return;
+    e.preventDefault();
+    if (onToggleActiveTheme) {
+      onToggleActiveTheme(themeId);
     }
-
-    // Otherwise, toggle theme activation
-    e.stopPropagation();
-    onToggleActiveTheme(themeId);
   };
 
   // In der ApplicationList-Komponente fügen wir eine Löschfunktion hinzu
@@ -364,8 +299,21 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     setShowProcessPopup(null);
   };
 
-  const handleRemoveProcess = (themeId: string, processId: number) => {
-    onRemoveFromTheme(themeId, processId);
+  const handleRemoveFromThemeClick = (
+    themeId: string,
+    processId: number | string
+  ) => {
+    if (onRemoveFromTheme) {
+      onRemoveFromTheme(themeId, processId);
+    }
+  };
+
+  const handleProcessSelect = (processId: number | string) => {
+    setSelectedProcessIds((prev) =>
+      prev.includes(processId)
+        ? prev.filter((id) => id !== processId)
+        : [...prev, processId]
+    );
   };
 
   // Render process popup
@@ -398,7 +346,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   <span>{process.title || process.name}</span>
                   <span
                     className="popup-process-remove"
-                    onClick={() => handleRemoveProcess(theme.id, process.id)}
+                    onClick={(e) =>
+                      handleRemoveFromThemeClick(theme.id, process.id)
+                    }
                   >
                     ×
                   </span>
@@ -471,7 +421,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleActiveTheme(theme.id);
+                    if (onToggleActiveTheme) {
+                      onToggleActiveTheme(theme.id);
+                    }
                   }}
                 >
                   {theme.shortcut && (
@@ -479,7 +431,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                       className="shortcut-badge text-white"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onToggleActiveTheme(theme.id);
+                        if (onToggleActiveTheme) {
+                          onToggleActiveTheme(theme.id);
+                        }
                       }}
                     >
                       {theme.shortcut}
@@ -520,7 +474,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   } ${isOver ? "group-item-active-drop" : ""}`}
                   onDragOver={(e) => handleDragOver(e, theme.id)}
                   onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleThemeDrop(e, theme.id)}
+                  onDrop={(e) => handleDrop(e, theme.id)}
                   onClick={(e) => handleThemeClick(e, theme.id)}
                 >
                   {/* Action Buttons */}
@@ -601,11 +555,14 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
             <div className="process-list">
               {unassignedApplications.length > 0 ? (
-                <ProcessTree
-                  processes={unassignedApplications}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                />
+                unassignedApplications.map((process) => (
+                  <ProcessTree
+                    key={process.id}
+                    processes={[process]}
+                    selectedProcessIds={new Set(selectedProcessIds)}
+                    onProcessClick={(p) => handleProcessSelect(p.id)}
+                  />
+                ))
               ) : (
                 <div className="no-processes">
                   Alle Prozesse sind Gruppen zugeordnet

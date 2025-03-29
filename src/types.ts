@@ -1,6 +1,12 @@
 // Gemeinsame Typdefinitionen für die gesamte Anwendung
 
 // Information zu laufenden Prozessen
+export interface WindowInfo {
+  hwnd: number;
+  processId: number;
+  title: string;
+}
+
 export interface ProcessInfo {
   id: number;
   name: string;
@@ -9,14 +15,15 @@ export interface ProcessInfo {
   icon?: string;
   parentId?: number; // ID des Elternprozesses
   children?: ProcessInfo[]; // Array von Kindprozessen
+  windows?: WindowInfo[]; // Liste der zugehörigen Fenster
 }
 
 // Themen zur Gruppierung von Anwendungen
 export interface Theme {
   id: string;
   name: string;
-  applications: number[]; // Array von Prozess-IDs
-  shortcut?: string; // Tastaturkombination zum Aktivieren des Themes
+  applications: Array<number | string>; // Kann jetzt ProcessID oder WindowHandle sein
+  shortcut: string;
   color?: string; // Farbe für die visuelle Darstellung des Themes
 }
 
@@ -26,9 +33,9 @@ export interface ApplicationListProps {
   themes: Theme[];
   activeTheme: string | null;
   activeThemes?: string[];
-  onAddToTheme: (themeId: string, applicationId: number) => void;
-  onRemoveFromTheme: (themeId: string, applicationId: number) => void;
-  onUpdateTheme?: (themeId: string, updatedTheme: Partial<Theme>) => void;
+  onAddToTheme?: (themeId: string, appId: number | string) => void;
+  onRemoveFromTheme?: (themeId: string, appId: number | string) => void;
+  onUpdateTheme?: (theme: Theme) => void;
   onToggleActiveTheme?: (themeId: string) => void;
   compactMode?: boolean; // Kompakt-Modus-Flag
   showOnlyShortcuts?: boolean; // Flag, um nur Shortcuts anzuzeigen, keine Namen

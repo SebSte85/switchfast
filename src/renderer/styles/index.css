@@ -569,18 +569,34 @@
   }
 
   .process-item {
-    @apply flex items-center justify-between bg-[#2d2d3f] border-none rounded-lg py-3 px-5 transition-all;
+    @apply flex items-center justify-between bg-[#1a1a24] border-none rounded-lg py-3 px-5 transition-all cursor-grab active:cursor-grabbing;
     backdrop-filter: blur(8px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    margin: 4px 0;
+    position: relative;
   }
 
   .process-item:hover {
-    @apply bg-[#353548];
+    @apply bg-[#1f1f2c];
     transform: translateX(2px);
   }
 
+  .process-item.selected {
+    @apply border-l-4 border-[#78d97c] bg-[#78d97c]/5;
+  }
+
   .process-name {
-    @apply text-white font-medium flex-grow;
+    @apply text-white font-medium mr-4 min-w-[120px];
+    white-space: nowrap;
+    z-index: 5;
+  }
+
+  .process-title {
+    @apply text-white/60 text-sm flex-1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 5;
   }
 
   .process-menu {
@@ -610,26 +626,27 @@
 
   /* Drag and Drop Styling */
   .process-item.dragging {
-    @apply opacity-80 scale-[1.02] shadow-xl bg-[#3a3a50] border-l-4 border-[#78d97c];
-    animation: float 1s infinite alternate ease-in-out;
-    rotate: 0.5deg;
-  }
-
-  @keyframes float {
-    from {
-      transform: translateY(0px);
-    }
-    to {
-      transform: translateY(-4px);
-    }
+    @apply opacity-90 border-2 border-dashed rotate-1 scale-105 shadow-xl bg-[#78d97c]/20;
+    cursor: grabbing !important;
   }
 
   .process-drag-handle {
-    @apply flex items-center cursor-grab p-1;
+    @apply text-[#78d97c]/70 hover:text-[#78d97c] transition-colors ml-4;
+    opacity: 0.4;
+    z-index: 5;
   }
 
-  .drag-handle-icon {
-    @apply text-[#78d97c]/70 hover:text-[#78d97c] transition-colors;
+  .process-item:hover .process-drag-handle,
+  .window-item:hover .process-drag-handle {
+    opacity: 0.8;
+  }
+
+  .process-drag-handle:hover {
+    opacity: 1 !important;
+  }
+
+  .process-children {
+    margin-left: 12px;
   }
 
   .no-processes {
@@ -718,40 +735,44 @@
   /* Process Tree Styling */
   .process-tree {
     @apply flex flex-col gap-2;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+      Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   }
 
   .process-node {
-    @apply flex flex-col w-full;
-  }
-
-  .process-children {
-    @apply flex flex-col gap-2 pl-5 mt-2 border-l border-[#78d97c]/20 ml-3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+      Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   }
 
   .process-expander {
     @apply text-[#78d97c] cursor-pointer mr-2 w-5 h-5 flex items-center justify-center rounded-full bg-[#78d97c]/10 hover:bg-[#78d97c]/20 transition-colors;
+    z-index: 10;
+  }
+
+  .process-expander:hover {
+    @apply text-white;
   }
 
   .process-expander-placeholder {
-    @apply w-5 mr-2;
+    width: 20px;
+    margin-right: 8px;
   }
 
-  /* Process item with children */
+  .process-item:hover .process-drag-handle,
+  .window-item:hover .process-drag-handle {
+    opacity: 0.7;
+  }
+
+  .process-drag-handle:hover {
+    opacity: 1 !important;
+  }
+
+  .process-children {
+    margin-left: 12px;
+  }
+
   .process-item.has-children {
-    @apply border-l-4 border-amber-400 bg-amber-400/5;
-  }
-
-  /* Dragging Styles */
-  .process-item.dragging {
-    @apply opacity-60 border-2 border-dashed rotate-1 scale-105 shadow-lg bg-[#52825d];
-  }
-
-  .process-drag-handle {
-    @apply flex items-center cursor-grab;
-  }
-
-  .drag-handle-icon {
-    @apply text-[#78d97c] hover:text-white transition-colors;
+    @apply border-l-4 border-amber-400 bg-[#1a1a24];
   }
 
   /* Modernisierte Gruppeneingabe (Browser-Stil) - kompakter */
@@ -1206,5 +1227,100 @@
 
   .process-popup-content::-webkit-scrollbar-thumb:hover {
     @apply bg-[#515169];
+  }
+
+  .window-item {
+    @apply flex items-center justify-between bg-[#1a1a24]/80 border-none rounded-lg py-2 px-5 transition-all cursor-grab active:cursor-grabbing;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    margin: 4px 0 4px 28px;
+    position: relative;
+  }
+
+  .window-item:hover {
+    @apply bg-[#1f1f2c];
+    transform: translateX(2px);
+  }
+
+  .window-item.selected {
+    @apply border-l-4 border-[#78d97c] bg-[#78d97c]/5;
+  }
+
+  .window-item::before {
+    content: "⊢";
+    position: absolute;
+    left: 12px;
+    color: rgba(120, 217, 124, 0.3);
+  }
+
+  .process-name {
+    @apply text-white font-medium mr-4 min-w-[120px];
+    white-space: nowrap;
+    z-index: 5;
+  }
+
+  .process-title {
+    @apply text-white/60 text-sm flex-1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 5;
+  }
+
+  .window-title {
+    @apply text-white/80 text-sm flex-1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 5;
+  }
+
+  .process-drag-handle {
+    @apply text-[#78d97c]/70 hover:text-[#78d97c] transition-colors ml-4;
+    opacity: 0.4;
+    z-index: 5;
+  }
+
+  .process-item:hover .process-drag-handle,
+  .window-item:hover .process-drag-handle {
+    opacity: 0.8;
+  }
+
+  .process-drag-handle:hover {
+    opacity: 1 !important;
+  }
+
+  .process-children {
+    margin-left: 12px;
+  }
+
+  /* Process item with children */
+  .process-item.has-children {
+    @apply border-l-4 border-[#78d97c] bg-[#1a1a24];
+  }
+
+  /* Dragging Styles */
+  .process-item.dragging {
+    @apply opacity-90 border-2 border-dashed rotate-1 scale-105 shadow-xl bg-[#78d97c]/20;
+    cursor: grabbing !important;
+  }
+
+  /* Drag Overlay - erscheint beim Hover */
+  .process-item::after,
+  .window-item::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='4' cy='4' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='12' cy='4' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='20' cy='4' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='4' cy='12' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='12' cy='12' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='20' cy='12' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='4' cy='20' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='12' cy='20' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='20' cy='20' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3C/svg%3E")
+      repeat;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .process-item:hover::after,
+  .window-item:hover::after {
+    opacity: 1;
   }
 }

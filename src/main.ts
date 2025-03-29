@@ -14,12 +14,20 @@ import * as path from "path";
 import { execFile } from "child_process";
 import { error } from "console";
 import { stderr } from "process";
+import { DataStore } from "./main/dataStore";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+const dataStore = new DataStore();
 
 // Types
+interface WindowInfo {
+  hwnd: number;
+  processId: number;
+  title: string;
+}
+
 interface ProcessInfo {
   id: number;
   name: string;
@@ -28,6 +36,7 @@ interface ProcessInfo {
   icon?: string;
   parentId?: number;
   children?: ProcessInfo[];
+  windows?: WindowInfo[];
 }
 
 const registeredShortcuts: Map<string, string> = new Map();
@@ -322,26 +331,48 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
       $results = @();
       
       foreach ($p in $processes) {
-        # Fenstertitel abrufen (wenn vorhanden)
-        $title = "";
-        
-        # Nur für Prozesse, die ein Fenster haben könnten
+        # Prozess in die Ergebnisse einfügen, wenn es sich um einen relevanten Prozess handelt
         $process = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue;
-        if ($process -and $process.MainWindowHandle -ne 0) {
-          $title = $process.MainWindowTitle;
+        if ($process) {
+          # Prozessnamen filtern - nur Desktop-Apps
+          $relevantProcess = $false;
           
-          # Falls kein Titel vorhanden ist, Prozessnamen verwenden
-          if (-not $title) {
-            $title = $p.Name;
+          # Bekannte Desktop-Anwendungen
+          $desktopApps = @(
+            "brave", "chrome", "firefox", "msedge",  # Browser
+            "code", "cursor",                        # Editoren
+            "notepad", "wordpad",                    # Text-Editoren
+            "explorer",                              # Datei-Explorer
+            "powershell", "WindowsTerminal",         # Terminals
+            "Teams", "slack", "discord",             # Kommunikation
+            "ONENOTE", "WINWORD", "EXCEL",          # Office
+            "SnippingTool",                         # Tools
+            "ApplicationFrameHost",                  # Windows Store Apps
+            "Taskmgr",                              # System Tools
+            "electron"                              # Electron Apps
+          );
+
+          # Prüfe, ob es sich um eine relevante Anwendung handelt
+          if ($desktopApps -contains $process.Name -or 
+              $process.MainWindowHandle -ne 0 -or
+              $process.MainWindowTitle) {
+            $relevantProcess = $true;
           }
-          
-          # Prozess in die Ergebnisse einfügen
-          $results += [PSCustomObject]@{
-            Id = $p.ProcessId;
-            ParentId = $p.ParentProcessId;
-            Name = $p.Name;
-            Title = $title;
-            CommandLine = $p.CommandLine;
+
+          if ($relevantProcess) {
+            $title = if ($process.MainWindowTitle) { 
+              $process.MainWindowTitle 
+            } else { 
+              $p.Name 
+            }
+
+            $results += [PSCustomObject]@{
+              Id = $p.ProcessId;
+              ParentId = $p.ParentProcessId;
+              Name = $p.Name;
+              Title = $title;
+              CommandLine = $p.CommandLine;
+            }
           }
         }
       }
@@ -377,7 +408,6 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
     processTree.sort((a, b) => a.name.localeCompare(b.name));
 
     console.log(`${processTree.length} Desktop-Anwendungen gefunden`);
-
     return processTree;
   } catch (error) {
     console.error("Fehler beim Abrufen der laufenden Anwendungen:", error);
@@ -752,40 +782,150 @@ async function showDesktopExceptApps(
 // Hilfsfunktion zum Ausführen von PowerShell-Befehlen
 function runPowerShellCommand(script: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Erstelle temporäre Datei mit UTF-8 Encoding
-    const tempFilePath = path.join(os.tmpdir(), `ps-script-${Date.now()}.ps1`);
-    fs.writeFileSync(tempFilePath, script, { encoding: "utf8" });
+    // Debug-Logging
+    console.log("Führe PowerShell-Skript aus:", script);
 
-    // Führe PowerShell-Skript aus
-    execFile(
+    // Erstelle temporäre Datei mit UTF-8 BOM Encoding für PowerShell
+    const tempFilePath = path.join(os.tmpdir(), `ps-script-${Date.now()}.ps1`);
+    const scriptWithErrorHandling = `
+      $ErrorActionPreference = "Stop"
+      try {
+        ${script}
+      } catch {
+        Write-Error $_.Exception.Message
+        exit 1
+      }
+    `;
+
+    // UTF-8 BOM für PowerShell
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const scriptBuffer = Buffer.concat([
+      bom,
+      Buffer.from(scriptWithErrorHandling, "utf8"),
+    ]);
+    fs.writeFileSync(tempFilePath, scriptBuffer);
+
+    console.log("Temporäre Skriptdatei erstellt:", tempFilePath);
+
+    // Führe PowerShell mit Debugging aus
+    const process = execFile(
       "powershell.exe",
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempFilePath],
-      { encoding: "utf8" },
+      { encoding: "utf8", maxBuffer: 1024 * 1024 * 10 }, // 10MB Buffer
       (error, stdout, stderr) => {
         // Lösche temporäre Datei
         try {
           fs.unlinkSync(tempFilePath);
+          console.log("Temporäre Datei gelöscht:", tempFilePath);
         } catch (e) {
           console.warn("Konnte temporäre Datei nicht löschen:", e);
         }
 
         if (error) {
+          console.error("PowerShell Fehler:", error);
+          console.error("PowerShell stderr:", stderr);
           reject(new Error(`PowerShell error: ${error.message}\n${stderr}`));
           return;
         }
 
+        if (stderr) {
+          console.warn("PowerShell stderr (nicht fatal):", stderr);
+        }
+
+        console.log("PowerShell stdout:", stdout);
         resolve(stdout);
       }
     );
+
+    // Log PowerShell Process ID
+    console.log("PowerShell Process ID:", process.pid);
   });
 }
 
-// Initialisiere IPC-Kommunikation
+// Funktion zum Abrufen der Prozesse mit Fenstern
+async function getProcessesWithWindows() {
+  try {
+    // Hole Prozesse und Fenster parallel
+    const [processes, windows] = await Promise.all([
+      getRunningApplications(),
+      getWindows(),
+    ]);
+
+    console.log("Gefundene Fenster:", windows);
+
+    // Gruppiere Fenster nach ProcessId
+    const windowsByProcess = new Map();
+    windows.forEach((window) => {
+      if (!windowsByProcess.has(window.processId)) {
+        windowsByProcess.set(window.processId, []);
+      }
+      windowsByProcess.get(window.processId).push({
+        hwnd: window.hwnd,
+        title: window.title,
+      });
+    });
+
+    // Füge Fenster zu den entsprechenden Prozessen hinzu
+    const processesWithWindows = processes.map((process) => {
+      const processWindows = windowsByProcess.get(process.id) || [];
+      return {
+        ...process,
+        windows: processWindows,
+        // Behalte den originalen Prozess-Titel bei
+        title: process.title,
+      };
+    });
+
+    console.log("Prozesse mit Fenstern:", processesWithWindows);
+    return processesWithWindows;
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Prozesse und Fenster:", error);
+    return [];
+  }
+}
+
+// Zentrale Funktion zum Einrichten der IPC-Handler
 function setupIpcHandlers() {
-  // Laufende Anwendungen abrufen
+  // Entferne alle existierenden Handler
+  ipcMain.removeHandler("get-running-applications");
+  ipcMain.removeHandler("get-themes");
+  ipcMain.removeHandler("save-themes");
+  ipcMain.removeHandler("add-theme");
+  ipcMain.removeHandler("update-theme");
+  ipcMain.removeHandler("delete-theme");
+  ipcMain.removeHandler("minimize-applications");
+  ipcMain.removeHandler("minimize-all-except");
+  ipcMain.removeHandler("show-desktop-except");
+  ipcMain.removeHandler("register-shortcut");
+  ipcMain.removeHandler("unregister-shortcut");
+
+  // Registriere die Handler neu
   ipcMain.handle("get-running-applications", async () => {
-    console.log("getRunningApplications() wird aufgerufen");
-    return await getRunningApplications();
+    return getProcessesWithWindows();
+  });
+
+  ipcMain.handle("get-themes", () => {
+    return dataStore.getThemes();
+  });
+
+  ipcMain.handle("save-themes", (_, themes) => {
+    dataStore.setThemes(themes);
+    return true;
+  });
+
+  ipcMain.handle("add-theme", (_, theme) => {
+    dataStore.addTheme(theme);
+    return true;
+  });
+
+  ipcMain.handle("update-theme", (_, themeId, updatedTheme) => {
+    dataStore.updateTheme(themeId, updatedTheme);
+    return true;
+  });
+
+  ipcMain.handle("delete-theme", (_, themeId) => {
+    dataStore.deleteTheme(themeId);
+    return true;
   });
 
   // Anwendungen minimieren
@@ -821,7 +961,7 @@ function setupIpcHandlers() {
     return unregisterThemeShortcut(themeId);
   });
 
-  // Add window control handlers
+  // Window control handlers
   ipcMain.on("minimize-window", () => {
     if (mainWindow) mainWindow.minimize();
   });
@@ -829,6 +969,17 @@ function setupIpcHandlers() {
   ipcMain.on("close-window", () => {
     if (mainWindow) mainWindow.close();
   });
+
+  // Compact mode handler
+  ipcMain.on(
+    "toggle-compact-mode",
+    (_, isCompact: boolean, groupCount: number) => {
+      if (mainWindow) {
+        const height = isCompact ? Math.min(60 + groupCount * 40, 300) : 600;
+        mainWindow.setSize(400, height);
+      }
+    }
+  );
 }
 
 // Beim Beenden der App alle Shortcuts entfernen
@@ -838,10 +989,35 @@ app.on("will-quit", () => {
   console.log("Alle globalen Shortcuts entfernt");
 });
 
+// Funktion zum Registrieren aller gespeicherten Shortcuts
+async function registerSavedShortcuts() {
+  try {
+    const themes = dataStore.getThemes();
+    console.log("Registriere gespeicherte Shortcuts...");
+
+    themes.forEach((theme) => {
+      if (theme.shortcut && theme.shortcut.trim() !== "") {
+        console.log(
+          `Registriere gespeicherten Shortcut ${theme.shortcut} für Theme ${theme.id}`
+        );
+        registerThemeShortcut(theme.id, theme.shortcut);
+      }
+    });
+
+    console.log("Alle gespeicherten Shortcuts wurden registriert");
+  } catch (error) {
+    console.error(
+      "Fehler beim Registrieren der gespeicherten Shortcuts:",
+      error
+    );
+  }
+}
+
 // App bereit-Event
 app.on("ready", () => {
   createWindow();
-  setupIpcHandlers(); // IPC-Handler initialisieren
+  setupIpcHandlers();
+  registerSavedShortcuts();
 });
 
 // Quit when all windows are closed, except on macOS
@@ -885,3 +1061,119 @@ ipcMain.on("toggle-compact-mode", (_, isCompact, groupCount) => {
     }, 50); // Kleine Verzögerung für bessere Animation
   }
 });
+
+/**
+ * Ruft alle sichtbaren Fenster mit ihren Titeln und Process IDs ab
+ */
+async function getWindows(): Promise<WindowInfo[]> {
+  try {
+    const command = `
+      # Aktiviere detaillierte Fehlerbehandlung
+      $ErrorActionPreference = "Stop"
+      $VerbosePreference = "Continue"
+
+      Write-Verbose "Starte Fensterauflistung..."
+
+      Add-Type -TypeDefinition @"
+        using System;
+        using System.Runtime.InteropServices;
+        using System.Text;
+        using System.Collections.Generic;
+
+        public class WindowUtils {
+            [DllImport("user32.dll")]
+            public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+            [DllImport("user32.dll")]
+            public static extern bool IsWindowVisible(IntPtr hWnd);
+
+            [DllImport("user32.dll")]
+            public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+            [DllImport("user32.dll")]
+            public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+            public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+            public static List<string> GetVisibleWindows() {
+                var windows = new List<string>();
+                
+                try {
+                    EnumWindows(delegate (IntPtr hWnd, IntPtr lParam) {
+                        try {
+                            if (IsWindowVisible(hWnd)) {
+                                var builder = new StringBuilder(256);
+                                uint processId = 0;
+                                
+                                if (GetWindowThreadProcessId(hWnd, out processId) != 0) {
+                                    if (GetWindowText(hWnd, builder, 256) > 0) {
+                                        string title = builder.ToString().Trim();
+                                        if (!string.IsNullOrEmpty(title)) {
+                                            windows.Add(string.Format("{0}|{1}|{2}", hWnd, processId, title));
+                                            Console.WriteLine("Gefunden: " + title + " (PID: " + processId + ", HWND: " + hWnd + ")");
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception ex) {
+                            Console.WriteLine("Fehler bei Fenster: " + ex.Message);
+                        }
+                        return true;
+                    }, IntPtr.Zero);
+                } catch (Exception ex) {
+                    Console.WriteLine("Kritischer Fehler: " + ex.Message);
+                    throw;
+                }
+
+                Console.WriteLine(windows.Count + " Fenster gefunden");
+                return windows;
+            }
+        }
+"@
+
+      Write-Verbose "Typ definiert, rufe GetVisibleWindows auf..."
+      
+      try {
+          $windows = [WindowUtils]::GetVisibleWindows()
+          Write-Verbose "GetVisibleWindows erfolgreich ausgeführt"
+          return $windows
+      } catch {
+          Write-Error "Fehler in GetVisibleWindows: $_"
+          throw
+      }
+    `;
+
+    console.log("Starte Fensterauflistung...");
+    const stdout = await runPowerShellCommand(command);
+    console.log("PowerShell Ausgabe erhalten:", stdout);
+
+    if (!stdout || stdout.trim() === "") {
+      console.error("Keine Ausgabe von PowerShell erhalten");
+      return [];
+    }
+
+    const windowsData = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && line.includes("|"))
+      .map((line) => {
+        const [hwndStr, processIdStr, ...titleParts] = line.split("|");
+        const window = {
+          hwnd: parseInt(hwndStr),
+          processId: parseInt(processIdStr),
+          title: titleParts.join("|").trim(),
+        };
+        console.log("Verarbeite Fenster:", window);
+        return window;
+      });
+
+    console.log(`${windowsData.length} Fenster erfolgreich verarbeitet`);
+    return windowsData;
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Fenster:", error);
+    return [];
+  }
+}
+
+// Native Windows API Funktionen
+// declare function getWindows(): Promise<WindowInfo[]>;

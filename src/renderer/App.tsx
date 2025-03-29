@@ -2,25 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ipcRenderer } from "electron";
 import "./styles/index.css";
 import ApplicationList from "./components/ApplicationList";
-
-// Typdefinitionen
-interface ProcessInfo {
-  id: number;
-  name: string;
-  title: string;
-  path?: string;
-  icon?: string;
-  parentId?: number;
-  children?: ProcessInfo[];
-}
-
-interface Theme {
-  id: string;
-  name: string;
-  applications: number[];
-  shortcut: string;
-  color?: string;
-}
+import { ProcessInfo, Theme } from "../types";
 
 const App: React.FC = () => {
   const [applications, setApplications] = useState<ProcessInfo[]>([]);
@@ -30,30 +12,6 @@ const App: React.FC = () => {
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [compactMode, setCompactMode] = useState<boolean>(false);
-
-  // Theme hinzufügen mit useCallback
-  const handleAddTheme = useCallback((newTheme: Theme) => {
-    // Ensure we have a unique ID by using the current timestamp if not provided
-    const themeToAdd = {
-      ...newTheme,
-      id: newTheme.id || `theme_${Date.now()}`,
-      applications: newTheme.applications || [],
-      shortcut: newTheme.shortcut || "",
-      color: newTheme.color || "#78d97c", // Standard-Grün, falls keine Farbe angegeben
-    };
-
-    // Überprüfen, ob bereits ein Theme mit dieser ID existiert
-    setThemes((prevThemes) => {
-      const themeExists = prevThemes.some(
-        (theme) => theme.id === themeToAdd.id
-      );
-      if (themeExists) {
-        // Falls ja, eine neue eindeutige ID generieren
-        themeToAdd.id = `theme_${Date.now()}`;
-      }
-      return [...prevThemes, themeToAdd];
-    });
-  }, []);
 
   // Laden der laufenden Anwendungen
   useEffect(() => {
@@ -110,14 +68,50 @@ const App: React.FC = () => {
 
   // Laden der gespeicherten Themes beim Start
   useEffect(() => {
-    try {
-      const savedThemes = localStorage.getItem("themes");
-      if (savedThemes) {
-        const parsedThemes = JSON.parse(savedThemes);
-        setThemes(parsedThemes);
+    const loadSavedThemes = async () => {
+      try {
+        const savedThemes = await ipcRenderer.invoke("get-themes");
+        if (savedThemes && savedThemes.length > 0) {
+          setThemes(savedThemes);
+        }
+      } catch (error) {
+        console.error("Fehler beim Laden der gespeicherten Themes:", error);
       }
+    };
+
+    loadSavedThemes();
+  }, []);
+
+  // Speichern der Themes bei Änderungen
+  useEffect(() => {
+    const saveThemes = async () => {
+      try {
+        await ipcRenderer.invoke("save-themes", themes);
+      } catch (error) {
+        console.error("Fehler beim Speichern der Themes:", error);
+      }
+    };
+
+    if (themes.length > 0) {
+      saveThemes();
+    }
+  }, [themes]);
+
+  // Theme hinzufügen mit useCallback
+  const handleAddTheme = useCallback(async (newTheme: Theme) => {
+    const themeToAdd: Theme = {
+      ...newTheme,
+      id: newTheme.id || `theme_${Date.now()}`,
+      applications: newTheme.applications || [],
+      shortcut: newTheme.shortcut || "",
+      color: newTheme.color || "#78d97c",
+    };
+
+    try {
+      await ipcRenderer.invoke("add-theme", themeToAdd);
+      setThemes((prevThemes) => [...prevThemes, themeToAdd]);
     } catch (error) {
-      console.error("Fehler beim Laden der gespeicherten Themes:", error);
+      console.error("Fehler beim Hinzufügen des Themes:", error);
     }
   }, []);
 
@@ -301,51 +295,47 @@ const App: React.FC = () => {
   }, [handleDeleteTheme]);
 
   // Anwendung zum Theme hinzufügen
-  const handleAddToTheme = (themeId: string, applicationId: number) => {
-    setThemes(
-      themes.map((theme) => {
-        if (theme.id === themeId) {
-          return {
-            ...theme,
-            applications: [...theme.applications, applicationId],
-          };
-        }
-        return theme;
-      })
-    );
-  };
+  const handleAddToTheme = useCallback(
+    (themeId: string, appId: number | string) => {
+      setThemes((prevThemes) =>
+        prevThemes.map((theme) =>
+          theme.id === themeId
+            ? {
+                ...theme,
+                applications: [...theme.applications, appId],
+              }
+            : theme
+        )
+      );
+    },
+    []
+  );
 
   // Anwendung aus Theme entfernen
-  const handleRemoveFromTheme = (themeId: string, applicationId: number) => {
-    setThemes(
-      themes.map((theme) => {
-        if (theme.id === themeId) {
-          return {
-            ...theme,
-            applications: theme.applications.filter(
-              (id) => id !== applicationId
-            ),
-          };
-        }
-        return theme;
-      })
-    );
-  };
+  const handleRemoveFromTheme = useCallback(
+    (themeId: string, appId: number | string) => {
+      setThemes((prevThemes) =>
+        prevThemes.map((theme) =>
+          theme.id === themeId
+            ? {
+                ...theme,
+                applications: theme.applications.filter((id) => id !== appId),
+              }
+            : theme
+        )
+      );
+    },
+    []
+  );
 
-  // Theme aktualisieren (für Shortcut-Änderungen)
-  const handleUpdateTheme = (themeId: string, updatedTheme: Partial<Theme>) => {
-    setThemes(
-      themes.map((theme) => {
-        if (theme.id === themeId) {
-          return {
-            ...theme,
-            ...updatedTheme,
-          };
-        }
-        return theme;
-      })
+  // Theme aktualisieren
+  const handleUpdateTheme = useCallback((updatedTheme: Theme) => {
+    setThemes((prevThemes) =>
+      prevThemes.map((theme) =>
+        theme.id === updatedTheme.id ? updatedTheme : theme
+      )
     );
-  };
+  }, []);
 
   // Toggle theme activation (add to or remove from active themes)
   const toggleActiveTheme = (themeId: string) => {
@@ -526,26 +516,6 @@ const App: React.FC = () => {
       console.error("Fehler beim Minimieren der Anwendungen:", error);
     }
   };
-
-  // Speichert Themes im localStorage
-  useEffect(() => {
-    if (themes.length > 0) {
-      try {
-        const themesData = JSON.stringify(
-          themes.map((theme) => ({
-            id: theme.id,
-            name: theme.name,
-            applications: theme.applications,
-            shortcut: theme.shortcut || "",
-            color: theme.color || "#78d97c", // Speichere die Farbe
-          }))
-        );
-        localStorage.setItem("themes", themesData);
-      } catch (error) {
-        console.error("Fehler beim Speichern der Themes:", error);
-      }
-    }
-  }, [themes]);
 
   // Kompaktmodus ändern und Größe anpassen
   const toggleCompactMode = () => {
