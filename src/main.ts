@@ -5,6 +5,9 @@ import {
   Menu,
   globalShortcut,
   ipcMain,
+  shell,
+  dialog,
+  MessageBoxOptions,
 } from "electron";
 import * as url from "url";
 import { exec } from "child_process";
@@ -15,6 +18,8 @@ import { execFile } from "child_process";
 import { error } from "console";
 import { stderr } from "process";
 import { DataStore } from "./main/dataStore";
+import Store from "electron-store";
+import { autoUpdater } from "electron-updater";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -1168,10 +1173,13 @@ async function registerSavedShortcuts() {
 }
 
 // App bereit-Event
-app.on("ready", () => {
+app.whenReady().then(() => {
   createWindow();
   setupIpcHandlers();
   registerSavedShortcuts();
+
+  // Auto-Updater einrichten
+  setupAutoUpdater();
 });
 
 // Quit when all windows are closed, except on macOS
@@ -1321,3 +1329,84 @@ async function getWindows(): Promise<WindowInfo[]> {
 
 // Native Windows API Funktionen
 // declare function getWindows(): Promise<WindowInfo[]>;
+
+/**
+ * Richtet den Auto-Updater ein und prüft auf Updates
+ * Hinweis: Vor der Verwendung müssen folgende Pakete installiert werden:
+ * npm install electron-updater electron-log
+ */
+function setupAutoUpdater() {
+  // Log-Ausgaben vom Updater (nur im Entwicklungsmodus)
+  if (process.env.NODE_ENV === "development") {
+    autoUpdater.logger = require("electron-log");
+    autoUpdater.logger.transports.file.level = "info";
+  }
+
+  // Updater-Events
+  autoUpdater.on("checking-for-update", () => {
+    sendStatusToWindow("Suche nach Updates...");
+  });
+
+  autoUpdater.on("update-available", (info: any) => {
+    sendStatusToWindow("Update verfügbar.");
+  });
+
+  autoUpdater.on("update-not-available", (info: any) => {
+    sendStatusToWindow("App ist aktuell.");
+  });
+
+  autoUpdater.on("error", (err: Error) => {
+    sendStatusToWindow(`Fehler beim Update: ${err.toString()}`);
+  });
+
+  autoUpdater.on(
+    "download-progress",
+    (progressObj: {
+      bytesPerSecond: number;
+      percent: number;
+      transferred: number;
+      total: number;
+    }) => {
+      const message = `Download-Geschwindigkeit: ${progressObj.bytesPerSecond} - Heruntergeladen: ${progressObj.percent}% (${progressObj.transferred}/${progressObj.total})`;
+      sendStatusToWindow(message);
+    }
+  );
+
+  autoUpdater.on("update-downloaded", (info: any) => {
+    sendStatusToWindow(
+      "Update heruntergeladen. Es wird beim Neustart installiert."
+    );
+
+    // Optional: Dialog anzeigen und Neustart anbieten
+    const dialogOpts: MessageBoxOptions = {
+      type: "info",
+      buttons: ["Jetzt neu starten", "Später"],
+      title: "Update verfügbar",
+      message:
+        "Eine neue Version wurde heruntergeladen. Neustart erforderlich, um das Update zu installieren.",
+    };
+
+    dialog
+      .showMessageBox(dialogOpts)
+      .then((returnValue: { response: number }) => {
+        if (returnValue.response === 0) autoUpdater.quitAndInstall();
+      });
+  });
+
+  // Nach Updates suchen
+  autoUpdater.checkForUpdatesAndNotify();
+
+  // Periodisch nach Updates suchen (z.B. alle 60 Minuten)
+  setInterval(() => {
+    autoUpdater.checkForUpdatesAndNotify();
+  }, 60 * 60 * 1000);
+}
+
+/**
+ * Sendet Update-Status an das Hauptfenster
+ */
+function sendStatusToWindow(text: string) {
+  if (mainWindow) {
+    mainWindow.webContents.send("update-message", text);
+  }
+}

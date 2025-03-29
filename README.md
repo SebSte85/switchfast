@@ -55,6 +55,44 @@ npm run build
 - **Backend**: Node.js, Electron IPC, Windows Process API
 - **Speicherung**: JSON-basierte Persistenz im Benutzerverzeichnis
 
+## Auto-Update-Funktion
+
+Die Anwendung ist mit einem automatischen Update-System ausgestattet. Wenn neue Versionen verfügbar sind, werden Benutzer benachrichtigt und können das Update automatisch installieren.
+
+### Einrichtung für Entwickler
+
+1. Erstelle ein GitHub-Repository für deine App
+2. Bearbeite die `package.json` und passe die `publish`-Konfiguration an:
+   ```json
+   "publish": [
+     {
+       "provider": "github",
+       "owner": "DEIN_GITHUB_BENUTZERNAME",
+       "repo": "DEIN_REPOSITORY_NAME"
+     }
+   ]
+   ```
+3. Erstelle ein persönliches GitHub-Token mit Berechtigungen für das Repository
+4. Setze das Token als Umgebungsvariable:
+
+   ```
+   setx GH_TOKEN "dein_github_token"
+   ```
+
+5. Erstelle ein Release mit einer Versionsnummer (z.B. v1.0.0):
+
+   ```
+   npm version patch
+   npm run package
+   ```
+
+6. Veröffentliche das Release auf GitHub:
+   ```
+   npx electron-builder -p always
+   ```
+
+Die App wird nun bei jedem Start nach Updates suchen und Benutzer benachrichtigen, wenn eine neue Version verfügbar ist.
+
 ## Lizenz
 
 [Ihre Lizenz hier]

@@ -1,0 +1,47 @@
+/* Update-Benachrichtigung */
+.update-notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: #414159;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 6px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: slide-in 0.3s ease-out;
+  max-width: 320px;
+  border-left: 4px solid #50fa7b;
+}
+
+.update-message {
+  flex: 1;
+  font-size: 14px;
+}
+
+.update-close {
+  background: none;
+  border: none;
+  color: #8f8f9d;
+  cursor: pointer;
+  font-size: 18px;
+  margin-left: 8px;
+  padding: 0 4px;
+}
+
+.update-close:hover {
+  color: #fff;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

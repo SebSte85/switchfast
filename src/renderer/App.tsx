@@ -12,6 +12,7 @@ const App: React.FC = () => {
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [compactMode, setCompactMode] = useState<boolean>(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
   // Laden der laufenden Anwendungen
   useEffect(() => {
@@ -500,10 +501,40 @@ const App: React.FC = () => {
     }
   };
 
+  // Event-Listener für Auto-Updates
+  useEffect(() => {
+    // Listener für Update-Nachrichten
+    const handleUpdateMessage = (_: any, message: string) => {
+      setUpdateMessage(message);
+
+      // Nachricht nach 5 Sekunden ausblenden
+      setTimeout(() => {
+        setUpdateMessage(null);
+      }, 5000);
+    };
+
+    ipcRenderer.on("update-message", handleUpdateMessage);
+
+    return () => {
+      ipcRenderer.removeListener("update-message", handleUpdateMessage);
+    };
+  }, []);
+
   return (
-    <div
-      className={`app-container-simple ${compactMode ? "compact-mode" : ""}`}
-    >
+    <div className={`app ${compactMode ? "compact-mode" : ""}`}>
+      {/* Update-Benachrichtigung */}
+      {updateMessage && (
+        <div className="update-notification">
+          <div className="update-message">{updateMessage}</div>
+          <button
+            className="update-close"
+            onClick={() => setUpdateMessage(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="custom-titlebar">
         <div className="app-brand">
           <div className="app-logo">

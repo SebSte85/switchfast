@@ -381,21 +381,43 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     const theme = themes.find((t) => t.id === showProcessPopup);
     if (!theme) return null;
 
-    const themeProcesses = applications.filter((app) => {
-      // Check if the process ID is in the theme applications
-      if (theme.applications.includes(app.id)) {
-        return true;
-      }
+    // Helper function to recursively collect all processes and their children
+    const collectProcessesInTheme = (
+      processes: ProcessInfo[]
+    ): ProcessInfo[] => {
+      const result: ProcessInfo[] = [];
 
-      // Check for window handles - if any window's hwnd is included in the theme applications
-      if (app.windows && app.windows.length > 0) {
-        return app.windows.some((window) =>
-          theme.applications.includes(`w${window.hwnd}`)
-        );
-      }
+      const collectProcess = (process: ProcessInfo) => {
+        // Check if the process ID is in the theme applications
+        if (theme.applications.includes(process.id)) {
+          result.push(process);
+        }
 
-      return false;
-    });
+        // Check for window handles
+        if (process.windows && process.windows.length > 0) {
+          const hasWindowInTheme = process.windows.some(
+            (window) =>
+              // Check both formats: direct hwnd number and with "w" prefix
+              theme.applications.includes(window.hwnd) ||
+              theme.applications.includes(`w${window.hwnd}`)
+          );
+          if (hasWindowInTheme && !result.includes(process)) {
+            result.push(process);
+          }
+        }
+
+        // Recursively check child processes
+        if (process.children && process.children.length > 0) {
+          process.children.forEach(collectProcess);
+        }
+      };
+
+      // Start collection from all root processes
+      processes.forEach(collectProcess);
+      return result;
+    };
+
+    const themeProcesses = collectProcessesInTheme(applications);
 
     return (
       <div className="process-popup-overlay" onClick={handleCloseProcessPopup}>
@@ -411,20 +433,21 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           </div>
           <div className="process-popup-content">
             <div className="popup-process-list">
-              {themeProcesses.map((process) => (
-                <div key={process.id} className="popup-process-item">
-                  <span>{process.title || process.name}</span>
-                  <span
-                    className="popup-process-remove"
-                    onClick={(e) =>
-                      handleRemoveFromThemeClick(theme.id, process.id)
-                    }
-                  >
-                    ×
-                  </span>
-                </div>
-              ))}
-              {themeProcesses.length === 0 && (
+              {themeProcesses.length > 0 ? (
+                themeProcesses.map((process) => (
+                  <div key={process.id} className="popup-process-item">
+                    <span>{process.title || process.name}</span>
+                    <span
+                      className="popup-process-remove"
+                      onClick={(e) =>
+                        handleRemoveFromThemeClick(theme.id, process.id)
+                      }
+                    >
+                      ×
+                    </span>
+                  </div>
+                ))
+              ) : (
                 <div className="text-gray-400 text-center py-4">
                   Keine Prozesse in dieser Gruppe
                 </div>
