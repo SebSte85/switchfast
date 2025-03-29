@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" id="switch">
+  <rect width="20" height="12" x="2" y="6" fill="#78d97c" rx="6" ry="6" class="colorff7f58 svgShape"></rect>
+  <path fill="#2d2d3f" d="M15.58,14.33c-.2,0-.39-.08-.53-.22l-1.58-1.58c-.29-.29-.29-.77,0-1.06s.77-.29,1.06,0l.98,.98,1.9-2.5c.25-.33,.72-.4,1.05-.14,.33,.25,.39,.72,.14,1.05l-2.42,3.18c-.13,.17-.33,.28-.55,.29-.02,0-.03,0-.05,0Z" class="color064bde svgShape"></path>
+  <circle cx="8" cy="12" r="3" fill="#2d2d3f" class="color064bde svgShape"></circle>
+</svg>

@@ -946,6 +946,22 @@
     -webkit-app-region: drag; /* Macht die Titelleiste draggable */
   }
 
+  .app-brand {
+    @apply flex items-center ml-2;
+    height: 100%;
+    -webkit-app-region: drag;
+  }
+
+  .app-logo {
+    @apply text-[#78d97c] mr-1.5;
+    display: flex;
+    align-items: center;
+  }
+
+  .app-name {
+    @apply text-sm font-semibold text-[#78d97c] tracking-wide;
+  }
+
   .drag-region {
     @apply flex-grow h-full;
   }
@@ -1000,6 +1016,57 @@
   .loading-text {
     @apply text-lg font-medium mb-4 text-[#78d97c];
     animation: pulse 1.5s infinite;
+  }
+
+  /* Neue Prozess-ähnliche Ladeanimation */
+  .loading-process-item {
+    @apply flex items-center justify-between bg-[#1a1a24] border-none rounded-lg py-3 px-5 transition-all;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    margin: 10px auto;
+    position: relative;
+    width: 80%;
+    max-width: 500px;
+    height: 60px;
+    overflow: hidden;
+  }
+
+  .loading-process-item::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='4' cy='4' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='12' cy='4' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='20' cy='4' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='4' cy='12' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='12' cy='12' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='20' cy='12' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='4' cy='20' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='12' cy='20' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3Ccircle cx='20' cy='20' r='1.5' fill='%2378d97c' fill-opacity='0.2'/%3E%3C/svg%3E")
+      repeat;
+    opacity: 1;
+    z-index: 1;
+  }
+
+  .loading-process-item::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(120, 217, 124, 0.2) 40%,
+      rgba(120, 217, 124, 0.3) 50%,
+      rgba(120, 217, 124, 0.2) 60%,
+      transparent 100%
+    );
+    animation: loading-sweep 2s infinite linear;
+    z-index: 2;
+  }
+
+  @keyframes loading-sweep {
+    0% {
+      transform: translateX(0%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
   }
 
   .loading-spinner {

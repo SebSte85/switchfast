@@ -69,6 +69,8 @@ const ProcessTree: React.FC<ProcessTreeProps> = ({
   };
 
   const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     e.currentTarget.classList.remove("dragging");
   };
 
@@ -151,9 +153,11 @@ const ProcessTree: React.FC<ProcessTreeProps> = ({
                         );
                         e.currentTarget.classList.add("dragging");
                       }}
-                      onDragEnd={(e) =>
-                        e.currentTarget.classList.remove("dragging")
-                      }
+                      onDragEnd={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.currentTarget.classList.remove("dragging");
+                      }}
                     >
                       <span className="window-title">{window.title}</span>
                       <span className="process-drag-handle">

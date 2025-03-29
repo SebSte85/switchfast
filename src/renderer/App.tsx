@@ -577,6 +577,17 @@ const App: React.FC = () => {
       className={`app-container-simple ${compactMode ? "compact-mode" : ""}`}
     >
       <div className="custom-titlebar">
+        <div className="app-brand">
+          <div className="app-logo">
+            <img
+              src="../assets/logo.svg"
+              width="16"
+              height="16"
+              alt="Switchfast Logo"
+            />
+          </div>
+          <div className="app-name">switchfast</div>
+        </div>
         <div className="drag-region"></div>
         <div className="window-controls">
           <button
@@ -627,17 +638,8 @@ const App: React.FC = () => {
       </div>
       {loading ? (
         <div className="loading-animation">
-          <div className="loading-spinner">
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-          </div>
           <div className="loading-text">Lade Anwendungen...</div>
+          <div className="loading-process-item"></div>
         </div>
       ) : (
         <ApplicationList

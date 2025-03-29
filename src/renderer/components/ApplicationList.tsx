@@ -391,9 +391,21 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     const theme = themes.find((t) => t.id === showProcessPopup);
     if (!theme) return null;
 
-    const themeProcesses = applications.filter((app) =>
-      theme.applications.includes(app.id)
-    );
+    const themeProcesses = applications.filter((app) => {
+      // Check if the process ID is in the theme applications
+      if (theme.applications.includes(app.id)) {
+        return true;
+      }
+
+      // Check for window handles - if any window's hwnd is included in the theme applications
+      if (app.windows && app.windows.length > 0) {
+        return app.windows.some((window) =>
+          theme.applications.includes(`w${window.hwnd}`)
+        );
+      }
+
+      return false;
+    });
 
     return (
       <div className="process-popup-overlay" onClick={handleCloseProcessPopup}>

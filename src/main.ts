@@ -66,6 +66,7 @@ function createWindow() {
     frame: false,
     backgroundColor: "#414159",
     alwaysOnTop: compactMode,
+    title: "switchfast",
   });
 
   // Menüleiste komplett entfernen
@@ -141,7 +142,7 @@ function createTray() {
       },
     ]);
 
-    tray.setToolTip("Work Focus Manager");
+    tray.setToolTip("switchfast");
     tray.setContextMenu(contextMenu);
 
     tray.on("click", () => {
@@ -680,102 +681,200 @@ async function minimizeAllExcept(exceptProcessId: number): Promise<boolean> {
 /**
  * Minimiert alle Fenster außer die angegebenen Apps und stellt diese wieder her
  */
-async function showDesktopExceptApps(
+export async function showDesktopExceptApps(
   appIdsToProtect: number[]
 ): Promise<boolean> {
   try {
-    // Füge die Process ID unserer Electron App hinzu
-    const ourProcessId = process.pid;
-    const protectedIds = [...appIdsToProtect, ourProcessId];
+    console.log(`[SHOW_DESKTOP] Schütze Apps: ${appIdsToProtect.join(", ")}`);
 
-    // Sammle alle zu schützenden Prozess-IDs (normale Prozesse) und Fenster-Handles (für Subprozesse)
-    const protectedProcessIds = protectedIds.filter((id) => id < 100000); // Heuristik: Prozess-IDs sind in der Regel kleiner
-    const protectedWindowHandles = protectedIds.filter((id) => id >= 100000); // Heuristik: Fenster-Handles sind in der Regel größer
+    // Teile die IDs in PIDs und Fenster-Handles auf
+    const protectedPids = appIdsToProtect.filter((id) => id < 100000);
+    const protectedHandles = appIdsToProtect.filter((id) => id >= 100000);
 
-    // PowerShell-Skript, das alle Fenster minimiert außer die angegebenen
-    const psScript = `
-      Add-Type @"
+    console.log(`[SHOW_DESKTOP] Geschützte PIDs: ${protectedPids.join(", ")}`);
+    console.log(
+      `[SHOW_DESKTOP] Geschützte Fenster: ${protectedHandles.join(", ")}`
+    );
+
+    // Für PIDs: hole alle zugehörigen Fenster-Handles
+    let allWindowsFromPids: number[] = [];
+    if (protectedPids.length > 0) {
+      const windowsScript = `
+        Add-Type @"
         using System;
         using System.Runtime.InteropServices;
-        using System.Collections.Generic;
-        public class Win32 {
+        using System.Text;
+        public class WindowUtils {
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+            [DllImport("user32.dll", SetLastError=true)]
+            public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+            public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        }
+"@
+
+        $protectedPids = @(${protectedPids.join(",")})
+        $windows = New-Object System.Collections.ArrayList
+
+        $enumWindowCallback = {
+            param(
+                [IntPtr]$hwnd,
+                [IntPtr]$lParam
+            )
+
+            $processId = 0
+            [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
+            
+            if ($protectedPids -contains $processId) {
+                [void]$windows.Add($hwnd.ToInt64())
+            }
+            
+            return $true
+        }
+
+        [WindowUtils]::EnumWindows($enumWindowCallback, [IntPtr]::Zero)
+        $windows -join ","
+      `;
+
+      const windowsResult = await runPowerShellCommand(windowsScript);
+      if (windowsResult.trim()) {
+        allWindowsFromPids = windowsResult
+          .split(",")
+          .map((h) => parseInt(h.trim()))
+          .filter((id) => !isNaN(id)); // Filtere NaN-Werte heraus
+        console.log(
+          `[SHOW_DESKTOP] Fenster von geschützten PIDs: ${allWindowsFromPids.join(
+            ", "
+          )}`
+        );
+      }
+    }
+
+    // Kombiniere alle zu schützenden Fenster-Handles
+    const allProtectedWindows = [...protectedHandles, ...allWindowsFromPids];
+
+    // Füge eigene Anwendung zu den geschützten Fenstern hinzu
+    const ourProcessId = process.pid;
+
+    const protectedWindowsStr =
+      allProtectedWindows.length > 0 ? allProtectedWindows.join(",") : "";
+
+    const psScript = `
+      Add-Type @"
+      using System;
+      using System.Runtime.InteropServices;
+      using System.Text;
+      public class WindowUtils {
+          [DllImport("user32.dll")]
+          [return: MarshalAs(UnmanagedType.Bool)]
+          public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
           [DllImport("user32.dll")]
           [return: MarshalAs(UnmanagedType.Bool)]
           public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-          
+
           [DllImport("user32.dll")]
           [return: MarshalAs(UnmanagedType.Bool)]
           public static extern bool IsWindowVisible(IntPtr hWnd);
 
-          [DllImport("user32.dll")]
-          public static extern bool SetForegroundWindow(IntPtr hWnd);
+          [DllImport("user32.dll", SetLastError = true)]
+          public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
 
-          [DllImport("user32.dll")]
-          public static extern bool BringWindowToTop(IntPtr hWnd);
-
-          [DllImport("user32.dll")]
-          public static extern bool SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
-          
-          [DllImport("user32.dll")]
+          [DllImport("user32.dll", SetLastError=true)]
           public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-        }
+          
+          [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+          public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+          public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+      }
 "@
 
-      # Hole alle Fenster
-      $windows = Get-Process | Where-Object {$_.MainWindowHandle -ne 0} | ForEach-Object {
-        @{
-          Id = $_.Id
-          Handle = $_.MainWindowHandle
-          Title = $_.MainWindowTitle
-        }
-      }
-
-      # IDs der zu schützenden Apps (Prozess-IDs)
-      $protectedProcessIds = @(${protectedProcessIds.join(",")})
+      $protectedWindows = @(${protectedWindowsStr})
+      $ourProcessId = ${ourProcessId}
       
-      # Handles der zu schützenden Fenster
-      $protectedWindowHandles = @(${protectedWindowHandles.join(",")})
-
-      # Minimiere zuerst alle nicht geschützten Fenster (SW_MINIMIZE = 6)
-      $windows | ForEach-Object {
-        $procId = $_.Id
-        $handle = $_.Handle
-        
-        # Prüfe ob es ein geschützter Prozess oder ein geschütztes Fenster ist
-        $isProtectedProcess = $protectedProcessIds -contains $procId
-        $isProtectedWindow = $protectedWindowHandles -contains $handle.ToInt64()
-        
-        if (-not ($isProtectedProcess -or $isProtectedWindow)) {
-          [Win32]::ShowWindow($handle, 6)
-        }
+      # Minimiere alle Fenster, außer geschützte
+      function ShowDesktop {
+          # Finde spezielle Fenster, die wir nicht minimieren sollten
+          $taskbarWindow = [WindowUtils]::FindWindow("Shell_TrayWnd", $null)
+          $progmanWindow = [WindowUtils]::FindWindow("Progman", $null)
+          
+          $minimizeAll = $false
+          $restoreProtected = $true
+          
+          # Enum Callback zum Minimieren von Fenstern
+          $enumCallback = {
+              param(
+                  [IntPtr]$hwnd,
+                  [IntPtr]$lParam
+              )
+              
+              # Prüfen, ob es sich um ein sichtbares Fenster handelt
+              if (![WindowUtils]::IsWindowVisible($hwnd)) {
+                  return $true
+              }
+              
+              # Spezielle Fenster-Klassen identifizieren (Desktop, Taskbar, etc.)
+              $classNameBuilder = New-Object System.Text.StringBuilder 256
+              [WindowUtils]::GetClassName($hwnd, $classNameBuilder, 256) | Out-Null
+              $className = $classNameBuilder.ToString()
+              
+              # Liste von speziellen Windows-System-Fenstern, die wir nicht minimieren wollen
+              $specialClasses = @("Progman", "WorkerW", "Shell_TrayWnd", "DV2ControlHost", "SysListView32", "FolderView")
+              
+              # Wenn es sich um ein System-/Desktop-Fenster handelt, überspringen
+              if ($specialClasses -contains $className -or 
+                  $hwnd -eq $taskbarWindow -or 
+                  $hwnd -eq $progmanWindow) {
+                  return $true
+              }
+              
+              # Überprüfe, ob das Fenster zu unserem eigenen Prozess gehört
+              $processId = 0
+              [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
+              $isOurProcess = $processId -eq $ourProcessId
+              
+              if ($protectedWindows -contains $hwnd.ToInt64() -or $isOurProcess) {
+                  # Stelle geschützte Fenster wieder her (SW_RESTORE = 9)
+                  if ($restoreProtected) {
+                      [void][WindowUtils]::ShowWindow($hwnd, 9)
+                  }
+              } else {
+                  # Minimiere andere Fenster (SW_MINIMIZE = 6)
+                  if ($minimizeAll) {
+                      [void][WindowUtils]::ShowWindow($hwnd, 6)
+                  }
+              }
+              
+              return $true
+          }
+          
+          # Alle Fenster minimieren außer die geschützten
+          $minimizeAll = $true
+          $restoreProtected = $false
+          [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
+          
+          # Geschützte Fenster wiederherstellen
+          $minimizeAll = $false
+          $restoreProtected = $true
+          [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
       }
-
-      # Warte kurz, damit Windows Zeit hat, die Fenster zu minimieren
-      Start-Sleep -Milliseconds 100
-
-      # Stelle geschützte Fenster wieder her und bringe sie in den Vordergrund
-      $windows | ForEach-Object {
-        $procId = $_.Id
-        $handle = $handle = $_.Handle
-        
-        # Prüfe ob es ein geschützter Prozess oder ein geschütztes Fenster ist
-        $isProtectedProcess = $protectedProcessIds -contains $procId
-        $isProtectedWindow = $protectedWindowHandles -contains $handle.ToInt64()
-        
-        if ($isProtectedProcess -or $isProtectedWindow) {
-          # SW_RESTORE = 9
-          [Win32]::ShowWindow($handle, 9)
-          [Win32]::SetForegroundWindow($handle)
-          [Win32]::BringWindowToTop($handle)
-          [Win32]::SwitchToThisWindow($handle, $true)
-          Start-Sleep -Milliseconds 50
-        }
-      }
+      
+      ShowDesktop
     `;
 
     const result = await runPowerShellCommand(psScript);
+    console.log(
+      `[SHOW_DESKTOP] PowerShell-Ausgabe: ${result.substring(0, 500)}${
+        result.length > 500 ? "..." : ""
+      }`
+    );
     return true;
   } catch (error) {
+    console.error(`[SHOW_DESKTOP] Fehler: ${error}`);
     return false;
   }
 }
@@ -1067,9 +1166,40 @@ function setupIpcHandlers() {
   ipcMain.on(
     "toggle-compact-mode",
     (_, isCompact: boolean, groupCount: number) => {
+      // Berechne dynamische Breite basierend auf Gruppenanzahl
+      let width = 300; // Mindestbreite
+      if (isCompact && groupCount > 0) {
+        // Pro Gruppe etwa 120px, aber maximal 4 Gruppen pro Zeile
+        const groupsPerRow = Math.min(groupCount, 4);
+        width = Math.max(300, groupsPerRow * 120 + 80); // 80px für Padding/Margins
+      }
+
+      // Neue Fenstergröße für Kompaktmodus
+      const newSize = isCompact
+        ? { width, height: 120, alwaysOnTop: true }
+        : { width: 600, height: 680, alwaysOnTop: false };
+
+      // Fenstereigenschaften anpassen und Übergang berücksichtigen
       if (mainWindow) {
-        const height = isCompact ? Math.min(60 + groupCount * 40, 300) : 600;
-        mainWindow.setSize(400, height);
+        // Aktiviere/deaktiviere "immer im Vordergrund" sofort
+        mainWindow.setAlwaysOnTop(newSize.alwaysOnTop);
+
+        // Verzögere die Größenänderung leicht, damit die CSS-Transition sichtbar ist
+        setTimeout(() => {
+          if (mainWindow) {
+            mainWindow.setSize(newSize.width, newSize.height, true);
+
+            // Wenn Kompaktmodus aktiviert wird, positioniere das Fenster in der unteren rechten Ecke
+            if (isCompact) {
+              const { width: screenWidth, height: screenHeight } =
+                require("electron").screen.getPrimaryDisplay().workAreaSize;
+              const xPosition = screenWidth - newSize.width - 20; // 20px Abstand vom Rand
+              const yPosition = screenHeight - newSize.height - 20; // 20px Abstand vom Rand
+
+              mainWindow.setPosition(xPosition, yPosition);
+            }
+          }
+        }, 50); // Kleine Verzögerung für bessere Animation
       }
     }
   );
@@ -1110,33 +1240,6 @@ app.on("window-all-closed", () => {
   }
 });
 
-// Toggle zwischen Kompakt- und Normalansicht
-ipcMain.on("toggle-compact-mode", (_, isCompact, groupCount) => {
-  // Berechne dynamische Breite basierend auf Gruppenanzahl
-  let width = 300; // Mindestbreite
-  if (isCompact && groupCount > 0) {
-    // Pro Gruppe etwa 120px, aber maximal 4 Gruppen pro Zeile
-    const groupsPerRow = Math.min(groupCount, 4);
-    width = Math.max(300, groupsPerRow * 120 + 80); // 80px für Padding/Margins
-  }
-
-  // Neue Fenstergröße für Kompaktmodus
-  const newSize = isCompact
-    ? { width, height: 120, alwaysOnTop: true }
-    : { width: 600, height: 680, alwaysOnTop: false };
-
-  // Fenstereigenschaften anpassen und Übergang berücksichtigen
-  if (mainWindow) {
-    // Aktiviere/deaktiviere "immer im Vordergrund" sofort
-    mainWindow.setAlwaysOnTop(newSize.alwaysOnTop);
-
-    // Verzögere die Größenänderung leicht, damit die CSS-Transition sichtbar ist
-    setTimeout(() => {
-      mainWindow?.setSize(newSize.width, newSize.height, true);
-    }, 50); // Kleine Verzögerung für bessere Animation
-  }
-});
-
 /**
  * Ruft alle sichtbaren Fenster mit ihren Titeln und Process IDs ab
  */
@@ -1169,6 +1272,9 @@ async function getWindows(): Promise<WindowInfo[]> {
 
             [DllImport("user32.dll")]
             public static extern IntPtr GetParent(IntPtr hWnd);
+
+            [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+            public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
             public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
