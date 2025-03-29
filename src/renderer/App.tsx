@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ipcRenderer } from "electron";
 import "./styles/index.css";
 import ApplicationList from "./components/ApplicationList";
-import { ProcessInfo, Theme } from "../types";
+import { ProcessInfo, Theme, WindowInfo } from "../types";
 
 const App: React.FC = () => {
   const [applications, setApplications] = useState<ProcessInfo[]>([]);
@@ -15,16 +15,9 @@ const App: React.FC = () => {
 
   // Laden der laufenden Anwendungen
   useEffect(() => {
-    console.log("App - Lade Anwendungen vom Main-Prozess");
     const fetchApplications = async () => {
       try {
         const apps = await ipcRenderer.invoke("get-running-applications");
-        console.log(
-          "App - Erhaltene Anwendungen:",
-          apps?.length || 0,
-          JSON.stringify(apps?.slice(0, 3), null, 2),
-          apps?.length > 3 ? "... und weitere" : ""
-        );
 
         // Erstelle eine Map aller App-IDs (inkl. Kinder)
         const getAllAppIds = (app: ProcessInfo): number[] => {
@@ -37,17 +30,33 @@ const App: React.FC = () => {
           return ids;
         };
 
+        // Get all process IDs
         const runningAppIds = new Set(
           apps.flatMap((app: ProcessInfo) => getAllAppIds(app))
         );
 
-        // Cleanup themes by removing only truly closed applications
+        // Get all window handles
+        const runningWindowIds = new Set<number>();
+        apps.forEach((app: ProcessInfo) => {
+          if (app.windows) {
+            app.windows.forEach((window: WindowInfo) => {
+              runningWindowIds.add(window.hwnd);
+            });
+          }
+        });
+
+        // Cleanup themes by removing only truly closed applications and windows
         setThemes((prevThemes) =>
           prevThemes.map((theme) => ({
             ...theme,
-            applications: theme.applications.filter((appId) =>
-              runningAppIds.has(appId)
-            ),
+            applications: theme.applications.filter((appId) => {
+              // If this is a window handle (typically larger numbers)
+              if (typeof appId === "number" && appId > 100000) {
+                return runningWindowIds.has(appId);
+              }
+              // If this is a process ID
+              return runningAppIds.has(appId);
+            }),
           }))
         );
 
@@ -382,56 +391,84 @@ const App: React.FC = () => {
   // Modified to support multiple themes
   const applyFocusMode = async (themeId: string, active: boolean) => {
     if (!active) {
-      console.log("Focus Mode deaktiviert");
       return;
     }
 
     // Finde das aktuelle Theme
     const currentTheme = themes.find((t) => t.id === themeId);
     if (!currentTheme) {
-      console.log("Theme nicht gefunden");
       return;
     }
 
-    console.log(`Aktiviere exklusiv Theme: ${currentTheme.name}`);
+    // Sammle alle zu schützenden IDs
+    let appIdsToProtect: number[] = [];
 
-    // Verwende nur die Apps des aktuellen Themes
-    const appIdsToProtect = currentTheme.applications;
+    // 1. Sammle reguläre Prozess-IDs
+    currentTheme.applications.forEach((id) => {
+      // Wenn id ein number ist, füge es hinzu
+      if (typeof id === "number") {
+        appIdsToProtect.push(id);
+      }
+    });
+
+    // 2. Sammle Fenster-Handles aus dem windows-Array, falls vorhanden
+    if (
+      (currentTheme as any).windows &&
+      (currentTheme as any).windows.length > 0
+    ) {
+      console.log(
+        `[WINDOWS_DEBUG] Theme hat ${
+          (currentTheme as any).windows.length
+        } Fenster`
+      );
+
+      (currentTheme as any).windows.forEach((window: WindowInfo) => {
+        console.log(
+          `[WINDOWS_DEBUG] Fenster: hwnd=${window.hwnd}, PID=${window.processId}, Titel="${window.title}"`
+        );
+
+        if (window.hwnd && !appIdsToProtect.includes(window.hwnd)) {
+          appIdsToProtect.push(window.hwnd);
+        }
+        if (window.processId && !appIdsToProtect.includes(window.processId)) {
+          appIdsToProtect.push(window.processId);
+        }
+      });
+    } else {
+      console.log(`[WINDOWS_DEBUG] Theme hat keine Fenster im windows-Array`);
+    }
+
+    // 3. Prüfe, ob wir überhaupt etwas zu schützen haben
+    console.log(
+      `[FOCUS_MODE] Zu schützende IDs: ${appIdsToProtect.join(", ")}`
+    );
 
     if (appIdsToProtect.length === 0) {
       alert(
         "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert."
       );
-      console.log("Keine Anwendungen in der Gruppe, nichts zu minimieren");
       return;
     }
 
     try {
       // Neue Methode: "Show Desktop" und dann Apps wiederherstellen
       console.log(
-        `Sende Anfrage für 'Show Desktop except Apps' für ${appIdsToProtect.length} Anwendungen aus Theme "${currentTheme.name}"...`
+        `[FOCUS_MODE] Sende ${appIdsToProtect.length} IDs an show-desktop-except`
       );
       const success = await ipcRenderer.invoke(
         "show-desktop-except",
         appIdsToProtect
       );
+      console.log(`[FOCUS_MODE] show-desktop-except Ergebnis: ${success}`);
 
-      if (success) {
-        console.log("'Show Desktop'-Funktion erfolgreich ausgeführt");
-      } else {
-        console.warn("Problem beim Ausführen der 'Show Desktop'-Funktion");
-
+      if (!success) {
         // Fallback auf die alten Methoden mit dem einzelnen aktiven Theme
         if (currentTheme) {
           fallbackFocusMode(currentTheme);
         }
       }
     } catch (error) {
-      console.error(
-        "Fehler beim Ausführen der 'Show Desktop'-Funktion:",
-        error
-      );
-
+      console.error(`[FOCUS_MODE] Fehler: ${error}`);
       // Fallback auf die alten Methoden
       if (currentTheme) {
         fallbackFocusMode(currentTheme);

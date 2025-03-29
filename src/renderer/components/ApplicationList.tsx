@@ -211,13 +211,41 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, themeId: string) => {
     e.preventDefault();
-    const draggedApp = e.dataTransfer.getData("application");
-    if (draggedApp && onAddToTheme) {
-      onAddToTheme(
-        themeId,
-        draggedApp.startsWith("w") ? draggedApp : parseInt(draggedApp)
-      );
+    const appIdStr = e.dataTransfer.getData("application");
+
+    // Check if we have a valid application ID
+    if (appIdStr && onAddToTheme) {
+      // Handle window IDs (prefixed with 'w') and process IDs
+      if (appIdStr.startsWith("w")) {
+        // This is a window handle - we need to extract the hwnd and get window info
+        const hwnd = parseInt(appIdStr.substring(1));
+
+        // Find the window in the applications list
+        let windowInfo = null;
+        for (const app of applications) {
+          if (app.windows) {
+            const foundWindow = app.windows.find((w) => w.hwnd === hwnd);
+            if (foundWindow) {
+              windowInfo = foundWindow;
+              break;
+            }
+          }
+        }
+
+        if (windowInfo) {
+          // Call the IPC directly to ensure window is properly saved
+          ipcRenderer.invoke("add-windows-to-theme", themeId, [windowInfo]);
+
+          // Also update the UI state
+          onAddToTheme(themeId, hwnd);
+        }
+      } else {
+        // This is a process ID - handle it normally
+        const appId = parseInt(appIdStr);
+        onAddToTheme(themeId, appId);
+      }
     }
+
     setDraggedOverTheme(null);
   };
 
@@ -258,8 +286,36 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   };
 
   const handleShortcutKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Verarbeite Tastenkombinationen für alle Tasten außer Enter (das wird nur zum Bestätigen verwendet)
+    if (e.key !== "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Ignoriere reine Modifier-Tasten
+      if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) {
+        return;
+      }
+
+      // Baue den Shortcut-String
+      let shortcut = "";
+      if (e.ctrlKey) shortcut += "Ctrl+";
+      if (e.altKey) shortcut += "Alt+";
+      if (e.shiftKey) shortcut += "Shift+";
+      if (e.metaKey) shortcut += "Meta+";
+
+      // Taste mit besonderem Format für spezielle Tasten
+      const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+      shortcut += key;
+
+      // Aktualisiere den Shortcut
+      setCurrentShortcut(shortcut);
+    }
+
+    // Speichern beim Drücken von Enter
     if (e.key === "Enter" && editingShortcut) {
       e.preventDefault();
+      e.stopPropagation();
+
       if (onUpdateTheme) {
         const theme = themes.find((t) => t.id === editingShortcut);
         if (theme) {
@@ -269,7 +325,19 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           });
         }
       }
-      setEditingShortcut(null);
+
+      // Registriere den Shortcut sofort beim Main-Prozess
+      if (editingShortcut && currentShortcut) {
+        ipcRenderer.invoke("register-shortcut", {
+          themeId: editingShortcut,
+          shortcut: currentShortcut,
+        });
+      }
+
+      // Warte kurz mit dem Beenden des Edit-Modus
+      setTimeout(() => {
+        setEditingShortcut(null);
+      }, 10);
     }
   };
 
@@ -502,7 +570,13 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                     )}
                     <div className="group-item-actions">
                       {editingShortcut === theme.id ? (
-                        <div className="shortcut-editor">
+                        <div
+                          className="shortcut-editor"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
                           <input
                             type="text"
                             className="shortcut-input"
@@ -510,6 +584,10 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                             onChange={(e) => setCurrentShortcut(e.target.value)}
                             onKeyDown={handleShortcutKeyDown}
                             placeholder="Tastenkombination drücken"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
                             autoFocus
                           />
                         </div>
