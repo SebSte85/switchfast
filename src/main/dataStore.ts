@@ -80,13 +80,40 @@ export class DataStore {
   }
 
   updateTheme(themeId: string, updatedTheme: Theme): void {
+    console.log(`[DataStore] Updating theme ${themeId}:`, updatedTheme);
+
     const index = this.themes.findIndex((t) => t.id === themeId);
     if (index !== -1) {
-      const existingWindows = this.themes[index].windows || [];
+      const existingTheme = this.themes[index];
+      console.log(`[DataStore] Existing theme:`, existingTheme);
+
+      // Behalte existierende Fenster-Handles
+      const existingWindowHandles = (existingTheme.applications || []).filter(
+        (id) => id >= 100000
+      );
+      console.log(
+        `[DataStore] Existing window handles:`,
+        existingWindowHandles
+      );
+
+      // Neue Anwendungs-IDs (keine Fenster-Handles)
+      const newApplications = (updatedTheme.applications || []).filter(
+        (id) => id < 100000
+      );
+      console.log(`[DataStore] New applications:`, newApplications);
+
+      // Kombiniere existierende Fenster mit neuen Anwendungen
+      const combinedApplications = [
+        ...newApplications,
+        ...existingWindowHandles,
+      ];
+      console.log(`[DataStore] Combined applications:`, combinedApplications);
+
       this.themes[index] = {
         ...updatedTheme,
-        windows: existingWindows,
+        applications: combinedApplications,
       };
+
       this.saveThemes();
     }
   }
@@ -97,12 +124,17 @@ export class DataStore {
   }
 
   addWindowsToTheme(themeId: string, newWindows: WindowInfo[]) {
+    console.log(`[DataStore] Adding windows to theme ${themeId}:`, newWindows);
+
     const themes = this.getThemes();
     const theme = themes.find((t) => t.id === themeId);
 
     if (!theme) {
+      console.log(`[DataStore] Theme ${themeId} not found`);
       return;
     }
+
+    console.log(`[DataStore] Current theme state:`, theme);
 
     // Initialize arrays if they don't exist
     if (!theme.windows) theme.windows = [];
@@ -113,6 +145,7 @@ export class DataStore {
     newWindows.forEach((window) => {
       // Check if window already exists
       const exists = theme.windows!.some((w) => w.hwnd === window.hwnd);
+      console.log(`[DataStore] Window ${window.hwnd} exists? ${exists}`);
 
       if (!exists) {
         // Add window to windows array
@@ -125,15 +158,20 @@ export class DataStore {
         // Add process ID to processes array if not already there
         if (!theme.processes.includes(window.processId)) {
           theme.processes.push(window.processId);
+          console.log(`[DataStore] Added process ID ${window.processId}`);
         }
 
-        // CRITICAL FIX: Also add window handle to applications array to prevent its removal during refresh
-        // For subprocess windows we need to add the window handle to applications for proper tracking
+        // Add window handle to applications array
         if (!theme.applications.includes(window.hwnd)) {
           theme.applications.push(window.hwnd);
+          console.log(
+            `[DataStore] Added window handle ${window.hwnd} to applications`
+          );
         }
       }
     });
+
+    console.log(`[DataStore] Final theme state:`, theme);
 
     // Save changes
     this.saveThemes();

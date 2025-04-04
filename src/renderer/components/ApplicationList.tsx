@@ -121,33 +121,48 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
         const isAssigned = themes.some((theme) =>
           theme.applications.includes(currentApp.id)
         );
+
+        // Prüfe, ob eines der Fenster der App in einer Gruppe ist
+        const assignedWindows =
+          currentApp.windows?.filter((window) =>
+            themes.some((theme) =>
+              theme.applications.some((appId) => {
+                const numericId =
+                  typeof appId === "string" ? parseInt(appId, 10) : appId;
+                return numericId === window.hwnd;
+              })
+            )
+          ) || [];
+
+        // Wenn die Haupt-App selbst zugewiesen ist, verstecke sie komplett
         if (isAssigned) return null;
 
-        // Wenn die App Kinder hat, filtere diese rekursiv
-        if (currentApp.children && currentApp.children.length > 0) {
-          const filteredChildren = currentApp.children
-            .map((child) => filterAssignedApps(child))
-            .filter((child): child is ProcessInfo => child !== null);
+        // Erstelle eine neue App-Kopie mit nur den nicht zugewiesenen Fenstern
+        const unassignedWindows = currentApp.windows?.filter(
+          (window) => !assignedWindows.includes(window)
+        );
 
-          // Wenn nach dem Filtern noch Kinder übrig sind, gib die App mit gefilterten Kindern zurück
-          if (filteredChildren.length > 0) {
-            return {
-              ...currentApp,
-              children: filteredChildren,
-            };
-          }
-          // Wenn keine Kinder mehr übrig sind und die App selbst nicht zugeordnet ist,
-          // zeige sie ohne children an
-          else if (!isAssigned) {
-            return {
-              ...currentApp,
-              children: undefined,
-            };
-          }
+        // Wenn die App Kinder hat, filtere diese rekursiv
+        const filteredChildren = currentApp.children
+          ?.map((child) => filterAssignedApps(child))
+          .filter((child): child is ProcessInfo => child !== null);
+
+        // Wenn weder Fenster noch Kinder übrig sind und die App selbst zugewiesen ist,
+        // zeige sie nicht an
+        if (
+          (!unassignedWindows || unassignedWindows.length === 0) &&
+          (!filteredChildren || filteredChildren.length === 0) &&
+          isAssigned
+        ) {
+          return null;
         }
 
-        // Wenn die App keine Kinder hat und nicht zugeordnet ist, zeige sie an
-        return isAssigned ? null : currentApp;
+        // Gib die App mit gefilterten Fenstern und Kindern zurück
+        return {
+          ...currentApp,
+          windows: unassignedWindows,
+          children: filteredChildren?.length ? filteredChildren : undefined,
+        };
       };
 
       // Filtere die App und ihre Unterprozesse

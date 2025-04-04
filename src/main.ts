@@ -20,6 +20,7 @@ import { stderr } from "process";
 import { DataStore } from "./main/dataStore";
 import Store from "electron-store";
 import { autoUpdater } from "electron-updater";
+import * as electronLog from "electron-log";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -657,70 +658,100 @@ export async function showDesktopExceptApps(
   appIdsToProtect: number[]
 ): Promise<boolean> {
   try {
-    // Teile die IDs in PIDs und Fenster-Handles auf
-    const protectedPids = appIdsToProtect.filter((id) => id < 100000);
-    const protectedHandles = appIdsToProtect.filter((id) => id >= 100000);
+    console.log(
+      "[showDesktopExceptApps] Starting with protected IDs:",
+      appIdsToProtect
+    );
 
-    // Für PIDs: hole alle zugehörigen Fenster-Handles
-    let allWindowsFromPids: number[] = [];
-    if (protectedPids.length > 0) {
-      const windowsScript = `
-        Add-Type @"
-        using System;
-        using System.Runtime.InteropServices;
-        using System.Text;
-        public class WindowUtils {
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    // Hole zuerst alle Fenster, um die korrekten PIDs zu den Handles zu bekommen
+    const windowsScript = `
+      Add-Type @"
+      using System;
+      using System.Runtime.InteropServices;
+      using System.Text;
+      public class WindowUtils {
+          [DllImport("user32.dll")]
+          [return: MarshalAs(UnmanagedType.Bool)]
+          public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
-            [DllImport("user32.dll", SetLastError=true)]
-            public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+          [DllImport("user32.dll", SetLastError=true)]
+          public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
-            public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-        }
+          public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+      }
 "@
 
-        $protectedPids = @(${protectedPids.join(",")})
-        $windows = New-Object System.Collections.ArrayList
+      $windows = New-Object System.Collections.ArrayList
 
-        $enumWindowCallback = {
-            param(
-                [IntPtr]$hwnd,
-                [IntPtr]$lParam
-            )
+      $enumWindowCallback = {
+          param(
+              [IntPtr]$hwnd,
+              [IntPtr]$lParam
+          )
 
-            $processId = 0
-            [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
-            
-            if ($protectedPids -contains $processId) {
-                [void]$windows.Add($hwnd.ToInt64())
-            }
-            
-            return $true
-        }
-
-        [WindowUtils]::EnumWindows($enumWindowCallback, [IntPtr]::Zero)
-        $windows -join ","
-      `;
-
-      const windowsResult = await runPowerShellCommand(windowsScript);
-      if (windowsResult.trim()) {
-        allWindowsFromPids = windowsResult
-          .split(",")
-          .map((h) => parseInt(h.trim()))
-          .filter((id) => !isNaN(id)); // Filtere NaN-Werte heraus
+          $processId = 0
+          [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
+          
+          [void]$windows.Add("$($hwnd.ToInt64())|$processId")
+          
+          return $true
       }
+
+      [WindowUtils]::EnumWindows($enumWindowCallback, [IntPtr]::Zero)
+      $windows -join ","
+    `;
+
+    const windowsResult = await runPowerShellCommand(windowsScript);
+    console.log(
+      "[showDesktopExceptApps] Window mapping result:",
+      windowsResult
+    );
+
+    // Parse die Window-zu-PID Mappings
+    const windowToPidMap = new Map<number, number>();
+    const pidToWindowsMap = new Map<number, number[]>();
+
+    if (windowsResult.trim()) {
+      windowsResult.split(",").forEach((mapping) => {
+        const [hwnd, pid] = mapping.split("|").map((n) => parseInt(n.trim()));
+        if (!isNaN(hwnd) && !isNaN(pid)) {
+          windowToPidMap.set(hwnd, pid);
+          if (!pidToWindowsMap.has(pid)) {
+            pidToWindowsMap.set(pid, []);
+          }
+          pidToWindowsMap.get(pid)!.push(hwnd);
+        }
+      });
     }
 
-    // Kombiniere alle zu schützenden Fenster-Handles
-    const allProtectedWindows = [...protectedHandles, ...allWindowsFromPids];
+    // Sammle alle zu schützenden Fenster
+    const allProtectedWindows = new Set<number>();
+
+    appIdsToProtect.forEach((id) => {
+      // Füge nur das spezifische Handle oder die spezifische PID hinzu
+      allProtectedWindows.add(id);
+    });
 
     // Füge eigene Anwendung zu den geschützten Fenstern hinzu
     const ourProcessId = process.pid;
+    console.log("[showDesktopExceptApps] Our process ID:", ourProcessId);
+    if (pidToWindowsMap.has(ourProcessId)) {
+      pidToWindowsMap
+        .get(ourProcessId)!
+        .forEach((hwnd) => allProtectedWindows.add(hwnd));
+    }
 
-    const protectedWindowsStr =
-      allProtectedWindows.length > 0 ? allProtectedWindows.join(",") : "";
+    const protectedWindowsArray = Array.from(allProtectedWindows);
+    console.log(
+      "[showDesktopExceptApps] All protected windows:",
+      protectedWindowsArray
+    );
+
+    const protectedWindowsStr = protectedWindowsArray.join(",");
+    console.log(
+      "[showDesktopExceptApps] Running PowerShell script with protected windows:",
+      protectedWindowsStr
+    );
 
     const psScript = `
       Add-Type @"
@@ -740,6 +771,10 @@ export async function showDesktopExceptApps(
           [return: MarshalAs(UnmanagedType.Bool)]
           public static extern bool IsWindowVisible(IntPtr hWnd);
 
+          [DllImport("user32.dll")]
+          [return: MarshalAs(UnmanagedType.Bool)]
+          public static extern bool IsIconic(IntPtr hWnd);
+
           [DllImport("user32.dll", SetLastError = true)]
           public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
 
@@ -750,11 +785,17 @@ export async function showDesktopExceptApps(
           public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
           public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+          public const int SW_MINIMIZE = 6;
+          public const int SW_RESTORE = 9;
       }
 "@
 
       $protectedWindows = @(${protectedWindowsStr})
       $ourProcessId = ${ourProcessId}
+      
+      Write-Host "[PowerShell] Starting ShowDesktop with protected windows: $protectedWindows"
+      Write-Host "[PowerShell] Our process ID: $ourProcessId"
       
       # Minimiere alle Fenster, außer geschützte
       function ShowDesktop {
@@ -762,8 +803,7 @@ export async function showDesktopExceptApps(
           $taskbarWindow = [WindowUtils]::FindWindow("Shell_TrayWnd", $null)
           $progmanWindow = [WindowUtils]::FindWindow("Progman", $null)
           
-          $minimizeAll = $false
-          $restoreProtected = $true
+          Write-Host "[PowerShell] Found system windows - Taskbar: $taskbarWindow, Progman: $progmanWindow"
           
           # Enum Callback zum Minimieren von Fenstern
           $enumCallback = {
@@ -786,49 +826,50 @@ export async function showDesktopExceptApps(
               $specialClasses = @("Progman", "WorkerW", "Shell_TrayWnd", "DV2ControlHost", "SysListView32", "FolderView")
               
               # Wenn es sich um ein System-/Desktop-Fenster handelt, überspringen
-              if ($specialClasses -contains $className -or 
-                  $hwnd -eq $taskbarWindow -or 
-                  $hwnd -eq $progmanWindow) {
+              if ($specialClasses -contains $className -or $hwnd -eq $progmanWindow) {
+                  Write-Host "[PowerShell] Skipping system window: $className"
                   return $true
               }
               
               # Überprüfe, ob das Fenster zu unserem eigenen Prozess gehört
               $processId = 0
               [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
-              $isOurProcess = $processId -eq $ourProcessId
               
-              if ($protectedWindows -contains $hwnd.ToInt64() -or $isOurProcess) {
-                  # Stelle geschützte Fenster wieder her (SW_RESTORE = 9)
-                  if ($restoreProtected) {
-                      [void][WindowUtils]::ShowWindow($hwnd, 9)
+              # Wenn es sich um unsere eigene App oder ein geschütztes Fenster handelt
+              if ($processId -eq $ourProcessId -or $protectedWindows -contains $hwnd -or $protectedWindows -contains $processId) {
+                  Write-Host "[PowerShell] Protecting window: $hwnd (Process: $processId)"
+                  if ([WindowUtils]::IsIconic($hwnd)) {
+                      [WindowUtils]::ShowWindow($hwnd, [WindowUtils]::SW_RESTORE)
                   }
-              } else {
-                  # Minimiere andere Fenster (SW_MINIMIZE = 6)
-                  if ($minimizeAll) {
-                      [void][WindowUtils]::ShowWindow($hwnd, 6)
-                  }
+                  return $true
               }
               
+              # Minimiere alle anderen Fenster
+              Write-Host "[PowerShell] Minimizing window: $hwnd (Process: $processId)"
+              [WindowUtils]::ShowWindow($hwnd, [WindowUtils]::SW_MINIMIZE)
               return $true
           }
           
-          # Alle Fenster minimieren außer die geschützten
-          $minimizeAll = $true
-          $restoreProtected = $false
+          Write-Host "[PowerShell] Starting first pass - minimizing all windows"
           [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
           
-          # Geschützte Fenster wiederherstellen
-          $minimizeAll = $false
-          $restoreProtected = $true
+          Write-Host "[PowerShell] Starting second pass - restoring protected windows"
           [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
+          
+          Write-Host "[PowerShell] ShowDesktop completed"
       }
       
       ShowDesktop
     `;
 
     const result = await runPowerShellCommand(psScript);
+    console.log(
+      "[showDesktopExceptApps] PowerShell script completed with result:",
+      result
+    );
     return true;
   } catch (error) {
+    console.error("[showDesktopExceptApps] Error:", error);
     return false;
   }
 }
@@ -1180,6 +1221,19 @@ app.whenReady().then(() => {
 
   // Auto-Updater einrichten
   setupAutoUpdater();
+
+  // Register global shortcut to open DevTools
+  globalShortcut.register("CommandOrControl+Shift+I", () => {
+    if (mainWindow && !mainWindow.webContents.isDevToolsOpened()) {
+      mainWindow.webContents.openDevTools();
+    }
+  });
+
+  app.on("activate", () => {
+    if (!mainWindow) {
+      createWindow();
+    }
+  });
 });
 
 // Quit when all windows are closed, except on macOS
@@ -1234,28 +1288,24 @@ async function getWindows(): Promise<WindowInfo[]> {
                 try {
                     EnumWindows(delegate (IntPtr hWnd, IntPtr lParam) {
                         try {
-                            // Überprüfe, ob das Fenster sichtbar ist und kein Kind-Fenster
-                            if (IsWindowVisible(hWnd) && GetParent(hWnd) == IntPtr.Zero) {
+                            if (IsWindowVisible(hWnd)) {
                                 var builder = new StringBuilder(256);
                                 uint processId = 0;
 
                                 if (GetWindowThreadProcessId(hWnd, out processId) != 0) {
-                                    // Hole den Prozess aus dem Cache oder erstelle einen neuen
                                     Process process;
                                     if (!processCache.TryGetValue(processId, out process)) {
                                         try {
                                             process = Process.GetProcessById((int)processId);
                                             processCache[processId] = process;
                                         } catch {
-                                            return true; // Prozess nicht mehr verfügbar, überspringen
+                                            return true;
                                         }
                                     }
 
-                                    // Hole den Fenstertitel
                                     if (GetWindowText(hWnd, builder, 256) > 0) {
                                         string title = builder.ToString().Trim();
                                         
-                                        // Ignoriere leere Titel und Hilfsprozesse
                                         if (!string.IsNullOrEmpty(title) && 
                                             !title.EndsWith(".exe") &&
                                             !title.Contains("Program Manager") &&
@@ -1264,7 +1314,22 @@ async function getWindows(): Promise<WindowInfo[]> {
                                             !title.Contains("Settings") &&
                                             !title.Contains("Windows Shell Experience Host")) {
                                             
-                                            windows.Add(string.Format("{0}|{1}|{2}", hWnd, processId, title));
+                                            var classNameBuilder = new StringBuilder(256);
+                                            GetClassName(hWnd, classNameBuilder, 256);
+                                            string className = classNameBuilder.ToString();
+
+                                            bool isBrowserWindow = 
+                                                className.Contains("Chrome") || 
+                                                className.Contains("Mozilla") || 
+                                                className.Contains("Brave") ||
+                                                process.ProcessName.ToLower().Contains("brave") ||
+                                                process.ProcessName.ToLower().Contains("chrome") ||
+                                                process.ProcessName.ToLower().Contains("firefox");
+
+                                            IntPtr parentHwnd = GetParent(hWnd);
+                                            if (isBrowserWindow || parentHwnd == IntPtr.Zero) {
+                                                windows.Add(string.Format("{0}|{1}|{2}", hWnd, processId, title));
+                                            }
                                         }
                                     }
                                 }
@@ -1309,7 +1374,6 @@ async function getWindows(): Promise<WindowInfo[]> {
         };
       })
       .filter((window) => {
-        // Zusätzliche Filterung auf JavaScript-Seite
         return (
           window.title &&
           !window.title.endsWith(".exe") &&
@@ -1336,10 +1400,11 @@ async function getWindows(): Promise<WindowInfo[]> {
  * npm install electron-updater electron-log
  */
 function setupAutoUpdater() {
-  // Log-Ausgaben vom Updater (nur im Entwicklungsmodus)
+  // Konfiguriere den Auto-Updater Logger
   if (process.env.NODE_ENV === "development") {
-    autoUpdater.logger = require("electron-log");
-    autoUpdater.logger.transports.file.level = "info";
+    const log = require("electron-log");
+    autoUpdater.logger = log;
+    log.transports.file.level = "info";
   }
 
   // Updater-Events

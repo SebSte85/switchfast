@@ -14,67 +14,101 @@ const App: React.FC = () => {
   const [compactMode, setCompactMode] = useState<boolean>(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
-  // Laden der laufenden Anwendungen
-  useEffect(() => {
-    const fetchApplications = async () => {
-      try {
-        const apps = await ipcRenderer.invoke("get-running-applications");
+  // Refresh-Funktion mit useCallback
+  const fetchApplications = useCallback(async () => {
+    console.log("[REFRESH] --------------------------------");
+    console.log("[REFRESH] Starting refresh cycle");
+    try {
+      const apps = await ipcRenderer.invoke("get-running-applications");
+      console.log("[REFRESH] Got applications:", apps);
 
-        // Erstelle eine Map aller App-IDs (inkl. Kinder)
-        const getAllAppIds = (app: ProcessInfo): number[] => {
+      // Get all process IDs
+      const runningAppIds = new Set(
+        apps.flatMap((app: ProcessInfo) => {
           const ids = [app.id];
           if (app.children) {
             app.children.forEach((child: ProcessInfo) => {
-              ids.push(...getAllAppIds(child));
+              ids.push(child.id);
             });
           }
           return ids;
-        };
+        })
+      );
+      console.log("[REFRESH] Running app IDs:", Array.from(runningAppIds));
 
-        // Get all process IDs
-        const runningAppIds = new Set(
-          apps.flatMap((app: ProcessInfo) => getAllAppIds(app))
-        );
+      // Get all window handles
+      const runningWindowIds = new Set<number>();
+      apps.forEach((app: ProcessInfo) => {
+        if (app.windows) {
+          app.windows.forEach((window: WindowInfo) => {
+            runningWindowIds.add(window.hwnd);
+            console.log(
+              `[REFRESH] Found window: hwnd=${window.hwnd}, title=${window.title}`
+            );
+          });
+        }
+      });
+      console.log(
+        "[REFRESH] Running window IDs:",
+        Array.from(runningWindowIds)
+      );
 
-        // Get all window handles
-        const runningWindowIds = new Set<number>();
-        apps.forEach((app: ProcessInfo) => {
-          if (app.windows) {
-            app.windows.forEach((window: WindowInfo) => {
-              runningWindowIds.add(window.hwnd);
-            });
-          }
+      // Cleanup themes by removing only closed applications
+      setThemes((prevThemes) => {
+        console.log("[REFRESH] Previous themes:", prevThemes);
+        const updatedThemes = prevThemes.map((theme) => {
+          const filteredApps = theme.applications.filter((appId) => {
+            const numericId =
+              typeof appId === "string" ? parseInt(appId, 10) : appId;
+            console.log(
+              `[REFRESH] Checking app ID ${appId} in theme "${theme.name}"`
+            );
+
+            // Check if it's a window handle by checking if it exists in runningWindowIds
+            const isWindowHandle = runningWindowIds.has(numericId);
+            console.log(
+              `[REFRESH] Is window handle in runningWindowIds? ${isWindowHandle}`
+            );
+
+            // Check if it's a process ID by checking if it exists in runningAppIds
+            const isRunningApp = runningAppIds.has(numericId);
+            console.log(`[REFRESH] Is in runningAppIds? ${isRunningApp}`);
+
+            // Keep the ID if it's either a valid window handle or a running process
+            return isWindowHandle || isRunningApp;
+          });
+
+          console.log(
+            `[REFRESH] Theme "${theme.name}" after filtering:`,
+            filteredApps
+          );
+          return {
+            ...theme,
+            applications: filteredApps,
+          };
         });
 
-        // Cleanup themes by removing only truly closed applications and windows
-        setThemes((prevThemes) =>
-          prevThemes.map((theme) => ({
-            ...theme,
-            applications: theme.applications.filter((appId) => {
-              // If this is a window handle (typically larger numbers)
-              if (typeof appId === "number" && appId > 100000) {
-                return runningWindowIds.has(appId);
-              }
-              // If this is a process ID
-              return runningAppIds.has(appId);
-            }),
-          }))
-        );
+        console.log("[REFRESH] Updated themes:", updatedThemes);
+        return updatedThemes;
+      });
 
-        setApplications(apps || []);
-        setLoading(false);
-      } catch (error) {
-        console.error("App - Fehler beim Abrufen der Anwendungen:", error);
-        setLoading(false);
-      }
-    };
+      setApplications(apps || []);
+      setLoading(false);
+    } catch (error) {
+      console.error("[REFRESH] Error:", error);
+      setLoading(false);
+    }
+    console.log("[REFRESH] --------------------------------");
+  }, []); // Keine Abhängigkeit von themes mehr
 
+  // Laden der laufenden Anwendungen und Refresh-Intervall
+  useEffect(() => {
     fetchApplications();
 
     // Anwendungen alle 10 Sekunden aktualisieren
     const intervalId = setInterval(fetchApplications, 10000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [fetchApplications]);
 
   // Laden der gespeicherten Themes beim Start
   useEffect(() => {
