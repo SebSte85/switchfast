@@ -16,11 +16,18 @@ const App: React.FC = () => {
 
   // Refresh-Funktion mit useCallback
   const fetchApplications = useCallback(async () => {
-    console.log("[REFRESH] --------------------------------");
-    console.log("[REFRESH] Starting refresh cycle");
+    // Nur im Entwicklungsmodus detaillierte Logs ausgeben
+    if (process.env.NODE_ENV === "development") {
+      console.log("[REFRESH] --------------------------------");
+      console.log("[REFRESH] Starting refresh cycle");
+    }
+
     try {
       const apps = await ipcRenderer.invoke("get-running-applications");
-      console.log("[REFRESH] Got applications:", apps);
+
+      if (process.env.NODE_ENV === "development") {
+        console.log("[REFRESH] Got applications:", apps);
+      }
 
       // Get all process IDs
       const runningAppIds = new Set(
@@ -34,7 +41,10 @@ const App: React.FC = () => {
           return ids;
         })
       );
-      console.log("[REFRESH] Running app IDs:", Array.from(runningAppIds));
+
+      if (process.env.NODE_ENV === "development") {
+        console.log("[REFRESH] Running app IDs:", Array.from(runningAppIds));
+      }
 
       // Get all window handles
       const runningWindowIds = new Set<number>();
@@ -42,53 +52,76 @@ const App: React.FC = () => {
         if (app.windows) {
           app.windows.forEach((window: WindowInfo) => {
             runningWindowIds.add(window.hwnd);
-            console.log(
-              `[REFRESH] Found window: hwnd=${window.hwnd}, title=${window.title}`
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[REFRESH] Found window: hwnd=${window.hwnd}, title=${window.title}`
+              );
+            }
           });
         }
       });
-      console.log(
-        "[REFRESH] Running window IDs:",
-        Array.from(runningWindowIds)
-      );
+
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[REFRESH] Running window IDs:",
+          Array.from(runningWindowIds)
+        );
+      }
 
       // Cleanup themes by removing only closed applications
       setThemes((prevThemes) => {
-        console.log("[REFRESH] Previous themes:", prevThemes);
+        if (process.env.NODE_ENV === "development") {
+          console.log("[REFRESH] Previous themes:", prevThemes);
+        }
+
         const updatedThemes = prevThemes.map((theme) => {
           const filteredApps = theme.applications.filter((appId) => {
             const numericId =
               typeof appId === "string" ? parseInt(appId, 10) : appId;
-            console.log(
-              `[REFRESH] Checking app ID ${appId} in theme "${theme.name}"`
-            );
+
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[REFRESH] Checking app ID ${appId} in theme "${theme.name}"`
+              );
+            }
 
             // Check if it's a window handle by checking if it exists in runningWindowIds
             const isWindowHandle = runningWindowIds.has(numericId);
-            console.log(
-              `[REFRESH] Is window handle in runningWindowIds? ${isWindowHandle}`
-            );
+
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[REFRESH] Is window handle in runningWindowIds? ${isWindowHandle}`
+              );
+            }
 
             // Check if it's a process ID by checking if it exists in runningAppIds
             const isRunningApp = runningAppIds.has(numericId);
-            console.log(`[REFRESH] Is in runningAppIds? ${isRunningApp}`);
+
+            if (process.env.NODE_ENV === "development") {
+              console.log(`[REFRESH] Is in runningAppIds? ${isRunningApp}`);
+            }
 
             // Keep the ID if it's either a valid window handle or a running process
             return isWindowHandle || isRunningApp;
           });
 
-          console.log(
-            `[REFRESH] Theme "${theme.name}" after filtering:`,
-            filteredApps
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[REFRESH] Theme "${theme.name}" after filtering:`,
+              filteredApps
+            );
+          }
+
           return {
             ...theme,
             applications: filteredApps,
           };
         });
 
-        console.log("[REFRESH] Updated themes:", updatedThemes);
+        if (process.env.NODE_ENV === "development") {
+          console.log("[REFRESH] Updated themes:", updatedThemes);
+        }
+
         return updatedThemes;
       });
 
@@ -98,15 +131,18 @@ const App: React.FC = () => {
       console.error("[REFRESH] Error:", error);
       setLoading(false);
     }
-    console.log("[REFRESH] --------------------------------");
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[REFRESH] --------------------------------");
+    }
   }, []); // Keine Abhängigkeit von themes mehr
 
   // Laden der laufenden Anwendungen und Refresh-Intervall
   useEffect(() => {
     fetchApplications();
 
-    // Anwendungen alle 10 Sekunden aktualisieren
-    const intervalId = setInterval(fetchApplications, 10000);
+    // Anwendungen alle 5 Minuten aktualisieren
+    const intervalId = setInterval(fetchApplications, 300000);
     return () => clearInterval(intervalId);
   }, [fetchApplications]);
 
@@ -583,6 +619,18 @@ const App: React.FC = () => {
         </div>
         <div className="drag-region"></div>
         <div className="window-controls">
+          <button
+            className="refresh-button"
+            onClick={fetchApplications}
+            title="Anwendungen aktualisieren"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16">
+              <path
+                fill="currentColor"
+                d="M8 3a5 5 0 0 0-5 5H1l3.5 3.5L8 8H6a2 2 0 1 1 2 2v2a4 4 0 1 0-4-4H2a6 6 0 1 1 6 6v-2a4 4 0 0 0 0-8z"
+              />
+            </svg>
+          </button>
           <button
             className="compact-toggle-button"
             onClick={toggleCompactMode}

@@ -62,22 +62,25 @@ Napi::Array GetRunningApplications(const Napi::CallbackInfo& info) {
   return result;
 }
 
-// Struct to hold data for EnumWindowsProc
-struct EnumWindowsProcData {
-  DWORD processId;
-  bool success;
+// Struktur für die Daten, die zwischen Funktionen übergeben werden
+struct EnumWindowsData {
+  DWORD targetProcessId;
+  bool found;
 };
 
-// Callback function for EnumWindows
-BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
-  EnumWindowsProcData* data = reinterpret_cast<EnumWindowsProcData*>(lParam);
-  DWORD windowProcessId;
+// EnumWindows Callback-Funktion - außerhalb der MinimizeApplication Funktion
+BOOL CALLBACK EnumWindowsCallback(HWND hwnd, LPARAM lParam) {
+  EnumWindowsData* data = reinterpret_cast<EnumWindowsData*>(lParam);
+  
+  DWORD windowProcessId = 0;
   GetWindowThreadProcessId(hwnd, &windowProcessId);
-  if (windowProcessId == data->processId && IsWindowVisible(hwnd)) {
+  
+  if (windowProcessId == data->targetProcessId && IsWindowVisible(hwnd)) {
     ShowWindow(hwnd, SW_MINIMIZE);
-    data->success = true;
+    data->found = true;
     return FALSE; // Stop enumeration
   }
+  
   return TRUE; // Continue enumeration
 }
 
@@ -92,10 +95,10 @@ Napi::Boolean MinimizeApplication(const Napi::CallbackInfo& info) {
   
   DWORD processId = static_cast<DWORD>(info[0].As<Napi::Number>().Int32Value());
   
-  EnumWindowsProcData data = { processId, false };
-  EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&data));
+  EnumWindowsData data = { processId, false };
+  EnumWindows(EnumWindowsCallback, reinterpret_cast<LPARAM>(&data));
   
-  return Napi::Boolean::New(env, data.success);
+  return Napi::Boolean::New(env, data.found);
 }
 
 // Initialize the native addon

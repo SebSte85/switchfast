@@ -971,6 +971,10 @@
     -webkit-app-region: no-drag; /* Buttons sind nicht draggable */
   }
 
+  .refresh-button {
+    @apply w-6 h-6 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-[#78d97c]/20 transition-colors;
+  }
+
   .minimize-button {
     @apply w-8 h-6 flex items-center justify-center text-white/80 hover:text-white hover:bg-[#333344] transition-colors;
   }

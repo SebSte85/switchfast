@@ -297,21 +297,37 @@ function formatShortcutForElectron(shortcut: string): string {
 }
 
 function unregisterThemeShortcut(themeId: string): boolean {
+  const shortcutEntry = registeredShortcuts.get(themeId);
+  console.log(`[Shortcut] unregisterThemeShortcut called for themeId: ${themeId}. Current shortcut in map: ${shortcutEntry || 'Not found'}`);
   try {
     if (registeredShortcuts.has(themeId)) {
-      const shortcut = registeredShortcuts.get(themeId);
-      if (shortcut) {
+    const shortcut = registeredShortcuts.get(themeId);
+    if (shortcut && shortcut.trim() !== "") { // Ensure shortcut string is not empty
+      try {
+        console.log(`[Shortcut] Attempting to unregister shortcut: "${shortcut}" for themeId: ${themeId}`);
         globalShortcut.unregister(shortcut);
         registeredShortcuts.delete(themeId);
+        console.log(`[Shortcut] Successfully unregistered and removed shortcut "${shortcut}" for themeId: ${themeId} from map.`);
         return true;
+      } catch (error) {
+        console.error(`[Shortcut] Error during globalShortcut.unregister("${shortcut}") for themeId ${themeId}:`, error);
+        registeredShortcuts.delete(themeId); // Remove from map despite error
+        console.warn(`[Shortcut] Removed shortcut for themeId ${themeId} from internal map despite unregistration error.`);
+        return false; // Indicate failure
       }
+    } else {
+      console.warn(`[Shortcut] ThemeId ${themeId} found in registeredShortcuts, but shortcut string was empty/invalid. Removing from map.`);
+      registeredShortcuts.delete(themeId); // Clean up invalid entry
+      return true; // Considered a "clean" state as there's no valid shortcut to unregister.
     }
-    return true;
-  } catch (error) {
-    return false;
   }
+  console.log(`[Shortcut] No shortcut found in internal map for themeId ${themeId}. Nothing to unregister.`);
+  return true; // No shortcut was registered with us for this themeId.
+} catch (error) {
+  console.error(`[Shortcut] Unexpected error in unregisterThemeShortcut for themeId ${themeId}:`, error);
+  return false;
 }
-
+}
 /**
  * Ruft alle laufenden Anwendungen mit ihren Fenstertiteln ab
  */
@@ -654,7 +670,7 @@ async function minimizeAllExcept(exceptProcessId: number): Promise<boolean> {
 /**
  * Minimiert alle Fenster außer die angegebenen Apps und stellt diese wieder her
  */
-export async function showDesktopExceptApps(
+async function showDesktopExceptApps(
   appIdsToProtect: number[]
 ): Promise<boolean> {
   try {
@@ -676,7 +692,10 @@ export async function showDesktopExceptApps(
 
           [DllImport("user32.dll", SetLastError=true)]
           public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
+          
+          [DllImport("user32.dll")]
+          public static extern bool IsWindowVisible(IntPtr hWnd);
+          
           public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
       }
 "@
@@ -758,6 +777,8 @@ export async function showDesktopExceptApps(
       using System;
       using System.Runtime.InteropServices;
       using System.Text;
+      using System.Collections.Generic;
+
       public class WindowUtils {
           [DllImport("user32.dll")]
           [return: MarshalAs(UnmanagedType.Bool)]
@@ -1083,10 +1104,36 @@ function setupIpcHandlers() {
     return true;
   });
 
-  ipcMain.handle("delete-theme", (_, themeId) => {
+  ipcMain.handle("delete-theme", async (event, themeId: string) => {
+  console.log(`[IPC] Received delete-theme request for themeId: ${themeId}`);
+  try {
+    const themeToDelete = dataStore.getThemes().find(t => t.id === themeId);
+    let shortcutInfo = "N/A";
+    if (themeToDelete && themeToDelete.shortcut) {
+      shortcutInfo = themeToDelete.shortcut;
+    }
+    console.log(`[IPC] Attempting to delete theme: ID=${themeId}, Name=${themeToDelete?.name || 'N/A'}, Shortcut=${shortcutInfo}`);
+
+    // Attempt to unregister the shortcut FIRST.
+    const unregisterSuccess = unregisterThemeShortcut(themeId);
+
+    if (!unregisterSuccess) {
+      console.error(`[IPC] unregisterThemeShortcut returned false for themeId: ${themeId}. The shortcut might still be active.`);
+      // Optionally, you could decide to not delete the theme if shortcut unregistration fails critically
+      // For now, we'll proceed with theme deletion but log the error.
+    } else {
+      console.log(`[IPC] Shortcut unregistration for themeId ${themeId} was successful or no shortcut was registered.`);
+    }
+
+    // Delete the theme data from the store
     dataStore.deleteTheme(themeId);
-    return true;
-  });
+    console.log(`[IPC] Theme data for themeId ${themeId} deleted from DataStore.`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[IPC] Critical error in delete-theme handler for themeId ${themeId}:`, error);
+    return { success: false, error: (error as Error).message };
+  }
+});
 
   // Neue Handler für Fenster-Management
   ipcMain.handle(
@@ -1466,6 +1513,9 @@ function setupAutoUpdater() {
     autoUpdater.checkForUpdatesAndNotify();
   }, 60 * 60 * 1000);
 }
+
+
+
 
 /**
  * Sendet Update-Status an das Hauptfenster

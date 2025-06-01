@@ -368,16 +368,46 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     setShowProcessPopup(themeId);
   };
 
-  const handleCloseProcessPopup = () => {
+  const handleCloseProcessPopup = (e?: React.MouseEvent) => {
+    // Wenn das Event direkt vom Overlay oder vom X-Button kommt, schließe das Popup
+    if (e) {
+      // Prüfe, ob das Klick-Target das Overlay selbst ist (e.currentTarget === e.target)
+      const isOverlayClick = e.currentTarget === e.target;
+      if (
+        !isOverlayClick &&
+        !(e.currentTarget as HTMLElement).classList.contains(
+          "process-popup-close"
+        )
+      ) {
+        return; // Klick war im Popup-Inhalt, aber nicht auf dem X-Button - nicht schließen
+      }
+    }
+
     setShowProcessPopup(null);
   };
 
   const handleRemoveFromThemeClick = (
     themeId: string,
-    processId: number | string
+    processId: number | string,
+    e?: React.MouseEvent
   ) => {
+    // Stoppt die Ereignis-Propagation, damit das Modal nicht geschlossen wird
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
+    // Überprüfe, ob die onRemoveFromTheme-Funktion existiert
     if (onRemoveFromTheme) {
       onRemoveFromTheme(themeId, processId);
+
+      // Aktualisiere die Anzeige im Modal sofort
+      setShowProcessPopup((current) => {
+        if (current === themeId) {
+          return themeId; // Damit das Modal geöffnet bleibt
+        }
+        return current;
+      });
     }
   };
 
@@ -435,13 +465,16 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     const themeProcesses = collectProcessesInTheme(applications);
 
     return (
-      <div className="process-popup-overlay" onClick={handleCloseProcessPopup}>
+      <div
+        className="process-popup-overlay"
+        onClick={(e) => handleCloseProcessPopup(e)}
+      >
         <div className="process-popup" onClick={(e) => e.stopPropagation()}>
           <div className="process-popup-header">
             <div className="process-popup-title">Prozesse in {theme.name}</div>
             <button
               className="process-popup-close"
-              onClick={handleCloseProcessPopup}
+              onClick={(e) => handleCloseProcessPopup(e)}
             >
               ×
             </button>
@@ -454,9 +487,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                     <span>{process.title || process.name}</span>
                     <span
                       className="popup-process-remove"
-                      onClick={(e) =>
-                        handleRemoveFromThemeClick(theme.id, process.id)
-                      }
+                      onClick={(e) => {
+                        handleRemoveFromThemeClick(theme.id, process.id, e);
+                      }}
                     >
                       ×
                     </span>
