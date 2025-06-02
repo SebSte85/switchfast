@@ -3,25 +3,26 @@ import {
   BrowserWindow,
   Tray,
   Menu,
-  globalShortcut,
+  MenuItem,
+  nativeImage,
   ipcMain,
-  shell,
+  globalShortcut,
   dialog,
-  MessageBoxOptions,
+  shell,
+  MessageBoxOptions
 } from "electron";
+import path from "path";
+import { spawn, exec, execFile } from "child_process";
+import { DataStore } from "./main/dataStore";
+import { PersistentProcessIdentifier, Theme } from "./types";
 import * as url from "url";
-import { exec } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
-import * as path from "path";
-import { execFile } from "child_process";
 import { error } from "console";
 import { stderr } from "process";
-import { DataStore } from "./main/dataStore";
 import Store from "electron-store";
 import { autoUpdater } from "electron-updater";
 import * as electronLog from "electron-log";
-import { PersistentProcessIdentifier } from "./types";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -175,54 +176,109 @@ function registerShortcuts() {
   }
 }
 
+// Globale Variable, um die Shortcut-Handler zu speichern
+const shortcutHandlers: Map<string, () => void> = new Map();
+
+// Globale Variable, um den Zustand der Shortcut-Registrierung zu verfolgen
+let shortcutsRegistered = false;
+
 function registerThemeShortcut(themeId: string, shortcut: string): boolean {
   try {
+    console.log(`[Shortcut] Registriere Shortcut für Theme ${themeId}: ${shortcut}`);
+    
     // Wenn bereits ein Shortcut für dieses Theme existiert, entferne ihn zuerst
     if (registeredShortcuts.has(themeId)) {
       const oldShortcut = registeredShortcuts.get(themeId);
       if (oldShortcut) {
         try {
+          console.log(`[Shortcut] Entferne alten Shortcut für Theme ${themeId}: ${oldShortcut}`);
           globalShortcut.unregister(oldShortcut);
         } catch (err) {
-          // Error handling
+          console.error(`[Shortcut] Fehler beim Entfernen des alten Shortcuts für Theme ${themeId}:`, err);
         }
       }
     }
 
     // Prüfe, ob der Shortcut gültig ist
     if (!shortcut || shortcut.trim() === "") {
+      console.warn(`[Shortcut] Ungültiger Shortcut für Theme ${themeId}: "${shortcut}"`);
       return false;
     }
 
     const formattedShortcut = formatShortcutForElectron(shortcut);
+    console.log(`[Shortcut] Formatierter Shortcut für Theme ${themeId}: ${formattedShortcut}`);
 
-    // Überprüfen, ob Shortcut bereits registriert ist
+    // Überprüfen, ob Shortcut bereits registriert ist und entferne ihn
     if (globalShortcut.isRegistered(formattedShortcut)) {
+      console.log(`[Shortcut] Shortcut ${formattedShortcut} ist bereits registriert, wird entfernt`);
       globalShortcut.unregister(formattedShortcut);
     }
-
-    // Registriere den neuen Shortcut
-    const success = globalShortcut.register(formattedShortcut, () => {
+    
+    // Definiere den Handler für diesen Shortcut
+    const handler = () => {
       if (!mainWindow) {
+        console.warn(`[Shortcut] Hauptfenster nicht verfügbar bei Aktivierung von ${themeId}`);
         return;
       }
 
-      // Sende Benachrichtigung an Renderer
+      console.log(`[Shortcut] Shortcut ${formattedShortcut} für Theme ${themeId} wurde aktiviert`);
+      
+      // Sende Benachrichtigung an Renderer mit aktuellen PIDs
       try {
-        mainWindow.webContents.send("activate-theme-and-minimize", themeId);
-      } catch (err) {
-        // Error handling
+        // Hole das Theme-Objekt
+        const theme = dataStore.getTheme(themeId);
+        if (!theme) {
+          console.error(`[Shortcut] Theme ${themeId} nicht gefunden`);
+          return;
+        }
+
+        console.log(`[Shortcut] Theme ${themeId} gefunden, aktualisiere PIDs vor Aktivierung`);
+        
+        // Aktualisiere die PIDs im Theme basierend auf den persistenten Identifikatoren
+        updateThemeProcessIds(theme).then(() => {
+          console.log(`[Shortcut] PIDs für Theme ${themeId} aktualisiert, aktiviere Theme`);
+          if (mainWindow) {
+            mainWindow.webContents.send("activate-theme-and-minimize", themeId);
+          }
+        }).catch((err: Error) => {
+          console.error(`[Shortcut] Fehler beim Aktualisieren der PIDs für Theme ${themeId}:`, err);
+          // Trotz Fehler versuchen, das Theme zu aktivieren
+          if (mainWindow) {
+            mainWindow.webContents.send("activate-theme-and-minimize", themeId);
+          }
+        });
+      } catch (err: unknown) {
+        console.error(`[Shortcut] Fehler beim Senden der Theme-Aktivierung für ${themeId}:`, err);
       }
-    });
+    };
+    
+    // Speichere den Handler in der Map
+    shortcutHandlers.set(themeId, handler);
+    
+    // Registriere den Shortcut mit dem Handler
+    const success = globalShortcut.register(formattedShortcut, handler);
 
     if (!success) {
+      console.error(`[Shortcut] Registrierung des Shortcuts ${formattedShortcut} für Theme ${themeId} fehlgeschlagen`);
+      shortcutHandlers.delete(themeId);
       return false;
     }
 
     // Speichere den registrierten Shortcut
     registeredShortcuts.set(themeId, formattedShortcut);
+    console.log(`[Shortcut] Shortcut ${formattedShortcut} für Theme ${themeId} erfolgreich registriert`);
+    
+    // Verifiziere, dass der Shortcut tatsächlich registriert wurde
+    if (globalShortcut.isRegistered(formattedShortcut)) {
+      console.log(`[Shortcut] Verifizierung erfolgreich: ${formattedShortcut} ist registriert`);
+    } else {
+      console.error(`[Shortcut] Verifizierung fehlgeschlagen: ${formattedShortcut} ist NICHT registriert!`);
+      return false;
+    }
+    
     return true;
   } catch (error) {
+    console.error(`[Shortcut] Unerwarteter Fehler bei der Registrierung des Shortcuts für Theme ${themeId}:`, error);
     return false;
   }
 }
@@ -1092,6 +1148,13 @@ function setupIpcHandlers() {
     return dataStore.getThemes();
   });
 
+  ipcMain.handle("get-theme", (_, themeId) => {
+    console.log(`[IPC] get-theme für ID ${themeId} aufgerufen`);
+    const theme = dataStore.getTheme(themeId);
+    console.log(`[IPC] Theme gefunden:`, theme);
+    return theme;
+  });
+
   ipcMain.handle("save-themes", (_, themes) => {
     dataStore.setThemes(themes);
     return true;
@@ -1458,19 +1521,153 @@ app.on("will-quit", () => {
   globalShortcut.unregisterAll();
 });
 
+// Funktion zum Aktualisieren der Prozess-IDs eines Themes basierend auf persistenten Identifikatoren
+async function updateThemeProcessIds(theme: any): Promise<void> {
+  try {
+    if (!theme.persistentProcesses || theme.persistentProcesses.length === 0) {
+      console.log(`[updateThemeProcessIds] Theme ${theme.id} hat keine persistenten Prozesse`);
+      return;
+    }
+
+    console.log(`[updateThemeProcessIds] Aktualisiere PIDs für Theme ${theme.id}`);
+    
+    // Hole aktuelle laufende Prozesse
+    const runningProcesses = await getRunningApplications();
+    
+    // Neue Prozess-IDs sammeln
+    const newProcessIds: number[] = [];
+    
+    // Für jeden persistenten Prozess die aktuelle PID finden
+    for (const persistentProcess of theme.persistentProcesses) {
+      const matchingProcess = findMatchingProcess(runningProcesses, persistentProcess);
+      
+      if (matchingProcess) {
+        console.log(`[updateThemeProcessIds] Gefunden: ${matchingProcess.name} (${matchingProcess.id})`);
+        newProcessIds.push(matchingProcess.id);
+      } else {
+        console.log(`[updateThemeProcessIds] Kein laufender Prozess gefunden für: ${persistentProcess.executableName}`);
+      }
+    }
+    
+    // Aktualisiere die Prozess-IDs im Theme
+    if (newProcessIds.length > 0) {
+      console.log(`[updateThemeProcessIds] Aktualisiere Theme ${theme.id} mit ${newProcessIds.length} neuen PIDs:`, newProcessIds);
+      theme.processes = newProcessIds;
+      
+      // Theme in der Datenbank aktualisieren
+      dataStore.updateTheme(theme.id, theme);
+    } else {
+      console.warn(`[updateThemeProcessIds] Keine aktiven Prozesse für Theme ${theme.id} gefunden`);
+    }
+  } catch (error) {
+    console.error(`[updateThemeProcessIds] Fehler beim Aktualisieren der PIDs für Theme ${theme.id}:`, error);
+  }
+}
+
 // Funktion zum Registrieren aller gespeicherten Shortcuts
 async function registerSavedShortcuts() {
   try {
+    console.log('[Shortcut] Beginne Registrierung aller gespeicherten Shortcuts...');
+    
+    // Zuerst alle vorhandenen Shortcuts deregistrieren, um einen sauberen Start zu haben
+    globalShortcut.unregisterAll();
+    console.log('[Shortcut] Alle vorhandenen Shortcuts wurden deregistriert');
+    
+    // Maps leeren, um einen konsistenten Zustand zu gewährleisten
+    registeredShortcuts.clear();
+    shortcutHandlers.clear();
+    console.log('[Shortcut] Shortcut-Maps wurden geleert');
+    
+    // Themes laden und Shortcuts registrieren
     const themes = dataStore.getThemes();
-
-    themes.forEach((theme) => {
-      if (theme.shortcut && theme.shortcut.trim() !== "") {
-        registerThemeShortcut(theme.id, theme.shortcut);
+    console.log(`[Shortcut] ${themes.length} Themes geladen`);
+    
+    // Längere Verzögerung, um sicherzustellen, dass die Anwendung vollständig initialisiert ist
+    // und alle Prozesse geladen sind
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Alle Shortcuts in einer Schleife registrieren
+    let registeredCount = 0;
+    const themesWithShortcuts = themes.filter(t => t.shortcut && t.shortcut.trim() !== "");
+    
+    // Mehrere Registrierungsversuche, falls nötig
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[Shortcut] Registrierungsversuch ${attempt} von 3`);
+      
+      // Alle Shortcuts erneut entfernen bei wiederholten Versuchen
+      if (attempt > 1) {
+        globalShortcut.unregisterAll();
+        registeredShortcuts.clear();
+        shortcutHandlers.clear();
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-    });
+      
+      // Shortcuts sequentiell registrieren
+      for (const theme of themesWithShortcuts) {
+        console.log(`[Shortcut] Registriere Shortcut für Theme ${theme.name} (${theme.id}): ${theme.shortcut}`);
+        const success = registerThemeShortcut(theme.id, theme.shortcut);
+        console.log(`[Shortcut] Registrierung für Theme ${theme.name} war ${success ? 'erfolgreich' : 'nicht erfolgreich'}`);
+        
+        if (success) registeredCount++;
+        
+        // Kurze Pause zwischen den Registrierungen
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      
+      // Überprüfe, ob alle Shortcuts registriert wurden
+      registeredCount = Array.from(registeredShortcuts.keys()).length;
+      console.log(`[Shortcut] ${registeredCount} von ${themesWithShortcuts.length} Shortcuts wurden registriert`);
+      
+      // Wenn alle Shortcuts registriert wurden, beende die Schleife
+      if (registeredCount === themesWithShortcuts.length) {
+        console.log('[Shortcut] Alle Shortcuts wurden erfolgreich registriert');
+        break;
+      } else {
+        console.warn(`[Shortcut] Nicht alle Shortcuts konnten registriert werden (${registeredCount}/${themesWithShortcuts.length}). Versuche es erneut...`);
+      }
+    }
+    
+    // Starte einen Hintergrund-Timer, der regelmäßig prüft, ob die Shortcuts noch aktiv sind
+    startShortcutWatchdog();
+    
+    console.log('[Shortcut] Registrierung aller Shortcuts abgeschlossen');
   } catch (error) {
-    // Error handling
+    console.error('[Shortcut] Fehler bei der Registrierung der gespeicherten Shortcuts:', error);
   }
+}
+
+// Watchdog-Timer, der regelmäßig prüft, ob die Shortcuts noch aktiv sind
+let shortcutWatchdogTimer: NodeJS.Timeout | null = null;
+
+function startShortcutWatchdog() {
+  // Stoppe einen eventuell laufenden Timer
+  if (shortcutWatchdogTimer) {
+    clearInterval(shortcutWatchdogTimer);
+  }
+  
+  console.log('[Shortcut] Starte Shortcut-Watchdog');
+  
+  // Starte einen neuen Timer, der alle 30 Sekunden prüft
+  shortcutWatchdogTimer = setInterval(() => {
+    try {
+      const entries = Array.from(registeredShortcuts.entries());
+      console.log(`[Shortcut] Watchdog prüft ${entries.length} Shortcuts`);
+      
+      for (const [themeId, shortcutKey] of entries) {
+        if (!globalShortcut.isRegistered(shortcutKey)) {
+          console.warn(`[Shortcut] Shortcut ${shortcutKey} für Theme ${themeId} ist nicht mehr registriert! Registriere neu...`);
+          
+          // Versuche, den Shortcut neu zu registrieren
+          const theme = dataStore.getThemes().find(t => t.id === themeId);
+          if (theme && theme.shortcut) {
+            registerThemeShortcut(themeId, theme.shortcut);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Shortcut] Fehler im Shortcut-Watchdog:', error);
+    }
+  }, 30000); // Alle 30 Sekunden prüfen
 }
 
 /**
@@ -1544,8 +1741,6 @@ async function fixThemeData() {
   
   if (themesUpdated) {
     console.log('[Fix] Theme-Daten wurden korrigiert und gespeichert.');
-  } else {
-    console.log('[Fix] Keine Korrekturen an den Theme-Daten notwendig.');
   }
 }
 
@@ -1553,7 +1748,6 @@ async function fixThemeData() {
 app.whenReady().then(async () => {
   createWindow();
   setupIpcHandlers();
-  registerSavedShortcuts();
 
   // Auto-Updater einrichten
   setupAutoUpdater();
@@ -1566,6 +1760,17 @@ app.whenReady().then(async () => {
   
   // Prozesszuordnungen wiederherstellen
   await restoreProcessAssociations();
+  
+  // Alle Themes mit aktuellen PIDs aktualisieren
+  const themes = dataStore.getThemes();
+  console.log(`[App] Aktualisiere PIDs für ${themes.length} Themes`);
+  
+  for (const theme of themes) {
+    await updateThemeProcessIds(theme);
+  }
+  
+  // Shortcuts erst nach der Wiederherstellung der Prozesse registrieren
+  registerSavedShortcuts();
 
   // Register global shortcut to open DevTools
   globalShortcut.register("CommandOrControl+Shift+I", () => {

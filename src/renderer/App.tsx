@@ -560,9 +560,27 @@ const App: React.FC = () => {
       return;
     }
 
-    // Finde das aktuelle Theme
-    const currentTheme = themes.find((t) => t.id === themeId);
+    // Hole das aktuelle Theme direkt aus der Datenbank, um die aktuellsten PIDs zu erhalten
+    let currentTheme;
+    try {
+      // Lade das aktuelle Theme aus der Datenbank
+      const freshTheme = await ipcRenderer.invoke("get-theme", themeId);
+      if (freshTheme) {
+        console.log(`[FOCUS] Frisches Theme aus Datenbank geladen für ${themeId}:`, freshTheme);
+        currentTheme = freshTheme;
+      } else {
+        // Fallback auf lokalen State, wenn Theme nicht in der Datenbank gefunden wurde
+        console.log(`[FOCUS] Theme ${themeId} nicht in Datenbank gefunden, verwende lokalen State`);
+        currentTheme = themes.find((t) => t.id === themeId);
+      }
+    } catch (error) {
+      console.error(`[FOCUS] Fehler beim Laden des Themes ${themeId} aus der Datenbank:`, error);
+      // Fallback auf lokalen State bei Fehlern
+      currentTheme = themes.find((t) => t.id === themeId);
+    }
+    
     if (!currentTheme) {
+      console.error(`[FOCUS] Theme ${themeId} konnte nicht gefunden werden`);
       return;
     }
 
@@ -570,7 +588,7 @@ const App: React.FC = () => {
     let appIdsToProtect: number[] = [];
 
     // 1. Sammle reguläre Prozess-IDs aus applications
-    currentTheme.applications.forEach((id) => {
+    currentTheme.applications.forEach((id: number | string) => {
       // Wenn id ein number ist, füge es hinzu
       if (typeof id === "number") {
         appIdsToProtect.push(id);
@@ -580,7 +598,7 @@ const App: React.FC = () => {
     // 1.1 Sammle Prozess-IDs aus dem processes-Array, falls vorhanden
     if (currentTheme.processes && currentTheme.processes.length > 0) {
       console.log(`[FOCUS] Füge ${currentTheme.processes.length} Prozesse aus processes-Array hinzu für Theme ${currentTheme.name}`);
-      currentTheme.processes.forEach((id) => {
+      currentTheme.processes.forEach((id: number | string) => {
         if (typeof id === "number" && !appIdsToProtect.includes(id)) {
           console.log(`[FOCUS] Füge Prozess-ID ${id} aus processes-Array hinzu`);
           appIdsToProtect.push(id);
