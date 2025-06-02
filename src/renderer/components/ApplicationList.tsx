@@ -109,6 +109,32 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   const [selectedProcessIds, setSelectedProcessIds] = useState<
     Array<number | string>
   >([]);
+  const [popupProcesses, setPopupProcesses] = useState<ProcessInfo[]>([]);
+
+  // Aktualisiere die Prozessinformationen, wenn das Popup geöffnet wird
+  useEffect(() => {
+    if (showProcessPopup) {
+      // Hole die aktuellen Prozesse vom Main-Prozess
+      const updateProcesses = async () => {
+        try {
+          console.log(`[UI] Aktualisiere Prozesse für Popup von Theme ${showProcessPopup}`);
+          const currentProcesses = await ipcRenderer.invoke("get-running-applications");
+          setPopupProcesses(currentProcesses || []);
+        } catch (error) {
+          console.error("Fehler beim Aktualisieren der Prozesse für das Popup:", error);
+          // Fallback auf die vorhandenen Prozesse
+          setPopupProcesses(applications);
+        }
+      };
+      
+      updateProcesses();
+    }
+  }, [showProcessPopup]);
+
+  // Handle process popup open
+  const handleProcessPopupOpen = (themeId: string) => {
+    setShowProcessPopup(themeId);
+  };
 
   // Filtere die Anwendungen, um nur die zu zeigen, die keiner Gruppe zugeordnet sind
   const unassignedApplications = applications
@@ -431,11 +457,74 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       processes: ProcessInfo[]
     ): ProcessInfo[] => {
       const result: ProcessInfo[] = [];
+      
+      // Debugging: Zeige Theme-Informationen
+      console.log(`[UI] Sammle Prozesse für Theme ${theme.name} (${theme.id})`);
+      console.log(`[UI] Theme hat ${theme.applications.length} Einträge im applications-Array`);
+      console.log(`[UI] Theme hat ${theme.processes ? theme.processes.length : 0} Einträge im processes-Array`);
+      console.log(`[UI] Theme hat ${theme.persistentProcesses ? theme.persistentProcesses.length : 0} persistente Prozesse`);
+      
+      // Zeige alle verfügbaren Prozesse zur Diagnose
+      console.log(`[UI] Verfügbare Prozesse für die Suche:`);
+      processes.forEach(p => {
+        console.log(`[UI] - Prozess ${p.name} (${p.id}) Pfad: ${p.path || 'unbekannt'}`);
+      });
 
       const collectProcess = (process: ProcessInfo) => {
         // Check if the process ID is in the theme applications
         if (theme.applications.includes(process.id)) {
+          console.log(`[UI] Prozess ${process.name} (${process.id}) im applications-Array gefunden`);
           result.push(process);
+        }
+        
+        // Check if the process ID is in the theme processes array (added for restored processes)
+        if (theme.processes && theme.processes.includes(process.id)) {
+          // Nur hinzufügen, wenn der Prozess nicht bereits im Ergebnis ist
+          if (!result.some(p => p.id === process.id)) {
+            console.log(`[UI] Prozess ${process.name} (${process.id}) im processes-Array gefunden`);
+            result.push(process);
+          }
+        }
+        
+        // Prüfe auch, ob der Prozess-Name mit einem der persistenten Prozesse übereinstimmt
+        // Dies ist ein Fallback für den Fall, dass die Prozess-ID sich geändert hat
+        if (theme.persistentProcesses && theme.persistentProcesses.length > 0 && process.name) {
+          for (const persistentProcess of theme.persistentProcesses) {
+            if (persistentProcess.executableName && 
+                process.name.toLowerCase() === persistentProcess.executableName.toLowerCase()) {
+              if (!result.some(p => p.id === process.id)) {
+                console.log(`[UI] Prozess ${process.name} (${process.id}) passt zum Namen eines persistenten Prozesses und wird hinzugefügt`);
+                result.push(process);
+              }
+              break; // Sobald ein Match gefunden wurde, können wir die Schleife verlassen
+            }
+          }
+        }
+        
+        // Prüfe, ob der Prozess zu einem der persistenten Prozessidentifikatoren passt
+        if (theme.persistentProcesses && theme.persistentProcesses.length > 0) {
+          for (const persistentProcess of theme.persistentProcesses) {
+            // Prüfe, ob der aktuelle Prozess dem persistenten Identifikator entspricht
+            const matchesExecutableName = persistentProcess.executableName && 
+                                         process.name && 
+                                         process.name.toLowerCase() === persistentProcess.executableName.toLowerCase();
+            
+            const matchesExecutablePath = persistentProcess.executablePath && 
+                                        process.path && 
+                                        process.path.toLowerCase() === persistentProcess.executablePath.toLowerCase();
+            
+            const matchesTitlePattern = persistentProcess.titlePattern && 
+                                       process.title && 
+                                       process.title.includes(persistentProcess.titlePattern);
+            
+            // Ein Prozess passt, wenn der Name UND (der Pfad ODER das Titelmuster) übereinstimmen
+            if (matchesExecutableName && (matchesExecutablePath || matchesTitlePattern)) {
+              if (!result.some(p => p.id === process.id)) {
+                console.log(`[UI] Prozess ${process.name} (${process.id}) passt zu persistentem Identifikator und wird zur Anzeige hinzugefügt`);
+                result.push(process);
+              }
+            }
+          }
         }
 
         // Check for window handles
@@ -447,6 +536,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
               theme.applications.includes(`w${window.hwnd}`)
           );
           if (hasWindowInTheme && !result.includes(process)) {
+            console.log(`[UI] Prozess ${process.name} (${process.id}) hat Fenster im applications-Array`);
             result.push(process);
           }
         }
@@ -459,10 +549,15 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
       // Start collection from all root processes
       processes.forEach(collectProcess);
+      
+      console.log(`[UI] Insgesamt ${result.length} Prozesse für Theme ${theme.name} gefunden`);
       return result;
     };
 
-    const themeProcesses = collectProcessesInTheme(applications);
+    // Verwende die aktualisierten Prozesse aus dem State, wenn verfügbar, sonst die applications prop
+    const processesToUse = popupProcesses.length > 0 ? popupProcesses : applications;
+    console.log(`[UI] Verwende ${processesToUse.length} Prozesse für die Anzeige im Popup`);
+    const themeProcesses = collectProcessesInTheme(processesToUse);
 
     return (
       <div
@@ -633,7 +728,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   <div className="group-item-content">
                     {!showOnlyShortcuts && (
                       <div className="group-item-name">
-                        {theme.name} ({theme.applications.length})
+                        {theme.name} ({(theme.processes && theme.processes.length > 0) ? theme.processes.length : theme.applications.length})
                       </div>
                     )}
                     <div className="group-item-actions">

@@ -1,5 +1,12 @@
 // Gemeinsame Typdefinitionen für die gesamte Anwendung
 
+// Persistente Prozessidentifikation für Wiederherstellung nach Neustart
+export interface PersistentProcessIdentifier {
+  executablePath?: string;
+  executableName: string;
+  titlePattern?: string;
+}
+
 // Information zu laufenden Prozessen
 export interface WindowInfo {
   hwnd: number;
@@ -25,6 +32,8 @@ export interface Theme {
   applications: Array<number | string>; // Kann jetzt ProcessID oder WindowHandle sein
   shortcut: string;
   color?: string; // Farbe für die visuelle Darstellung des Themes
+  persistentProcesses?: PersistentProcessIdentifier[]; // Persistente Prozessidentifikatoren für Wiederherstellung nach Neustart
+  processes?: number[]; // Prozess-IDs für die Zuordnung zu Themen
 }
 
 // ApplicationListProps Interface

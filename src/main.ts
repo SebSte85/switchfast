@@ -21,6 +21,7 @@ import { DataStore } from "./main/dataStore";
 import Store from "electron-store";
 import { autoUpdater } from "electron-updater";
 import * as electronLog from "electron-log";
+import { PersistentProcessIdentifier } from "./types";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -335,7 +336,7 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
   try {
     // PowerShell-Befehl zum Abrufen der Prozesse
     const command = `
-      $processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name;
+      $processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath;
       $results = @();
       
       foreach ($p in $processes) {
@@ -380,6 +381,7 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
               ParentId = $p.ParentProcessId;
               Name = $p.Name;
               Title = $title;
+              Path = $p.ExecutablePath;
             }
           }
         }
@@ -399,13 +401,14 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
     // JSON-Ausgabe parsen
     const processData = JSON.parse(stdout);
 
-    // Prozesse mit IDs, Namen und Titeln extrahieren
+    // Prozesse mit IDs, Namen, Titeln und Pfaden extrahieren
     const processes: ProcessInfo[] = Array.isArray(processData)
       ? processData.map((proc: any) => ({
           id: proc.Id,
           parentId: proc.ParentId,
           name: formatAppName(proc.Name.toLowerCase().replace(".exe", "")),
           title: proc.Title || proc.Name,
+          path: proc.Path || "",
         }))
       : [];
 
@@ -1138,17 +1141,54 @@ function setupIpcHandlers() {
   // Neue Handler für Fenster-Management
   ipcMain.handle(
     "add-windows-to-theme",
-    (_, themeId: string, windows: WindowInfo[]) => {
-      dataStore.addWindowsToTheme(themeId, windows);
-      return true;
-    }
-  );
-
-  ipcMain.handle(
-    "remove-windows-from-theme",
-    (_, themeId: string, windowIds: number[]) => {
-      dataStore.removeWindowsFromTheme(themeId, windowIds);
-      return true;
+    async (_, themeId: string, windows: WindowInfo[]) => {
+      try {
+        // Thema abrufen
+        const theme = dataStore.getTheme(themeId);
+        if (!theme) {
+          console.error(`[IPC] Thema mit ID ${themeId} nicht gefunden.`);
+          return false;
+        }
+        
+        // Fenster zum Thema hinzufügen
+        dataStore.addWindowsToTheme(themeId, windows);
+        
+        // Initialisiere persistentProcesses, falls nicht vorhanden
+        if (!theme.persistentProcesses) {
+          theme.persistentProcesses = [];
+        }
+        
+        // Für jedes Fenster auch einen persistenten Prozessidentifikator speichern
+        const processes = await getRunningApplications();
+        
+        for (const window of windows) {
+          // Prozess in der Liste der laufenden Prozesse finden
+          const process = processes.find(p => p.id === window.processId);
+          
+          if (process) {
+            // Persistenten Identifikator erstellen
+            const persistentId = createPersistentIdentifier(process);
+            
+            // Prüfen, ob der persistente Identifikator bereits existiert
+            const exists = theme.persistentProcesses.some(
+              (p: PersistentProcessIdentifier) => p.executableName === persistentId.executableName
+            );
+            
+            if (!exists) {
+              console.log(`[IPC] Füge persistenten Identifikator für ${process.name} (${process.id}) zum Thema ${theme.id} hinzu.`);
+              theme.persistentProcesses.push(persistentId);
+              
+              // Thema aktualisieren
+              dataStore.updateTheme(themeId, theme);
+            }
+          }
+        }
+        
+        return true;
+      } catch (error) {
+        console.error('[IPC] Fehler beim Hinzufügen von Fenstern zum Thema:', error);
+        return false;
+      }
     }
   );
 
@@ -1197,6 +1237,128 @@ function setupIpcHandlers() {
   });
 
   // Compact mode handler
+  // Handler für das direkte Hinzufügen eines Prozesses zu einem Thema
+  ipcMain.handle(
+    "add-process-to-theme",
+    async (_, themeId: string, processId: number) => {
+      try {
+        console.log(`[IPC] Füge Prozess ${processId} zum Thema ${themeId} hinzu`);
+        
+        // Thema abrufen
+        const theme = dataStore.getTheme(themeId);
+        if (!theme) {
+          console.error(`[IPC] Thema mit ID ${themeId} nicht gefunden.`);
+          return false;
+        }
+        
+        // Initialisiere Arrays, falls nicht vorhanden
+        if (!theme.processes) theme.processes = [];
+        if (!theme.persistentProcesses) theme.persistentProcesses = [];
+        
+        // Prozessinformationen abrufen
+        const processes = await getRunningApplications();
+        const process = processes.find(p => p.id === processId);
+        
+        if (process) {
+          console.log(`[IPC] Prozess gefunden: ${process.name} (${process.id}), Pfad: ${process.path || 'unbekannt'}`);
+          
+          // Persistenten Identifikator erstellen und speichern
+          const persistentId = createPersistentIdentifier(process);
+          console.log(`[IPC] Persistenter Identifikator erstellt: ${JSON.stringify(persistentId)}`);
+          
+          // Prüfen, ob der persistente Identifikator bereits existiert
+          const exists = theme.persistentProcesses.some(
+            p => p.executableName === persistentId.executableName
+          );
+          
+          if (!exists) {
+            console.log(`[IPC] Füge persistenten Identifikator für ${process.name} zum Thema ${theme.id} hinzu.`);
+            theme.persistentProcesses.push(persistentId);
+          } else {
+            console.log(`[IPC] Persistenter Identifikator für ${process.name} existiert bereits im Thema ${theme.id}.`);
+          }
+          
+          // Prozess-ID zum processes-Array hinzufügen, falls noch nicht vorhanden
+          if (!theme.processes.includes(processId)) {
+            console.log(`[IPC] Füge Prozess-ID ${processId} zum Thema ${theme.id} hinzu.`);
+            theme.processes.push(processId);
+          }
+          
+          // Thema aktualisieren
+          dataStore.updateTheme(themeId, theme);
+          console.log(`[IPC] Prozess ${processId} erfolgreich zum Thema ${themeId} hinzugefügt.`);
+          
+          return true;
+        } else {
+          console.error(`[IPC] Prozess mit ID ${processId} nicht gefunden.`);
+          return false;
+        }
+      } catch (error) {
+        console.error(`[IPC] Fehler beim Hinzufügen des Prozesses ${processId} zum Thema ${themeId}:`, error);
+        return false;
+      }
+    }
+  );
+  
+  // Handler für das direkte Entfernen eines Prozesses aus einem Thema
+  ipcMain.handle(
+    "remove-process-from-theme",
+    async (_, themeId: string, processId: number) => {
+      try {
+        console.log(`[IPC] Entferne Prozess ${processId} aus Thema ${themeId}`);
+        
+        // Thema abrufen
+        const theme = dataStore.getTheme(themeId);
+        if (!theme) {
+          console.error(`[IPC] Thema mit ID ${themeId} nicht gefunden.`);
+          return false;
+        }
+        
+        // Prozessinformationen abrufen
+        const processes = await getRunningApplications();
+        const process = processes.find(p => p.id === processId);
+        
+        // Prozess aus dem Thema entfernen
+        if (theme.processes) {
+          theme.processes = theme.processes.filter(pid => pid !== processId);
+        }
+        
+        // Wenn der Prozess gefunden wurde, entferne auch den persistenten Identifikator
+        if (process && theme.persistentProcesses) {
+          console.log(`[IPC] Entferne persistenten Identifikator für ${process.name} (${process.id}) aus Thema ${themeId}`);
+          
+          // Erstelle einen persistenten Identifikator für den Prozess, um ihn zu vergleichen
+          const persistentId = createPersistentIdentifier(process);
+          
+          // Entferne alle persistenten Identifikatoren, die dem Prozess entsprechen
+          theme.persistentProcesses = theme.persistentProcesses.filter(pid => {
+            // Entferne den Prozess, wenn der Name übereinstimmt
+            if (pid.executableName.toLowerCase() === persistentId.executableName.toLowerCase()) {
+              console.log(`[IPC] Entferne persistenten Prozess mit Namen ${pid.executableName} aus Thema ${themeId}`);
+              return false;
+            }
+            // Entferne den Prozess, wenn der Pfad übereinstimmt (falls vorhanden)
+            if (pid.executablePath && persistentId.executablePath && 
+                pid.executablePath.toLowerCase() === persistentId.executablePath.toLowerCase()) {
+              console.log(`[IPC] Entferne persistenten Prozess mit Pfad ${pid.executablePath} aus Thema ${themeId}`);
+              return false;
+            }
+            return true;
+          });
+        }
+        
+        // Thema aktualisieren
+        dataStore.updateTheme(themeId, theme);
+        console.log(`[IPC] Prozess ${processId} erfolgreich aus Thema ${themeId} entfernt.`);
+        
+        return true;
+      } catch (error) {
+        console.error(`[IPC] Fehler beim Entfernen des Prozesses ${processId} aus dem Thema ${themeId}:`, error);
+        return false;
+      }
+    }
+  );
+  
   ipcMain.on(
     "toggle-compact-mode",
     (_, isCompact: boolean, groupCount: number) => {
@@ -1260,14 +1422,99 @@ async function registerSavedShortcuts() {
   }
 }
 
+/**
+ * Korrigiert die Daten in den Themes, um sicherzustellen, dass alle Prozesse korrekt gespeichert sind
+ */
+async function fixThemeData() {
+  console.log('[Fix] Beginne Korrektur der Theme-Daten...');
+  
+  // Alle gespeicherten Themen abrufen
+  const themes = dataStore.getThemes();
+  let themesUpdated = false;
+  
+  // Aktuelle Prozesse abrufen
+  const currentProcesses = await getRunningApplications();
+  
+  // Für jedes Thema
+  for (const theme of themes) {
+    let themeUpdated = false;
+    
+    // Prüfe, ob Prozess-IDs im applications-Array statt im processes-Array gespeichert sind
+    if (theme.applications && theme.applications.length > 0) {
+      // Filtere Prozess-IDs (unter 100000) aus applications heraus
+      const processIds = theme.applications.filter(id => typeof id === 'number' && id < 100000);
+      const windowHandles = theme.applications.filter(id => typeof id === 'string' || id >= 100000);
+      
+      if (processIds.length > 0) {
+        console.log(`[Fix] Theme ${theme.name}: ${processIds.length} Prozess-IDs vom applications-Array ins processes-Array verschoben`);
+        
+        // Füge die Prozess-IDs zum processes-Array hinzu (ohne Duplikate)
+        for (const processId of processIds) {
+          if (!theme.processes.includes(processId)) {
+            theme.processes.push(processId);
+          }
+        }
+        
+        // Aktualisiere das applications-Array, um nur Fenster-Handles zu enthalten
+        theme.applications = windowHandles;
+        themeUpdated = true;
+      }
+    }
+    
+    // Stelle sicher, dass für alle Prozesse persistente Identifikatoren existieren
+    if (theme.processes && theme.processes.length > 0) {
+      for (const processId of theme.processes) {
+        // Finde den Prozess in der Liste der laufenden Prozesse
+        const process = currentProcesses.find(p => p.id === processId);
+        
+        if (process) {
+          // Prüfe, ob bereits ein persistenter Identifikator für diesen Prozess existiert
+          const persistentId = createPersistentIdentifier(process);
+          const exists = theme.persistentProcesses.some(
+            p => p.executableName === persistentId.executableName && 
+                 (p.executablePath === persistentId.executablePath || !p.executablePath)
+          );
+          
+          if (!exists) {
+            console.log(`[Fix] Theme ${theme.name}: Persistenter Identifikator für ${process.name} (${process.id}) hinzugefügt`);
+            theme.persistentProcesses.push(persistentId);
+            themeUpdated = true;
+          }
+        }
+      }
+    }
+    
+    // Wenn das Theme aktualisiert wurde, speichere es
+    if (themeUpdated) {
+      dataStore.updateTheme(theme.id, theme);
+      themesUpdated = true;
+    }
+  }
+  
+  if (themesUpdated) {
+    console.log('[Fix] Theme-Daten wurden korrigiert und gespeichert.');
+  } else {
+    console.log('[Fix] Keine Korrekturen an den Theme-Daten notwendig.');
+  }
+}
+
 // App bereit-Event
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
   setupIpcHandlers();
   registerSavedShortcuts();
 
   // Auto-Updater einrichten
   setupAutoUpdater();
+  
+  // Theme-Daten korrigieren
+  await fixThemeData();
+  
+  // Bestehende Themen mit persistenten Prozessidentifikatoren aktualisieren
+  await updateExistingThemesWithPersistentIdentifiers();
+  
+  // Prozesszuordnungen wiederherstellen
+  await restoreProcessAssociations();
 
   // Register global shortcut to open DevTools
   globalShortcut.register("CommandOrControl+Shift+I", () => {
@@ -1523,5 +1770,407 @@ function setupAutoUpdater() {
 function sendStatusToWindow(text: string) {
   if (mainWindow) {
     mainWindow.webContents.send("update-message", text);
+  }
+}
+
+/**
+ * Erstellt einen persistenten Identifikator für einen Prozess
+ */
+function createPersistentIdentifier(process: ProcessInfo): PersistentProcessIdentifier {
+  return {
+    executablePath: process.path,
+    executableName: process.name,
+    titlePattern: process.title
+  };
+}
+
+/**
+ * Findet einen passenden Prozess anhand eines persistenten Identifikators
+ */
+function findMatchingProcess(processes: ProcessInfo[], persistentId: PersistentProcessIdentifier): ProcessInfo | undefined {
+  return processes.find(process => {
+    // Prüfen auf Übereinstimmung des Ausführungspfads (wenn vorhanden)
+    if (persistentId.executablePath && process.path) {
+      if (process.path.toLowerCase() === persistentId.executablePath.toLowerCase()) {
+        return true;
+      }
+    }
+    
+    // Prüfen auf Übereinstimmung des Anwendungsnamens
+    if (process.name.toLowerCase() === persistentId.executableName.toLowerCase()) {
+      // Wenn ein Titel-Muster vorhanden ist, auch dieses prüfen
+      if (persistentId.titlePattern) {
+        return process.title.includes(persistentId.titlePattern);
+      }
+      return true;
+    }
+    
+    return false;
+  });
+}
+
+/**
+ * Stellt Prozesszuordnungen nach einem Neustart wieder her und startet fehlende Anwendungen
+ */
+async function restoreProcessAssociations() {
+  console.log('[Restore] Beginne Wiederherstellung der Prozesszuordnungen...');
+  
+  // Alle gespeicherten Themen abrufen
+  const themes = dataStore.getThemes();
+  
+  // Aktuelle Prozesse abrufen
+  const currentProcesses = await getRunningApplications();
+  
+  console.log(`[Restore] ${themes.length} Themen und ${currentProcesses.length} laufende Prozesse gefunden.`);
+  
+  // Liste der zu startenden Anwendungen
+  const applicationsToStart: PersistentProcessIdentifier[] = [];
+  
+  // Für jedes Thema
+  themes.forEach(theme => {
+    // Für jeden persistenten Prozessidentifikator im Thema
+    if (theme.persistentProcesses && theme.persistentProcesses.length > 0) {
+      console.log(`[Restore] Verarbeite Thema "${theme.name}" mit ${theme.persistentProcesses.length} persistenten Prozessen.`);
+      
+      theme.persistentProcesses.forEach(persistentId => {
+        // Passenden aktuellen Prozess finden
+        const matchingProcess = findMatchingProcess(currentProcesses, persistentId);
+        
+        if (matchingProcess) {
+          console.log(`[Restore] Passenden Prozess gefunden: ${matchingProcess.name} (${matchingProcess.id})`);
+          
+          // Prozess zum Thema hinzufügen (ohne doppelte Einträge)
+          if (!theme.processes.includes(matchingProcess.id)) {
+            console.log(`[Restore] Füge Prozess ${matchingProcess.id} zum Thema ${theme.id} hinzu.`);
+            theme.processes.push(matchingProcess.id);
+            dataStore.updateTheme(theme.id, theme);
+          }
+        } else {
+          console.log(`[Restore] Kein passender Prozess für ${persistentId.executableName} gefunden.`);
+          
+          // Prüfen, ob die Anwendung gestartet werden kann
+          if (persistentId.executablePath) {
+            // Prüfen, ob die Anwendung bereits in der Liste der zu startenden Anwendungen ist
+            const alreadyInStartList = applicationsToStart.some(
+              app => app.executablePath === persistentId.executablePath
+            );
+            
+            if (!alreadyInStartList) {
+              console.log(`[Restore] Füge ${persistentId.executableName} zur Liste der zu startenden Anwendungen hinzu.`);
+              applicationsToStart.push(persistentId);
+            }
+          }
+        }
+      });
+    } else {
+      console.log(`[Restore] Thema "${theme.name}" hat keine persistenten Prozesse.`);
+    }
+  });
+  
+  console.log('[Restore] Wiederherstellung der Prozesszuordnungen abgeschlossen.');
+  
+  // Starte die fehlenden Anwendungen
+  if (applicationsToStart.length > 0) {
+    console.log(`[Restore] Starte ${applicationsToStart.length} fehlende Anwendungen...`);
+    await startMissingApplications(applicationsToStart);
+  } else {
+    console.log('[Restore] Keine fehlenden Anwendungen zu starten.');
+  }
+}
+
+/**
+ * Startet fehlende Anwendungen anhand ihrer Pfade
+ */
+async function startMissingApplications(applications: PersistentProcessIdentifier[]): Promise<void> {
+  console.log(`[Restore] Starte ${applications.length} Anwendungen...`);
+  
+  // Starte jede Anwendung
+  for (const app of applications) {
+    if (app.executablePath) {
+      try {
+        // Prüfe, ob die Datei existiert
+        const fs = require('fs');
+        const exists = fs.existsSync(app.executablePath);
+        
+        if (!exists) {
+          console.error(`[Restore] Fehler: Die Datei ${app.executablePath} für ${app.executableName} existiert nicht.`);
+          console.log(`[Restore] Versuche, den Pfad für ${app.executableName} zu finden...`);
+          
+          // Hier könnte man eine Suche nach der Anwendung implementieren
+          // Zum Beispiel für bekannte Browser und Anwendungen
+          let alternativePath = null;
+          
+          if (app.executableName.toLowerCase() === 'perplexity') {
+            // Versuche, Perplexity im Standardpfad zu finden
+            const possiblePaths = [
+              `${process.env.LOCALAPPDATA}\Programs\Perplexity\Perplexity.exe`,
+              `${process.env.PROGRAMFILES}\Perplexity\Perplexity.exe`,
+              `${process.env['PROGRAMFILES(X86)']}\Perplexity\Perplexity.exe`
+            ];
+            
+            for (const path of possiblePaths) {
+              if (fs.existsSync(path)) {
+                alternativePath = path;
+                console.log(`[Restore] Alternativer Pfad für Perplexity gefunden: ${path}`);
+                break;
+              }
+            }
+          } else if (app.executableName.toLowerCase().includes('chatgpt')) {
+            // Versuche, ChatGPT im Standardpfad zu finden
+            const possiblePaths = [
+              `${process.env.LOCALAPPDATA}\Programs\ChatGPT\ChatGPT.exe`,
+              `${process.env.PROGRAMFILES}\ChatGPT\ChatGPT.exe`,
+              `${process.env['PROGRAMFILES(X86)']}\ChatGPT\ChatGPT.exe`
+            ];
+            
+            for (const path of possiblePaths) {
+              if (fs.existsSync(path)) {
+                alternativePath = path;
+                console.log(`[Restore] Alternativer Pfad für ChatGPT gefunden: ${path}`);
+                break;
+              }
+            }
+          }
+          
+          if (alternativePath) {
+            console.log(`[Restore] Starte Anwendung mit alternativem Pfad: ${app.executableName} (${alternativePath})`);
+            await startApplication(alternativePath);
+          } else {
+            console.error(`[Restore] Kein alternativer Pfad für ${app.executableName} gefunden. Anwendung kann nicht gestartet werden.`);
+          }
+        } else {
+          console.log(`[Restore] Starte Anwendung: ${app.executableName} (${app.executablePath})`);
+          // Starte die Anwendung
+          await startApplication(app.executablePath);
+        }
+        
+        // Kurze Pause zwischen dem Starten von Anwendungen, um System nicht zu überlasten
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.error(`[Restore] Fehler beim Starten von ${app.executableName}:`, error);
+      }
+    } else {
+      console.error(`[Restore] Fehler: Kein Pfad für ${app.executableName} angegeben.`);
+    }
+  }
+  
+  console.log('[Restore] Alle Anwendungen gestartet.');
+  
+  // Warte kurz und aktualisiere dann die Prozessliste, um die neuen Prozesse zu erfassen
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  
+  // Aktualisiere die Prozesszuordnungen mit den neu gestarteten Anwendungen
+  await updateProcessAssociations();
+}
+
+/**
+ * Startet eine Anwendung mit dem angegebenen Pfad
+ */
+async function startApplication(executablePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      // Verwende child_process.spawn, um die Anwendung zu starten (besser für mehrere Prozesse)
+      const { spawn } = require('child_process');
+      
+      console.log(`[Restore] Starte Anwendung mit spawn: ${executablePath}`);
+      
+      // Unter Windows müssen wir cmd.exe verwenden, um den start-Befehl auszuführen
+      // Der /c Parameter bedeutet, dass cmd nach Ausführung des Befehls beendet wird
+      // Der /b Parameter für start bedeutet, dass kein neues Fenster geöffnet wird
+      const childProcess = spawn('cmd.exe', ['/c', 'start', '/b', '""', executablePath], {
+        detached: true,  // Prozess vom Elternprozess trennen
+        stdio: 'ignore', // Keine Ein-/Ausgabe-Streams
+        windowsHide: true // Kein Konsolenfenster anzeigen
+      });
+      
+      // Wir warten nicht auf das Ende des Prozesses, da wir ihn im Hintergrund laufen lassen wollen
+      childProcess.unref();
+      
+      // Kurze Verzögerung, um sicherzustellen, dass der Prozess gestartet wird
+      setTimeout(() => {
+        console.log(`[Restore] Anwendung ${executablePath} erfolgreich gestartet.`);
+        resolve();
+      }, 500);
+    } catch (error) {
+      console.error(`[Restore] Unerwarteter Fehler beim Starten von ${executablePath}:`, error);
+      reject(error);
+    }
+  });
+}
+
+/**
+ * Aktualisiert die Prozesszuordnungen nach dem Starten neuer Anwendungen
+ */
+async function updateProcessAssociations(): Promise<void> {
+  console.log('[Restore] Aktualisiere Prozesszuordnungen nach dem Starten neuer Anwendungen...');
+  
+  // Alle gespeicherten Themen abrufen
+  const themes = dataStore.getThemes();
+  
+  // Aktuelle Prozesse abrufen (sollte jetzt auch die neu gestarteten Anwendungen enthalten)
+  const currentProcesses = await getRunningApplications();
+  
+  // Für jedes Thema
+  themes.forEach(theme => {
+    // Für jeden persistenten Prozessidentifikator im Thema
+    if (theme.persistentProcesses && theme.persistentProcesses.length > 0) {
+      theme.persistentProcesses.forEach(persistentId => {
+        // Passenden aktuellen Prozess finden
+        const matchingProcess = findMatchingProcess(currentProcesses, persistentId);
+        
+        if (matchingProcess) {
+          // Prozess zum Thema hinzufügen (ohne doppelte Einträge)
+          if (!theme.processes.includes(matchingProcess.id)) {
+            console.log(`[Restore] Füge neu gestarteten Prozess ${matchingProcess.id} (${matchingProcess.name}) zum Thema ${theme.id} hinzu.`);
+            theme.processes.push(matchingProcess.id);
+            dataStore.updateTheme(theme.id, theme);
+          }
+        }
+      });
+    }
+  });
+  
+  console.log('[Restore] Aktualisierung der Prozesszuordnungen abgeschlossen.');
+}
+
+/**
+ * Aktualisiert bestehende Themen mit persistenten Prozessidentifikatoren
+ * Diese Funktion wird einmalig beim Start ausgeführt, um sicherzustellen, dass alle Themen
+ * persistente Prozessidentifikatoren für ihre Prozesse haben
+ */
+async function updateExistingThemesWithPersistentIdentifiers(): Promise<void> {
+  console.log('[Init] Aktualisiere bestehende Themen mit persistenten Prozessidentifikatoren...');
+  
+  try {
+    // Alle gespeicherten Themen abrufen
+    const themes = dataStore.getThemes();
+    
+    // Wenn keine Themen vorhanden sind, gibt es nichts zu tun
+    if (themes.length === 0) {
+      console.log('[Init] Keine Themen gefunden, die aktualisiert werden müssen.');
+      return;
+    }
+    
+    // Aktuelle Prozesse abrufen
+    const currentProcesses = await getRunningApplications();
+    console.log(`[Init] ${themes.length} Themen und ${currentProcesses.length} laufende Prozesse gefunden.`);
+    
+    // Debug: Zeige alle laufenden Prozesse an
+    currentProcesses.forEach(process => {
+      console.log(`[Init] Laufender Prozess: ${process.name} (${process.id}), Pfad: ${process.path || 'unbekannt'}`);
+    });
+    
+    // Sammle alle Informationen über Prozesse aus allen Themen
+    const processInfoMap = new Map<number, ProcessInfo>();
+    for (const process of currentProcesses) {
+      processInfoMap.set(process.id, process);
+    }
+    
+    let themesUpdated = 0;
+    let processesWithPersistentIds = 0;
+    
+    // Für jedes Thema
+    for (const theme of themes) {
+      let themeUpdated = false;
+      
+      console.log(`[Init] Verarbeite Thema "${theme.name}" (ID: ${theme.id})`);
+      
+      // Initialisiere persistentProcesses, falls nicht vorhanden
+      if (!theme.persistentProcesses) {
+        console.log(`[Init] Initialisiere persistentProcesses für Thema "${theme.name}".`);
+        theme.persistentProcesses = [];
+        themeUpdated = true; // Markiere als aktualisiert, damit es gespeichert wird
+      }
+      
+      // Initialisiere processes, falls nicht vorhanden
+      if (!theme.processes) {
+        theme.processes = [];
+        themeUpdated = true; // Markiere als aktualisiert, damit es gespeichert wird
+      }
+      
+      // Sammle alle Prozess-IDs aus applications und processes
+      const allProcessIds = new Set<number>();
+      
+      // Füge Prozess-IDs aus processes hinzu
+      if (theme.processes && theme.processes.length > 0) {
+        theme.processes.forEach(pid => allProcessIds.add(pid));
+      }
+      
+      // Füge Prozess-IDs aus applications hinzu (nur numerische IDs, keine Fenster-Handles)
+      if (theme.applications && theme.applications.length > 0) {
+        theme.applications.forEach(appId => {
+          const numId = typeof appId === 'string' ? parseInt(appId, 10) : appId;
+          // Fenster-Handles sind typischerweise sehr große Zahlen, wir filtern sie heraus
+          if (numId < 100000) {
+            allProcessIds.add(numId);
+            // Auch zum processes-Array hinzufügen, falls noch nicht vorhanden
+            if (!theme.processes.includes(numId)) {
+              theme.processes.push(numId);
+              themeUpdated = true;
+            }
+          }
+        });
+      }
+      
+      console.log(`[Init] Thema "${theme.name}" hat ${allProcessIds.size} zugeordnete Prozesse (kombiniert aus applications und processes).`);
+      
+      // Für jeden Prozess im Thema
+      if (allProcessIds.size > 0) {
+        // Speichere die aktuellen Prozess-IDs, um später nicht mehr existierende zu entfernen
+        const validProcessIds = [];
+        
+        for (const processId of allProcessIds) {
+          console.log(`[Init] Verarbeite Prozess mit ID ${processId} im Thema "${theme.name}".`);
+          
+          // Finde den Prozess in der Liste der laufenden Prozesse
+          const process = processInfoMap.get(processId);
+          
+          if (process) {
+            console.log(`[Init] Prozess gefunden: ${process.name} (${process.id})`);
+            validProcessIds.push(processId);
+            
+            // Erstelle einen persistenten Identifikator für den Prozess
+            const persistentId = createPersistentIdentifier(process);
+            console.log(`[Init] Persistenter Identifikator erstellt: ${JSON.stringify(persistentId)}`);
+            
+            // Prüfe, ob der persistente Identifikator bereits existiert
+            const exists = theme.persistentProcesses.some(
+              p => p.executableName === persistentId.executableName
+            );
+            
+            if (!exists) {
+              console.log(`[Init] Füge persistenten Identifikator für ${process.name} (${process.id}) zum Thema ${theme.id} hinzu.`);
+              theme.persistentProcesses.push(persistentId);
+              themeUpdated = true;
+              processesWithPersistentIds++;
+            } else {
+              console.log(`[Init] Persistenter Identifikator für ${process.name} existiert bereits im Thema ${theme.id}.`);
+            }
+          } else {
+            console.log(`[Init] Prozess mit ID ${processId} nicht in der Liste der laufenden Prozesse gefunden.`);
+            // Wir behalten den Prozess bei, auch wenn er nicht mehr läuft
+          }
+        }
+      } else {
+        console.log(`[Init] Thema "${theme.name}" hat keine zugeordneten Prozesse.`);
+      }
+      
+      // Speichere das aktualisierte Thema
+      if (themeUpdated) {
+        console.log(`[Init] Speichere aktualisiertes Thema "${theme.name}" mit ${theme.persistentProcesses.length} persistenten Prozessidentifikatoren.`);
+        dataStore.updateTheme(theme.id, theme);
+        themesUpdated++;
+      } else {
+        console.log(`[Init] Keine Änderungen am Thema "${theme.name}".`);
+      }
+    }
+    
+    // Erzwinge das Speichern aller Themen, auch wenn keine Änderungen vorgenommen wurden
+    // Dies stellt sicher, dass die persistentProcesses und processes Arrays in der JSON-Datei gespeichert werden
+    dataStore.setThemes(themes);
+    
+    console.log(`[Init] ${themesUpdated} Themen mit insgesamt ${processesWithPersistentIds} persistenten Prozessidentifikatoren aktualisiert.`);
+  } catch (error) {
+    console.error('[Init] Fehler bei der Aktualisierung der Themen mit persistenten Prozessidentifikatoren:', error);
   }
 }

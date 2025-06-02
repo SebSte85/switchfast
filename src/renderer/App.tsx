@@ -361,6 +361,7 @@ const App: React.FC = () => {
   // Anwendung zum Theme hinzufügen
   const handleAddToTheme = useCallback(
     (themeId: string, appId: number | string) => {
+      // Zuerst den lokalen State aktualisieren
       setThemes((prevThemes) =>
         prevThemes.map((theme) =>
           theme.id === themeId
@@ -371,6 +372,24 @@ const App: React.FC = () => {
             : theme
         )
       );
+      
+      // Dann den IPC-Handler aufrufen, um persistente Identifikatoren zu erstellen
+      // Nur für numerische Prozess-IDs (keine Fenster-Handles)
+      const numId = typeof appId === 'string' ? parseInt(appId, 10) : appId;
+      if (!isNaN(numId) && numId < 100000) { // Fenster-Handles sind typischerweise sehr große Zahlen
+        console.log(`[UI] Rufe IPC-Handler add-process-to-theme für Prozess ${numId} und Thema ${themeId} auf`);
+        ipcRenderer.invoke('add-process-to-theme', themeId, numId)
+          .then(success => {
+            if (success) {
+              console.log(`[UI] Prozess ${numId} erfolgreich zum Thema ${themeId} hinzugefügt mit persistentem Identifikator.`);
+            } else {
+              console.error(`[UI] Fehler beim Hinzufügen des Prozesses ${numId} zum Thema ${themeId} mit persistentem Identifikator.`);
+            }
+          })
+          .catch(error => {
+            console.error(`[UI] Fehler beim Aufruf des IPC-Handlers add-process-to-theme:`, error);
+          });
+      }
     },
     []
   );
@@ -378,6 +397,7 @@ const App: React.FC = () => {
   // Anwendung aus Theme entfernen
   const handleRemoveFromTheme = useCallback(
     (themeId: string, appId: number | string) => {
+      // Zuerst den lokalen State aktualisieren
       setThemes((prevThemes) =>
         prevThemes.map((theme) =>
           theme.id === themeId
@@ -388,6 +408,24 @@ const App: React.FC = () => {
             : theme
         )
       );
+      
+      // Dann den IPC-Handler aufrufen, um persistente Identifikatoren zu entfernen
+      // Nur für numerische Prozess-IDs (keine Fenster-Handles)
+      const numId = typeof appId === 'string' ? parseInt(appId, 10) : appId;
+      if (!isNaN(numId) && numId < 100000) { // Fenster-Handles sind typischerweise sehr große Zahlen
+        console.log(`[UI] Rufe IPC-Handler remove-process-from-theme für Prozess ${numId} und Thema ${themeId} auf`);
+        ipcRenderer.invoke('remove-process-from-theme', themeId, numId)
+          .then(success => {
+            if (success) {
+              console.log(`[UI] Prozess ${numId} erfolgreich aus Thema ${themeId} entfernt mit persistentem Identifikator.`);
+            } else {
+              console.error(`[UI] Fehler beim Entfernen des Prozesses ${numId} aus Thema ${themeId} mit persistentem Identifikator.`);
+            }
+          })
+          .catch(error => {
+            console.error(`[UI] Fehler beim Aufruf des IPC-Handlers remove-process-from-theme:`, error);
+          });
+      }
     },
     []
   );
@@ -451,13 +489,24 @@ const App: React.FC = () => {
     // Sammle alle zu schützenden IDs
     let appIdsToProtect: number[] = [];
 
-    // 1. Sammle reguläre Prozess-IDs
+    // 1. Sammle reguläre Prozess-IDs aus applications
     currentTheme.applications.forEach((id) => {
       // Wenn id ein number ist, füge es hinzu
       if (typeof id === "number") {
         appIdsToProtect.push(id);
       }
     });
+    
+    // 1.1 Sammle Prozess-IDs aus dem processes-Array, falls vorhanden
+    if (currentTheme.processes && currentTheme.processes.length > 0) {
+      console.log(`[FOCUS] Füge ${currentTheme.processes.length} Prozesse aus processes-Array hinzu für Theme ${currentTheme.name}`);
+      currentTheme.processes.forEach((id) => {
+        if (typeof id === "number" && !appIdsToProtect.includes(id)) {
+          console.log(`[FOCUS] Füge Prozess-ID ${id} aus processes-Array hinzu`);
+          appIdsToProtect.push(id);
+        }
+      });
+    }
 
     // 2. Sammle Fenster-Handles aus dem windows-Array, falls vorhanden
     if (
@@ -476,11 +525,15 @@ const App: React.FC = () => {
 
     // 3. Prüfe, ob wir überhaupt etwas zu schützen haben
     if (appIdsToProtect.length === 0) {
+      console.log(`[FOCUS] Keine zu schützenden Anwendungen gefunden für Theme ${currentTheme.name}`);
+      console.log(`[FOCUS] Theme Daten:`, JSON.stringify(currentTheme, null, 2));
       alert(
         "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert."
       );
       return;
     }
+    
+    console.log(`[FOCUS] Aktiviere Focus-Modus für Theme ${currentTheme.name} mit ${appIdsToProtect.length} zu schützenden Anwendungen:`, appIdsToProtect);
 
     try {
       // Neue Methode: "Show Desktop" und dann Apps wiederherstellen

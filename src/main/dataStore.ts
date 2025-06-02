@@ -2,6 +2,7 @@ import { app } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { PersistentProcessIdentifier } from "../types";
 
 const THEMES_FILE = "themes.json";
 
@@ -13,6 +14,7 @@ interface Theme {
   processes: number[];
   windows?: WindowInfo[];
   color?: string;
+  persistentProcesses: PersistentProcessIdentifier[];
 }
 
 interface WindowInfo {
@@ -44,8 +46,18 @@ export class DataStore {
   private loadThemes(): void {
     try {
       const data = fs.readFileSync(this.dataPath, "utf8");
-      this.themes = JSON.parse(data);
+      const loadedThemes = JSON.parse(data);
+      
+      // Stelle sicher, dass alle Themen die erforderlichen Felder haben
+      this.themes = loadedThemes.map((theme: any) => ({
+        ...theme,
+        processes: theme.processes || [],
+        persistentProcesses: theme.persistentProcesses || []
+      }));
+      
+      console.log(`[DataStore] ${this.themes.length} Themen geladen.`);
     } catch (error) {
+      console.error(`[DataStore] Fehler beim Laden der Themen:`, error);
       this.themes = [];
     }
   }
@@ -58,15 +70,49 @@ export class DataStore {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Speichere die Themes
-      fs.writeFileSync(this.dataPath, JSON.stringify(this.themes, null, 2));
+      // Bereite die Themes für die Speicherung vor und stelle sicher, dass alle wichtigen Felder enthalten sind
+      const themesToSave = this.themes.map(theme => {
+        // Stelle sicher, dass alle Arrays initialisiert sind
+        const processes = theme.processes || [];
+        const persistentProcesses = theme.persistentProcesses || [];
+        const applications = theme.applications || [];
+        
+        console.log(`[DataStore] Speichere Thema ${theme.id} mit ${persistentProcesses.length} persistenten Prozessen und ${processes.length} Prozessen`);
+        
+        // Erstelle ein vollständiges Objekt mit allen erforderlichen Feldern
+        // Wichtig: Wir erstellen ein neues Objekt, um sicherzustellen, dass keine Referenzen bestehen bleiben
+        const themeToSave = {
+          id: theme.id,
+          name: theme.name,
+          applications: applications,
+          shortcut: theme.shortcut,
+          color: theme.color || '',
+          processes: processes,
+          persistentProcesses: persistentProcesses
+        };
+        
+        return themeToSave;
+      });
+
+      // Speichere die Themes mit expliziter Formatierung
+      const jsonContent = JSON.stringify(themesToSave, null, 2);
+      fs.writeFileSync(this.dataPath, jsonContent);
+      
+      // Logge den Inhalt der gespeicherten Datei zur Überprüfung
+      console.log(`[DataStore] Themes erfolgreich in ${this.dataPath} gespeichert:`);
+      console.log(jsonContent);
     } catch (error) {
+      console.error(`[DataStore] Fehler beim Speichern der Themes:`, error);
       throw error; // Werfe den Fehler weiter, damit wir ihn debuggen können
     }
   }
 
   getThemes(): Theme[] {
     return this.themes;
+  }
+  
+  getTheme(themeId: string): Theme | undefined {
+    return this.themes.find(theme => theme.id === themeId);
   }
 
   setThemes(themes: Theme[]): void {
@@ -75,7 +121,15 @@ export class DataStore {
   }
 
   addTheme(theme: Theme): void {
-    this.themes.push(theme);
+    // Stelle sicher, dass alle erforderlichen Arrays initialisiert sind
+    const newTheme = {
+      ...theme,
+      processes: theme.processes || [],
+      persistentProcesses: theme.persistentProcesses || []
+    };
+    
+    this.themes.push(newTheme);
+    console.log(`[DataStore] Neues Thema hinzugefügt: ${newTheme.name} (${newTheme.id})`);
     this.saveThemes();
   }
 
@@ -108,12 +162,24 @@ export class DataStore {
         ...existingWindowHandles,
       ];
       console.log(`[DataStore] Combined applications:`, combinedApplications);
+      
+      // Persistente Prozessidentifikatoren beibehalten
+      const persistentProcesses = updatedTheme.persistentProcesses || existingTheme.persistentProcesses || [];
+      console.log(`[DataStore] Persistent processes:`, persistentProcesses);
+      
+      // Prozess-IDs beibehalten
+      const processes = updatedTheme.processes || existingTheme.processes || [];
+      console.log(`[DataStore] Processes:`, processes);
 
+      // Aktualisiertes Thema mit allen wichtigen Daten
       this.themes[index] = {
         ...updatedTheme,
         applications: combinedApplications,
+        persistentProcesses: persistentProcesses,
+        processes: processes
       };
 
+      console.log(`[DataStore] Final updated theme:`, this.themes[index]);
       this.saveThemes();
     }
   }
@@ -192,6 +258,46 @@ export class DataStore {
     });
 
     this.saveThemes();
+  }
+
+  // Methode zum Hinzufügen eines persistenten Prozesses zu einem Thema
+  addPersistentProcessToTheme(themeId: string, persistentProcess: PersistentProcessIdentifier): void {
+    const theme = this.themes.find((t) => t.id === themeId);
+    
+    if (theme) {
+      // Sicherstellen, dass persistentProcesses existiert
+      if (!theme.persistentProcesses) {
+        theme.persistentProcesses = [];
+      }
+      
+      // Prüfen, ob der persistente Prozess bereits existiert
+      const exists = theme.persistentProcesses.some(
+        p => p.executableName === persistentProcess.executableName
+      );
+      
+      if (!exists) {
+        theme.persistentProcesses.push(persistentProcess);
+        this.saveThemes();
+      }
+    }
+  }
+  
+  // Methode zum Entfernen eines persistenten Prozesses aus einem Thema
+  removePersistentProcessFromTheme(themeId: string, executableName: string): void {
+    const theme = this.themes.find((t) => t.id === themeId);
+    
+    if (theme && theme.persistentProcesses) {
+      theme.persistentProcesses = theme.persistentProcesses.filter(
+        p => p.executableName !== executableName
+      );
+      this.saveThemes();
+    }
+  }
+  
+  // Methode zum Abrufen aller persistenten Prozesse für ein Thema
+  getPersistentProcessesForTheme(themeId: string): PersistentProcessIdentifier[] {
+    const theme = this.themes.find((t) => t.id === themeId);
+    return theme?.persistentProcesses || [];
   }
 
   getAllAssignedWindows(): Set<number> {
