@@ -12,14 +12,17 @@ const App: React.FC = () => {
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingPhase, setLoadingPhase] = useState(0);
-  // Reduzierte Anzahl von Phasen mit besseren Beschreibungen
-  const loadingPhaseTexts = [
-    "Initializing workspace...", // Phase 0: Initialer Ladevorgang
-    "Starting your applications..." // Phase 1: Anwendungen werden gestartet
-  ];
+  const [shortcutsRegistered, setShortcutsRegistered] = useState(false);
   const [compactMode, setCompactMode] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+
+  // Reduzierte Anzahl von Phasen mit besseren Beschreibungen
+  const loadingPhaseTexts = [
+    "Initializing workspace...", // Phase 0: Initialer Ladevorgang
+    "Starting your applications...", // Phase 1: Anwendungen werden gestartet
+    "Registering shortcuts..." // Phase 2: Shortcuts werden registriert
+  ];
 
   // Refresh-Funktion mit useCallback
   const fetchApplications = useCallback(async () => {
@@ -194,7 +197,7 @@ const App: React.FC = () => {
   
   // Wir entfernen den Timer-Effekt und steuern stattdessen die Phasen durch die IPC-Events
   
-  // Listener für das Starten von Anwendungen
+  // Listener für das Starten von Anwendungen und Shortcut-Registrierung
   useEffect(() => {
     const handleAppStarting = () => {
       console.log("[UI] apps-starting Event empfangen, setze loading=true");
@@ -205,18 +208,23 @@ const App: React.FC = () => {
     
     const handleAppsStarted = () => {
       console.log("[UI] apps-started Event empfangen, aktualisiere Anwendungen");
-      // Wir bleiben in Phase 1, da die Anwendungen bereits gestartet werden
-      
       // Lade die Anwendungen neu, aber behalte den Ladezustand bei
-      // bis die Anwendungen vollständig geladen sind
+      // bis die Anwendungen vollständig geladen sind und Shortcuts registriert sind
       const updateApps = async () => {
         try {
           const apps = await ipcRenderer.invoke("get-running-applications");
           setApplications(apps || []);
           
-          // Erst jetzt den Ladezustand beenden
-          console.log("[UI] Anwendungen aktualisiert, setze loading=false");
-          setLoading(false);
+          // Wir beenden den Ladezustand noch nicht, sondern warten auf die Shortcut-Registrierung
+          console.log("[UI] Anwendungen aktualisiert, warte auf Shortcut-Registrierung");
+          // Setze die Phase auf 2 (dritter Text), für die Shortcut-Registrierung
+          setLoadingPhase(2);
+          
+          // Wenn bereits Shortcuts registriert wurden, können wir den Ladezustand beenden
+          if (shortcutsRegistered) {
+            console.log("[UI] Shortcuts bereits registriert, beende Ladezustand");
+            setLoading(false);
+          }
         } catch (error) {
           console.error("[UI] Fehler beim Aktualisieren der Anwendungen:", error);
           setLoading(false);
@@ -226,14 +234,23 @@ const App: React.FC = () => {
       updateApps();
     };
     
+    const handleShortcutsRegistered = () => {
+      console.log("[UI] shortcuts-registered Event empfangen");
+      setShortcutsRegistered(true);
+      // Beende den Ladezustand, wenn die Shortcuts registriert wurden
+      setLoading(false);
+    };
+    
     ipcRenderer.on("apps-starting", handleAppStarting);
     ipcRenderer.on("apps-started", handleAppsStarted);
+    ipcRenderer.on("shortcuts-registered", handleShortcutsRegistered);
     
     return () => {
       ipcRenderer.removeListener("apps-starting", handleAppStarting);
       ipcRenderer.removeListener("apps-started", handleAppsStarted);
+      ipcRenderer.removeListener("shortcuts-registered", handleShortcutsRegistered);
     };
-  }, []);
+  }, [shortcutsRegistered]);
   
   // Laden der laufenden Anwendungen und Refresh-Intervall
   useEffect(() => {
@@ -359,7 +376,7 @@ const App: React.FC = () => {
 
   // Handler für Theme-Aktivierung durch Shortcuts
   useEffect(() => {
-    const handleActivateThemeAndMinimize = (_: any, themeId: string) => {
+    const handleActivateThemeAndMinimize = (_: any, themeId: string, freshTheme?: Theme) => {
       setActiveThemes([themeId]);
 
       // For backward compatibility
@@ -368,7 +385,13 @@ const App: React.FC = () => {
 
       // Alle anderen Anwendungen minimieren
       try {
-        applyFocusMode(themeId, true);
+        // Verwende das direkt mitgesendete Theme, wenn vorhanden
+        if (freshTheme) {
+          console.log(`[FOCUS] Verwende direkt mitgesendetes Theme für ${themeId}:`, freshTheme);
+          applyFocusMode(themeId, true, freshTheme);
+        } else {
+          applyFocusMode(themeId, true);
+        }
       } catch (error) {
         console.error("Fehler beim Anwenden des Focus Mode:", error);
       }
@@ -554,29 +577,28 @@ const App: React.FC = () => {
     }
   };
 
-  // Modified to support multiple themes
-  const applyFocusMode = async (themeId: string, active: boolean) => {
+  // Modified to support multiple themes with PERFORMANCE-OPTIMIERUNG
+  const applyFocusMode = async (themeId: string, active: boolean, providedTheme?: Theme) => {
     if (!active) {
       return;
     }
 
-    // Hole das aktuelle Theme direkt aus der Datenbank, um die aktuellsten PIDs zu erhalten
+    // PERFORMANCE-OPTIMIERUNG: Reduziere Logging und optimiere Theme-Zugriff
     let currentTheme;
-    try {
-      // Lade das aktuelle Theme aus der Datenbank
-      const freshTheme = await ipcRenderer.invoke("get-theme", themeId);
-      if (freshTheme) {
-        console.log(`[FOCUS] Frisches Theme aus Datenbank geladen für ${themeId}:`, freshTheme);
-        currentTheme = freshTheme;
-      } else {
-        // Fallback auf lokalen State, wenn Theme nicht in der Datenbank gefunden wurde
-        console.log(`[FOCUS] Theme ${themeId} nicht in Datenbank gefunden, verwende lokalen State`);
-        currentTheme = themes.find((t) => t.id === themeId);
-      }
-    } catch (error) {
-      console.error(`[FOCUS] Fehler beim Laden des Themes ${themeId} aus der Datenbank:`, error);
-      // Fallback auf lokalen State bei Fehlern
+    if (providedTheme) {
+      currentTheme = providedTheme;
+    } else {
+      // Schneller Zugriff auf lokalen State zuerst, dann erst Datenbank-Abfrage
       currentTheme = themes.find((t) => t.id === themeId);
+      
+      // Nur wenn nicht im lokalen State gefunden, aus Datenbank laden
+      if (!currentTheme) {
+        try {
+          currentTheme = await ipcRenderer.invoke("get-theme", themeId);
+        } catch (error) {
+          console.error(`[FOCUS] Fehler beim Laden des Themes ${themeId}:`, error);
+        }
+      }
     }
     
     if (!currentTheme) {
@@ -584,57 +606,52 @@ const App: React.FC = () => {
       return;
     }
 
-    // Sammle alle zu schützenden IDs
-    let appIdsToProtect: number[] = [];
+    // PERFORMANCE-OPTIMIERUNG: Verwende Set für schnellere Lookups
+    const appIdsToProtectSet = new Set<number>();
 
-    // 1. Sammle reguläre Prozess-IDs aus applications
-    currentTheme.applications.forEach((id: number | string) => {
-      // Wenn id ein number ist, füge es hinzu
-      if (typeof id === "number") {
-        appIdsToProtect.push(id);
+    // 1. Sammle reguläre Prozess-IDs aus applications - optimiert
+    if (currentTheme.applications && currentTheme.applications.length > 0) {
+      for (let i = 0; i < currentTheme.applications.length; i++) {
+        const id = currentTheme.applications[i];
+        if (typeof id === "number") {
+          appIdsToProtectSet.add(id);
+        }
       }
-    });
+    }
     
-    // 1.1 Sammle Prozess-IDs aus dem processes-Array, falls vorhanden
+    // 1.1 Sammle Prozess-IDs aus dem processes-Array - optimiert
     if (currentTheme.processes && currentTheme.processes.length > 0) {
-      console.log(`[FOCUS] Füge ${currentTheme.processes.length} Prozesse aus processes-Array hinzu für Theme ${currentTheme.name}`);
-      currentTheme.processes.forEach((id: number | string) => {
-        if (typeof id === "number" && !appIdsToProtect.includes(id)) {
-          console.log(`[FOCUS] Füge Prozess-ID ${id} aus processes-Array hinzu`);
-          appIdsToProtect.push(id);
+      for (let i = 0; i < currentTheme.processes.length; i++) {
+        const id = currentTheme.processes[i];
+        if (typeof id === "number") {
+          appIdsToProtectSet.add(id);
         }
-      });
+      }
     }
 
-    // 2. Sammle Fenster-Handles aus dem windows-Array, falls vorhanden
-    if (
-      (currentTheme as any).windows &&
-      (currentTheme as any).windows.length > 0
-    ) {
-      (currentTheme as any).windows.forEach((window: WindowInfo) => {
-        if (window.hwnd && !appIdsToProtect.includes(window.hwnd)) {
-          appIdsToProtect.push(window.hwnd);
-        }
-        if (window.processId && !appIdsToProtect.includes(window.processId)) {
-          appIdsToProtect.push(window.processId);
-        }
-      });
+    // 2. Sammle Fenster-Handles aus dem windows-Array - optimiert
+    if ((currentTheme as any).windows && (currentTheme as any).windows.length > 0) {
+      const windows = (currentTheme as any).windows;
+      for (let i = 0; i < windows.length; i++) {
+        const window = windows[i];
+        if (window.hwnd) appIdsToProtectSet.add(window.hwnd);
+        if (window.processId) appIdsToProtectSet.add(window.processId);
+      }
     }
+
+    // Konvertiere Set zurück zu Array
+    const appIdsToProtect = Array.from(appIdsToProtectSet);
 
     // 3. Prüfe, ob wir überhaupt etwas zu schützen haben
     if (appIdsToProtect.length === 0) {
-      console.log(`[FOCUS] Keine zu schützenden Anwendungen gefunden für Theme ${currentTheme.name}`);
-      console.log(`[FOCUS] Theme Daten:`, JSON.stringify(currentTheme, null, 2));
       alert(
         "Diese Gruppe enthält keine Anwendungen. Füge mindestens eine Anwendung hinzu, damit der Focus-Modus funktioniert."
       );
       return;
     }
-    
-    console.log(`[FOCUS] Aktiviere Focus-Modus für Theme ${currentTheme.name} mit ${appIdsToProtect.length} zu schützenden Anwendungen:`, appIdsToProtect);
 
     try {
-      // Neue Methode: "Show Desktop" und dann Apps wiederherstellen
+      // PERFORMANCE-OPTIMIERUNG: Direkter Aufruf ohne zusätzliches Logging
       const success = await ipcRenderer.invoke(
         "show-desktop-except",
         appIdsToProtect

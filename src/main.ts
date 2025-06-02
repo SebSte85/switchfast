@@ -171,8 +171,19 @@ function registerShortcuts() {
         mainWindow.webContents.send("toggle-focus-mode");
       }
     });
+    
+    // Registriere alle gespeicherten Theme-Shortcuts
+    // Wir führen dies asynchron aus, um die App-Initialisierung nicht zu blockieren
+    setTimeout(async () => {
+      try {
+        await registerSavedShortcuts();
+        console.log('[Shortcut] Alle Theme-Shortcuts wurden registriert');
+      } catch (error) {
+        console.error('[Shortcut] Fehler bei der Registrierung der Theme-Shortcuts:', error);
+      }
+    }, 2000); // Kurze Verzögerung, um sicherzustellen, dass die App vollständig geladen ist
   } catch (error) {
-    // Error handling
+    console.error('[Shortcut] Fehler bei der Registrierung des globalen Shortcuts:', error);
   }
 }
 
@@ -223,33 +234,24 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
 
       console.log(`[Shortcut] Shortcut ${formattedShortcut} für Theme ${themeId} wurde aktiviert`);
       
-      // Sende Benachrichtigung an Renderer mit aktuellen PIDs
-      try {
-        // Hole das Theme-Objekt
-        const theme = dataStore.getTheme(themeId);
-        if (!theme) {
-          console.error(`[Shortcut] Theme ${themeId} nicht gefunden`);
-          return;
-        }
-
-        console.log(`[Shortcut] Theme ${themeId} gefunden, aktualisiere PIDs vor Aktivierung`);
-        
-        // Aktualisiere die PIDs im Theme basierend auf den persistenten Identifikatoren
-        updateThemeProcessIds(theme).then(() => {
-          console.log(`[Shortcut] PIDs für Theme ${themeId} aktualisiert, aktiviere Theme`);
-          if (mainWindow) {
-            mainWindow.webContents.send("activate-theme-and-minimize", themeId);
-          }
-        }).catch((err: Error) => {
-          console.error(`[Shortcut] Fehler beim Aktualisieren der PIDs für Theme ${themeId}:`, err);
-          // Trotz Fehler versuchen, das Theme zu aktivieren
-          if (mainWindow) {
-            mainWindow.webContents.send("activate-theme-and-minimize", themeId);
-          }
-        });
-      } catch (err: unknown) {
-        console.error(`[Shortcut] Fehler beim Senden der Theme-Aktivierung für ${themeId}:`, err);
+      const theme = dataStore.getTheme(themeId);
+      if (!theme) {
+        console.error(`[Shortcut] Theme ${themeId} nicht gefunden`);
+        return;
       }
+
+      // PERFORMANCE-OPTIMIERUNG: Sofort das Theme aktivieren, ohne auf PID-Aktualisierung zu warten
+      console.log(`[Shortcut] Aktiviere Theme ${themeId} sofort`);
+      if (mainWindow) mainWindow.webContents.send("activate-theme-and-minimize", themeId, theme);
+      
+      // Aktualisiere die PIDs im Hintergrund, ohne den Shortcut-Trigger zu blockieren
+      setTimeout(() => {
+        updateThemeProcessIds(theme).then(() => {
+          console.log(`[Shortcut] PIDs für Theme ${themeId} im Hintergrund aktualisiert`);
+        }).catch((err) => {
+          console.error(`[Shortcut] Fehler beim Aktualisieren der PIDs für Theme ${themeId} im Hintergrund:`, err);
+        });
+      }, 0);
     };
     
     // Speichere den Handler in der Map
@@ -871,75 +873,84 @@ async function showDesktopExceptApps(
       }
 "@
 
-      $protectedWindows = @(${protectedWindowsStr})
+      # PERFORMANCE-OPTIMIERUNG: Konvertiere Arrays in HashSets für schnellere Lookups
+      $protectedWindowsStr = "${protectedWindowsStr}"
+      $protectedWindowsArray = $protectedWindowsStr -split "," | ForEach-Object { [int]$_ }
+      $protectedWindowsSet = New-Object System.Collections.Generic.HashSet[int]
+      foreach ($id in $protectedWindowsArray) { [void]$protectedWindowsSet.Add($id) }
       $ourProcessId = ${ourProcessId}
       
-      Write-Host "[PowerShell] Starting ShowDesktop with protected windows: $protectedWindows"
-      Write-Host "[PowerShell] Our process ID: $ourProcessId"
+      # PERFORMANCE-OPTIMIERUNG: Reduzierte Logging-Ausgaben
       
-      # Minimiere alle Fenster, außer geschützte
-      function ShowDesktop {
-          # Finde spezielle Fenster, die wir nicht minimieren sollten
-          $taskbarWindow = [WindowUtils]::FindWindow("Shell_TrayWnd", $null)
-          $progmanWindow = [WindowUtils]::FindWindow("Progman", $null)
+      # Spezielle Fenster-Klassen identifizieren (Desktop, Taskbar, etc.)
+      $specialClasses = @("Progman", "WorkerW", "Shell_TrayWnd", "DV2ControlHost", "SysListView32", "FolderView")
+      $specialClassesSet = New-Object System.Collections.Generic.HashSet[string]
+      foreach ($class in $specialClasses) { [void]$specialClassesSet.Add($class) }
+      
+      # Finde spezielle Fenster, die wir nicht minimieren sollten
+      $taskbarWindow = [WindowUtils]::FindWindow("Shell_TrayWnd", $null)
+      $progmanWindow = [WindowUtils]::FindWindow("Progman", $null)
+      
+      # PERFORMANCE-OPTIMIERUNG: Nur ein Durchlauf durch alle Fenster
+      # Sammle zuerst alle zu minimierenden und zu schützenden Fenster
+      $windowsToMinimize = New-Object System.Collections.ArrayList
+      $windowsToRestore = New-Object System.Collections.ArrayList
+      
+      $enumCallback = {
+          param(
+              [IntPtr]$hwnd,
+              [IntPtr]$lParam
+          )
           
-          Write-Host "[PowerShell] Found system windows - Taskbar: $taskbarWindow, Progman: $progmanWindow"
-          
-          # Enum Callback zum Minimieren von Fenstern
-          $enumCallback = {
-              param(
-                  [IntPtr]$hwnd,
-                  [IntPtr]$lParam
-              )
-              
-              # Prüfen, ob es sich um ein sichtbares Fenster handelt
-              if (![WindowUtils]::IsWindowVisible($hwnd)) {
-                  return $true
-              }
-              
-              # Spezielle Fenster-Klassen identifizieren (Desktop, Taskbar, etc.)
-              $classNameBuilder = New-Object System.Text.StringBuilder 256
-              [WindowUtils]::GetClassName($hwnd, $classNameBuilder, 256) | Out-Null
-              $className = $classNameBuilder.ToString()
-              
-              # Liste von speziellen Windows-System-Fenstern, die wir nicht minimieren wollen
-              $specialClasses = @("Progman", "WorkerW", "Shell_TrayWnd", "DV2ControlHost", "SysListView32", "FolderView")
-              
-              # Wenn es sich um ein System-/Desktop-Fenster handelt, überspringen
-              if ($specialClasses -contains $className -or $hwnd -eq $progmanWindow) {
-                  Write-Host "[PowerShell] Skipping system window: $className"
-                  return $true
-              }
-              
-              # Überprüfe, ob das Fenster zu unserem eigenen Prozess gehört
-              $processId = 0
-              [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
-              
-              # Wenn es sich um unsere eigene App oder ein geschütztes Fenster handelt
-              if ($processId -eq $ourProcessId -or $protectedWindows -contains $hwnd -or $protectedWindows -contains $processId) {
-                  Write-Host "[PowerShell] Protecting window: $hwnd (Process: $processId)"
-                  if ([WindowUtils]::IsIconic($hwnd)) {
-                      [WindowUtils]::ShowWindow($hwnd, [WindowUtils]::SW_RESTORE)
-                  }
-                  return $true
-              }
-              
-              # Minimiere alle anderen Fenster
-              Write-Host "[PowerShell] Minimizing window: $hwnd (Process: $processId)"
-              [WindowUtils]::ShowWindow($hwnd, [WindowUtils]::SW_MINIMIZE)
+          # Prüfen, ob es sich um ein sichtbares Fenster handelt
+          if (![WindowUtils]::IsWindowVisible($hwnd)) {
               return $true
           }
           
-          Write-Host "[PowerShell] Starting first pass - minimizing all windows"
-          [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
+          # Spezielle Fenster-Klassen identifizieren
+          $classNameBuilder = New-Object System.Text.StringBuilder 256
+          [WindowUtils]::GetClassName($hwnd, $classNameBuilder, 256) | Out-Null
+          $className = $classNameBuilder.ToString()
           
-          Write-Host "[PowerShell] Starting second pass - restoring protected windows"
-          [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
+          # Wenn es sich um ein System-/Desktop-Fenster handelt, überspringen
+          if ($specialClassesSet.Contains($className) -or $hwnd -eq $progmanWindow) {
+              return $true
+          }
           
-          Write-Host "[PowerShell] ShowDesktop completed"
+          # Überprüfe, ob das Fenster zu unserem eigenen Prozess gehört
+          $processId = 0
+          [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
+          
+          # Wenn es sich um unsere eigene App oder ein geschütztes Fenster handelt
+          $hwndInt = $hwnd.ToInt32()
+          if ($processId -eq $ourProcessId -or $protectedWindowsSet.Contains($hwndInt) -or $protectedWindowsSet.Contains($processId)) {
+              if ([WindowUtils]::IsIconic($hwnd)) {
+                  [void]$windowsToRestore.Add($hwnd)
+              }
+              return $true
+          }
+          
+          # Alle anderen Fenster zum Minimieren vormerken
+          [void]$windowsToMinimize.Add($hwnd)
+          return $true
       }
       
-      ShowDesktop
+      # Sammle alle Fenster
+      [WindowUtils]::EnumWindows($enumCallback, [IntPtr]::Zero)
+      
+      # PERFORMANCE-OPTIMIERUNG: Batch-Operationen für Minimieren und Wiederherstellen
+      # Minimiere alle vorgemerkten Fenster
+      foreach ($hwnd in $windowsToMinimize) {
+          [WindowUtils]::ShowWindow($hwnd, [WindowUtils]::SW_MINIMIZE)
+      }
+      
+      # Stelle alle geschützten Fenster wieder her
+      foreach ($hwnd in $windowsToRestore) {
+          [WindowUtils]::ShowWindow($hwnd, [WindowUtils]::SW_RESTORE)
+      }
+      
+      # Gib Erfolg zurück
+      $true
     `;
 
     const result = await runPowerShellCommand(psScript);
@@ -1621,6 +1632,11 @@ async function registerSavedShortcuts() {
       // Wenn alle Shortcuts registriert wurden, beende die Schleife
       if (registeredCount === themesWithShortcuts.length) {
         console.log('[Shortcut] Alle Shortcuts wurden erfolgreich registriert');
+        // Sende Event an Renderer, dass Shortcuts registriert wurden
+        if (mainWindow) {
+          mainWindow.webContents.send('shortcuts-registered');
+          console.log('[Shortcut] Event "shortcuts-registered" an Renderer gesendet');
+        }
         break;
       } else {
         console.warn(`[Shortcut] Nicht alle Shortcuts konnten registriert werden (${registeredCount}/${themesWithShortcuts.length}). Versuche es erneut...`);

@@ -595,11 +595,10 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
   return (
     <div className="application-list">
-      {/* Gruppen-Sektion */}
+      {/* Groups-Sektion */}
       <section className="groups-section">
         {!showOnlyShortcuts && (
-          <div className="groups-header">
-            GRUPPEN
+          <h2 className="groups-title font-extrabold">GROUPS
             <button 
               className="add-group-button" 
               onClick={() => setShowNewGroupInput(true)}
@@ -607,7 +606,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
             >
               +
             </button>
-          </div>
+          </h2>
         )}
         <div className="groups-container">
           {/* Display a new group input at the beginning of the container */}
@@ -622,7 +621,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
             />
           )}
 
-          {/* Vorhandene Gruppen anzeigen */}
+          {/* Vorhandene Groups anzeigen */}
           {showOnlyShortcuts ? (
             <div
               className={`flex flex-wrap justify-center items-start gap-2 p-2 ${
@@ -776,12 +775,12 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       {/* Im kompakten Modus oder nur-Shortcuts-Modus blenden wir die Prozesse aus */}
       {!compactMode && !showOnlyShortcuts && (
         <>
-          {/* Trennlinie zwischen Gruppen und Prozesse */}
+          {/* Trennlinie zwischen Groups und Processes */}
           <div className="section-divider"></div>
 
           {/* Prozesse-Sektion */}
           <section className="processes-section">
-            <h2 className="processes-title font-extrabold">PROZESSE</h2>
+            <h2 className="processes-title font-extrabold">PROCESSES</h2>
 
             <div className="process-list">
               {unassignedApplications.length > 0 ? (
@@ -795,7 +794,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                 ))
               ) : (
                 <div className="no-processes">
-                  Alle Prozesse sind Gruppen zugeordnet
+                  Alle Processes sind Groups zugeordnet
                 </div>
               )}
             </div>
