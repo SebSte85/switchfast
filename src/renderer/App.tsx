@@ -12,12 +12,10 @@ const App: React.FC = () => {
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingPhase, setLoadingPhase] = useState(0);
-  // Jede Phase des Ladevorgangs hat ihren eigenen Text
+  // Reduzierte Anzahl von Phasen mit besseren Beschreibungen
   const loadingPhaseTexts = [
-    "Loading applications...",
-    "We'll bring you up to speed in a bit...",
-    "Preparing your workspace environment...",
-    "Almost there, finalizing your setup..."
+    "Initializing workspace...", // Phase 0: Initialer Ladevorgang
+    "Starting your applications..." // Phase 1: Anwendungen werden gestartet
   ];
   const [compactMode, setCompactMode] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -207,16 +205,12 @@ const App: React.FC = () => {
     
     const handleAppsStarted = () => {
       console.log("[UI] apps-started Event empfangen, aktualisiere Anwendungen");
-      // Setze die Phase auf 2 (dritter Text), wenn die Anwendungen gestartet wurden
-      setLoadingPhase(2);
+      // Wir bleiben in Phase 1, da die Anwendungen bereits gestartet werden
       
       // Lade die Anwendungen neu, aber behalte den Ladezustand bei
       // bis die Anwendungen vollständig geladen sind
       const updateApps = async () => {
         try {
-          // Setze die Phase auf 3 (vierter Text), bevor die Anwendungen geladen werden
-          setLoadingPhase(3);
-          
           const apps = await ipcRenderer.invoke("get-running-applications");
           setApplications(apps || []);
           

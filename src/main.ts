@@ -1255,9 +1255,38 @@ function setupIpcHandlers() {
         if (!theme.processes) theme.processes = [];
         if (!theme.persistentProcesses) theme.persistentProcesses = [];
         
-        // Prozessinformationen abrufen
-        const processes = await getRunningApplications();
-        const process = processes.find(p => p.id === processId);
+        // Prozessinformationen abrufen - OPTIMIERT: Nur den einen Prozess abrufen statt aller
+        // Dies beschleunigt die Verarbeitung erheblich
+        let process: ProcessInfo | undefined;
+        
+        try {
+          // PowerShell-Befehl zum Abrufen eines einzelnen Prozesses (viel schneller)
+          const script = `
+            $process = Get-Process -Id ${processId} -ErrorAction SilentlyContinue
+            if ($process) {
+              $name = $process.ProcessName
+              $path = $null
+              try { $path = $process.MainModule.FileName } catch {}
+              
+              [PSCustomObject]@{
+                id = $process.Id
+                name = $name
+                path = $path
+                title = $process.MainWindowTitle
+              } | ConvertTo-Json
+            }
+          `;
+          
+          const result = await runPowerShellCommand(script);
+          if (result && result.trim()) {
+            process = JSON.parse(result);
+          }
+        } catch (error) {
+          console.error(`[IPC] Fehler beim Abrufen des Prozesses ${processId}:`, error);
+          // Fallback zur alten Methode
+          const processes = await getRunningApplications();
+          process = processes.find(p => p.id === processId);
+        }
         
         if (process) {
           console.log(`[IPC] Prozess gefunden: ${process.name} (${process.id}), Pfad: ${process.path || 'unbekannt'}`);
@@ -1300,65 +1329,87 @@ function setupIpcHandlers() {
     }
   );
   
-  // Handler für das direkte Entfernen eines Prozesses aus einem Thema
   ipcMain.handle(
     "remove-process-from-theme",
     async (_, themeId: string, processId: number) => {
       try {
-        console.log(`[IPC] Entferne Prozess ${processId} aus Thema ${themeId}`);
+        console.log(`[IPC] Received request to remove process ${processId} from theme ${themeId}`);
         
-        // Thema abrufen
-        const theme = dataStore.getTheme(themeId);
-        if (!theme) {
-          console.error(`[IPC] Thema mit ID ${themeId} nicht gefunden.`);
+        // Initial check for theme existence
+        const initialThemeCheck = dataStore.getTheme(themeId);
+        if (!initialThemeCheck) {
+          console.error(`[IPC] Theme with ID ${themeId} not found at initial check.`);
           return false;
         }
         
-        // Prozessinformationen abrufen
-        const processes = await getRunningApplications();
-        const process = processes.find(p => p.id === processId);
+        const runningProcesses = await getRunningApplications();
+        const process = runningProcesses.find(p => p.id === processId);
         
-        // Prozess aus dem Thema entfernen
-        if (theme.processes) {
-          theme.processes = theme.processes.filter(pid => pid !== processId);
-        }
+        let success = false;
         
-        // Wenn der Prozess gefunden wurde, entferne auch den persistenten Identifikator
-        if (process && theme.persistentProcesses) {
-          console.log(`[IPC] Entferne persistenten Identifikator für ${process.name} (${process.id}) aus Thema ${themeId}`);
-          
-          // Erstelle einen persistenten Identifikator für den Prozess, um ihn zu vergleichen
+        if (process) {
+          // Process is running
+          console.log(`[IPC] Process ${processId} (${process.name}) is running. Checking current theme state before removal attempt.`);
           const persistentId = createPersistentIdentifier(process);
           
-          // Entferne alle persistenten Identifikatoren, die dem Prozess entsprechen
-          theme.persistentProcesses = theme.persistentProcesses.filter(pid => {
-            // Entferne den Prozess, wenn der Name übereinstimmt
-            if (pid.executableName.toLowerCase() === persistentId.executableName.toLowerCase()) {
-              console.log(`[IPC] Entferne persistenten Prozess mit Namen ${pid.executableName} aus Thema ${themeId}`);
-              return false;
+          // Get the most current theme state directly before the check and operation
+          const currentTheme = dataStore.getTheme(themeId);
+          if (!currentTheme) {
+            // This case should be rare if initialThemeCheck passed, but good for safety
+            console.error(`[IPC] Theme with ID ${themeId} was not found when re-fetching for removal operation.`);
+            return false;
+          }
+
+          const processStillInTheme = (currentTheme.processes || []).includes(processId);
+          const persistentProcessStillInTheme = (currentTheme.persistentProcesses || []).some(
+            (p) => p.executableName.toLowerCase() === persistentId.executableName.toLowerCase()
+          );
+
+          if (processStillInTheme || persistentProcessStillInTheme) {
+            console.log(`[IPC] Attempting to remove running process ${process.name} (${process.id}) and/or its persistent identifier ${persistentId.executableName} from theme ${themeId} as they appear to be present.`);
+            
+            const result = dataStore.removeProcessAndPersistentFromTheme(themeId, processId, persistentId.executableName);
+            
+            if (result.processRemoved || result.persistentRemoved) {
+              if (result.processRemoved && result.persistentRemoved) {
+                console.log(`[IPC] Successfully removed process ${processId} and persistent identifier ${persistentId.executableName} from theme ${themeId}.`);
+              } else if (result.processRemoved) {
+                console.log(`[IPC] Successfully removed process ${processId} from theme ${themeId}. Persistent identifier ${persistentId.executableName} may not have been present or removed.`);
+              } else { // only persistentRemoved
+                console.log(`[IPC] Successfully removed persistent identifier ${persistentId.executableName} from theme ${themeId}. Process ${processId} may not have been present or removed.`);
+              }
+              success = true;
+            } else {
+              // This means DataStore made no changes, implying they weren't there despite our earlier check.
+              // This could happen due to an extremely rapid concurrent modification.
+              console.log(`[IPC] DataStore reported no changes for process ${processId} or persistent identifier ${persistentId.executableName} in theme ${themeId}. Assuming already removed or handled.`);
+              success = true; // If DataStore confirms they are not there (by making no changes), state is good.
             }
-            // Entferne den Prozess, wenn der Pfad übereinstimmt (falls vorhanden)
-            if (pid.executablePath && persistentId.executablePath && 
-                pid.executablePath.toLowerCase() === persistentId.executablePath.toLowerCase()) {
-              console.log(`[IPC] Entferne persistenten Prozess mit Pfad ${pid.executablePath} aus Thema ${themeId}`);
-              return false;
-            }
-            return true;
-          });
+          } else {
+            console.log(`[IPC] Process ${processId} (${process.name}) and/or its persistent identifier ${persistentId.executableName} are already removed from theme ${themeId} or were never present. No action needed.`);
+            success = true;
+          }
+        } else {
+          // Process is not running
+          console.log(`[IPC] Process ${processId} is not running. Attempting to remove its ID from theme ${themeId}.`);
+          const result = dataStore.removeProcessAndPersistentFromTheme(themeId, processId, undefined);
+          if (result.processRemoved) {
+            console.log(`[IPC] Successfully removed process ID ${processId} from theme ${themeId}.`);
+            success = true;
+          } else {
+            // If processId was not found in theme.processes
+            console.log(`[IPC] Process ID ${processId} not found in theme ${themeId}. Assuming already removed or never present.`);
+            success = true; 
+          }
         }
         
-        // Thema aktualisieren
-        dataStore.updateTheme(themeId, theme);
-        console.log(`[IPC] Prozess ${processId} erfolgreich aus Thema ${themeId} entfernt.`);
-        
-        return true;
+        return success;
       } catch (error) {
-        console.error(`[IPC] Fehler beim Entfernen des Prozesses ${processId} aus dem Thema ${themeId}:`, error);
+        console.error(`[IPC] Error during remove-process-from-theme for process ${processId}, theme ${themeId}:`, error);
         return false;
       }
     }
   );
-  
   ipcMain.on(
     "toggle-compact-mode",
     (_, isCompact: boolean, groupCount: number) => {
@@ -1773,13 +1824,15 @@ function sendStatusToWindow(text: string) {
   }
 }
 
-/**
- * Erstellt einen persistenten Identifikator für einen Prozess
- */
+// Hilfsfunktion zum Erstellen eines persistenten Identifikators für einen Prozess
 function createPersistentIdentifier(process: ProcessInfo): PersistentProcessIdentifier {
+  // Stelle sicher, dass der executableName normalisiert wird, um Konsistenz zu gewährleisten
+  // Wir normalisieren den Namen, indem wir ihn in Kleinbuchstaben umwandeln
+  const normalizedName = process.name ? process.name.toLowerCase() : "";
+  
   return {
     executablePath: process.path,
-    executableName: process.name,
+    executableName: normalizedName, // Normalisierter Name für konsistente Vergleiche
     titlePattern: process.title
   };
 }
