@@ -11,11 +11,23 @@ const App: React.FC = () => {
   const [activeThemes, setActiveThemes] = useState<string[]>([]);
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingPhase, setLoadingPhase] = useState(0);
+  // Jede Phase des Ladevorgangs hat ihren eigenen Text
+  const loadingPhaseTexts = [
+    "Loading applications...",
+    "We'll bring you up to speed in a bit...",
+    "Preparing your workspace environment...",
+    "Almost there, finalizing your setup..."
+  ];
   const [compactMode, setCompactMode] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
   // Refresh-Funktion mit useCallback
   const fetchApplications = useCallback(async () => {
+    // Loading-State setzen - nur für manuelle Aktualisierungen
+    setIsRefreshing(true);
+    
     // Nur im Entwicklungsmodus detaillierte Logs ausgeben
     if (process.env.NODE_ENV === "development") {
       console.log("[REFRESH] --------------------------------");
@@ -126,10 +138,14 @@ const App: React.FC = () => {
       });
 
       setApplications(apps || []);
-      setLoading(false);
+      // Wir beenden den Ladezustand hier nicht mehr, da dies jetzt
+      // in den Event-Handlern für apps-started gesteuert wird
+      // Nur den Refresh-Status beenden
+      setIsRefreshing(false);
     } catch (error) {
       console.error("[REFRESH] Error:", error);
-      setLoading(false);
+      // Bei Fehlern den Ladezustand beenden, um die Anwendung nicht zu blockieren
+      setIsRefreshing(false);
     }
 
     if (process.env.NODE_ENV === "development") {
@@ -137,30 +153,100 @@ const App: React.FC = () => {
     }
   }, []); // Keine Abhängigkeit von themes mehr
 
-  // Laden der laufenden Anwendungen und Refresh-Intervall
+  // Initial loading of applications
   useEffect(() => {
-    fetchApplications();
-
-    // Anwendungen alle 5 Minuten aktualisieren
-    const intervalId = setInterval(fetchApplications, 300000);
-    return () => clearInterval(intervalId);
-  }, [fetchApplications]);
-
-  // Laden der gespeicherten Themes beim Start
-  useEffect(() => {
-    const loadSavedThemes = async () => {
+    // Lade Anwendungen beim Start
+    const loadInitialData = async () => {
       try {
+        // Setze die initiale Ladephase (erster Text)
+        setLoadingPhase(0);
+        
+        const apps = await ipcRenderer.invoke("get-running-applications");
+        setApplications(apps || []);
+
+        // Lade gespeicherte Themes
         const savedThemes = await ipcRenderer.invoke("get-themes");
         if (savedThemes && savedThemes.length > 0) {
           setThemes(savedThemes);
         }
+
+        // Prüfe, ob es persistente Anwendungen gibt, die gestartet werden müssen
+        const hasPersistentApps = savedThemes && savedThemes.some(
+          (theme: Theme) => theme.persistentProcesses && theme.persistentProcesses.length > 0
+        );
+
+        // Wenn keine persistenten Anwendungen vorhanden sind, beenden wir den Ladezustand sofort
+        // Andernfalls wird der Ladezustand durch die IPC-Events gesteuert
+        if (!hasPersistentApps) {
+          console.log("[UI] Keine persistenten Anwendungen gefunden, beende Ladezustand");
+          setLoading(false);
+        } else {
+          console.log("[UI] Persistente Anwendungen gefunden, Ladezustand bleibt aktiv");
+          // Ladezustand bleibt aktiv, bis apps-started Event empfangen wird
+        }
       } catch (error) {
-        console.error("Fehler beim Laden der gespeicherten Themes:", error);
+        console.error("Error loading initial data:", error);
+        // Bei Fehlern den Ladezustand beenden, um die Anwendung nicht zu blockieren
+        setLoading(false);
       }
     };
 
-    loadSavedThemes();
+    loadInitialData();
   }, []);
+  
+  // Wir entfernen den Timer-Effekt und steuern stattdessen die Phasen durch die IPC-Events
+  
+  // Listener für das Starten von Anwendungen
+  useEffect(() => {
+    const handleAppStarting = () => {
+      console.log("[UI] apps-starting Event empfangen, setze loading=true");
+      setLoading(true);
+      // Setze die Phase auf 1 (zweiter Text), wenn der Ladevorgang beginnt
+      setLoadingPhase(1);
+    };
+    
+    const handleAppsStarted = () => {
+      console.log("[UI] apps-started Event empfangen, aktualisiere Anwendungen");
+      // Setze die Phase auf 2 (dritter Text), wenn die Anwendungen gestartet wurden
+      setLoadingPhase(2);
+      
+      // Lade die Anwendungen neu, aber behalte den Ladezustand bei
+      // bis die Anwendungen vollständig geladen sind
+      const updateApps = async () => {
+        try {
+          // Setze die Phase auf 3 (vierter Text), bevor die Anwendungen geladen werden
+          setLoadingPhase(3);
+          
+          const apps = await ipcRenderer.invoke("get-running-applications");
+          setApplications(apps || []);
+          
+          // Erst jetzt den Ladezustand beenden
+          console.log("[UI] Anwendungen aktualisiert, setze loading=false");
+          setLoading(false);
+        } catch (error) {
+          console.error("[UI] Fehler beim Aktualisieren der Anwendungen:", error);
+          setLoading(false);
+        }
+      };
+      
+      updateApps();
+    };
+    
+    ipcRenderer.on("apps-starting", handleAppStarting);
+    ipcRenderer.on("apps-started", handleAppsStarted);
+    
+    return () => {
+      ipcRenderer.removeListener("apps-starting", handleAppStarting);
+      ipcRenderer.removeListener("apps-started", handleAppsStarted);
+    };
+  }, []);
+  
+  // Laden der laufenden Anwendungen und Refresh-Intervall
+  useEffect(() => {
+    // Anwendungen alle 5 Minuten aktualisieren
+    const intervalId = setInterval(fetchApplications, 300000);
+    return () => clearInterval(intervalId);
+  }, [fetchApplications]);
 
   // Speichern der Themes bei Änderungen
   useEffect(() => {
@@ -673,16 +759,31 @@ const App: React.FC = () => {
         <div className="drag-region"></div>
         <div className="window-controls">
           <button
-            className="refresh-button"
+            className={`refresh-button ${isRefreshing ? 'refreshing' : ''}`}
             onClick={fetchApplications}
             title="Anwendungen aktualisieren"
+            disabled={isRefreshing}
           >
-            <svg width="12" height="12" viewBox="0 0 16 16">
-              <path
-                fill="currentColor"
-                d="M8 3a5 5 0 0 0-5 5H1l3.5 3.5L8 8H6a2 2 0 1 1 2 2v2a4 4 0 1 0-4-4H2a6 6 0 1 1 6 6v-2a4 4 0 0 0 0-8z"
-              />
-            </svg>
+            {isRefreshing ? (
+              <svg className="spinner" width="12" height="12" viewBox="0 0 16 16">
+                <circle
+                  className="path"
+                  cx="8"
+                  cy="8"
+                  r="6"
+                  fill="none"
+                  strokeWidth="2"
+                  stroke="currentColor"
+                />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 16 16">
+                <path
+                  fill="currentColor"
+                  d="M8 3a5 5 0 0 0-5 5H1l3.5 3.5L8 8H6a2 2 0 1 1 2 2v2a4 4 0 1 0-4-4H2a6 6 0 1 1 6 6v-2a4 4 0 0 0 0-8z"
+                />
+              </svg>
+            )}
           </button>
           <button
             className="compact-toggle-button"
@@ -732,7 +833,7 @@ const App: React.FC = () => {
       </div>
       {loading ? (
         <div className="loading-animation">
-          <div className="loading-text">Lade Anwendungen...</div>
+          <div className="loading-text">{loadingPhaseTexts[loadingPhase]}</div>
           <div className="loading-process-item"></div>
         </div>
       ) : (

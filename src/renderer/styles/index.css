@@ -442,6 +442,13 @@
     margin: 0;
   }
 
+  /* Gruppen-Header mit Hinzufügen-Button */
+  .groups-header {
+    @apply text-sm font-bold text-white uppercase tracking-wide flex items-center justify-between px-3 py-1;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  
   /* Modernere Gruppenüberschrift */
   .groups-title {
     @apply text-lg font-bold text-[#78d97c] uppercase tracking-wide flex items-center gap-1;
@@ -975,6 +982,47 @@
     @apply w-6 h-6 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-[#78d97c]/20 transition-colors;
   }
 
+  .refresh-button.refreshing {
+    @apply bg-[#78d97c]/20 text-white cursor-not-allowed;
+  }
+
+  /* Spinner Animation */
+  .spinner {
+    animation: spin 1s linear infinite;
+  }
+
+  .spinner .path {
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-dasharray: 90, 150;
+    stroke-dashoffset: 0;
+    animation: spinner-path 1.5s ease-in-out infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes spinner-path {
+    0% {
+      stroke-dasharray: 1, 150;
+      stroke-dashoffset: 0;
+    }
+    50% {
+      stroke-dasharray: 90, 150;
+      stroke-dashoffset: -35;
+    }
+    100% {
+      stroke-dasharray: 90, 150;
+      stroke-dashoffset: -124;
+    }
+  }
+
   .minimize-button {
     @apply w-8 h-6 flex items-center justify-center text-white/80 hover:text-white hover:bg-[#333344] transition-colors;
   }
@@ -1015,6 +1063,11 @@
   /* Ladeanimation */
   .loading-animation {
     @apply flex flex-col items-center justify-center h-full text-white;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
   }
 
   .loading-text {
@@ -1050,15 +1103,15 @@
     position: absolute;
     top: 0;
     left: -100%;
-    width: 100%;
+    width: 200%;
     height: 100%;
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(120, 217, 124, 0.2) 40%,
-      rgba(120, 217, 124, 0.3) 50%,
-      rgba(120, 217, 124, 0.2) 60%,
-      transparent 100%
+      rgba(120, 217, 124, 0.2) 20%,
+      rgba(120, 217, 124, 0.3) 25%,
+      rgba(120, 217, 124, 0.2) 30%,
+      transparent 50%
     );
     animation: loading-sweep 2s infinite linear;
     z-index: 2;
@@ -1070,6 +1123,18 @@
     }
     100% {
       transform: translateX(100%);
+    }
+  }
+  
+  @keyframes pulse {
+    0% {
+      opacity: 0.7;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.7;
     }
   }
 

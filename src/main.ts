@@ -1825,7 +1825,7 @@ async function restoreProcessAssociations() {
   
   // Liste der zu startenden Anwendungen
   const applicationsToStart: PersistentProcessIdentifier[] = [];
-  
+
   // Für jedes Thema
   themes.forEach(theme => {
     // Für jeden persistenten Prozessidentifikator im Thema
@@ -1871,10 +1871,36 @@ async function restoreProcessAssociations() {
   
   // Starte die fehlenden Anwendungen
   if (applicationsToStart.length > 0) {
+    // Sende Event an den Renderer, dass Anwendungen gestartet werden
+    if (mainWindow) {
+      console.log('[Restore] Sende apps-starting Event an Renderer');
+      mainWindow.webContents.send('apps-starting');
+    }
+    
     console.log(`[Restore] Starte ${applicationsToStart.length} fehlende Anwendungen...`);
     await startMissingApplications(applicationsToStart);
+    
+    // Warte kurz und aktualisiere dann die Prozessliste, um die neuen Prozesse zu erfassen
+    console.log('[Restore] Warte auf Prozessstart und aktualisiere Zuordnungen...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Aktualisiere die Prozesszuordnungen mit den neu gestarteten Anwendungen
+    await updateProcessAssociations();
+    
+    // Sende Event an den Renderer, dass Anwendungen gestartet wurden
+    if (mainWindow) {
+      console.log('[Restore] Sende apps-started Event an Renderer');
+      mainWindow.webContents.send('apps-started');
+    }
   } else {
     console.log('[Restore] Keine fehlenden Anwendungen zu starten.');
+    
+    // Wenn keine Anwendungen zu starten sind, trotzdem das apps-started Event senden,
+    // damit der Ladebildschirm verschwindet
+    if (mainWindow) {
+      console.log('[Restore] Sende apps-started Event an Renderer (keine Apps zu starten)');
+      mainWindow.webContents.send('apps-started');
+    }
   }
 }
 
@@ -1955,12 +1981,6 @@ async function startMissingApplications(applications: PersistentProcessIdentifie
   }
   
   console.log('[Restore] Alle Anwendungen gestartet.');
-  
-  // Warte kurz und aktualisiere dann die Prozessliste, um die neuen Prozesse zu erfassen
-  await new Promise(resolve => setTimeout(resolve, 3000));
-  
-  // Aktualisiere die Prozesszuordnungen mit den neu gestarteten Anwendungen
-  await updateProcessAssociations();
 }
 
 /**

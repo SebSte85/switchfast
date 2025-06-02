@@ -48,6 +48,7 @@ export interface ApplicationListProps {
   onToggleActiveTheme?: (themeId: string) => void;
   compactMode?: boolean; // Kompakt-Modus-Flag
   showOnlyShortcuts?: boolean; // Flag, um nur Shortcuts anzuzeigen, keine Namen
+  startingApps?: boolean; // Flag, ob Anwendungen gerade gestartet werden
 }
 
 // IPC-Kommunikation zwischen Main und Renderer
