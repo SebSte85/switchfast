@@ -382,9 +382,30 @@ export class DataStore {
     }
   }
 
-  deleteTheme(themeId: string): void {
-    this.themes = this.themes.filter((t) => t.id !== themeId);
-    this.saveThemes();
+  // Methode zum Löschen eines Themes anhand seiner ID
+  deleteTheme(themeId: string): boolean {
+    console.log(`[DataStore] Lösche Theme mit ID ${themeId}`);
+    
+    // Anzahl der Themes vor dem Löschen
+    const originalLength = this.themes.length;
+    
+    // Filtere das zu löschende Theme heraus
+    this.themes = this.themes.filter(theme => theme.id !== themeId);
+    
+    // Prüfe, ob ein Theme entfernt wurde
+    const newLength = this.themes.length;
+    const themeRemoved = originalLength > newLength;
+    
+    if (themeRemoved) {
+      console.log(`[DataStore] Theme mit ID ${themeId} erfolgreich entfernt. Verbleibende Themes: ${newLength}`);
+      
+      // Speichere die Änderungen
+      this.saveThemes();
+      return true;
+    } else {
+      console.log(`[DataStore] Kein Theme mit ID ${themeId} gefunden.`);
+      return false;
+    }
   }
 
   addWindowsToTheme(themeId: string, newWindows: WindowInfo[]) {
@@ -611,4 +632,5 @@ export class DataStore {
     });
     return assignedWindows;
   }
+
 }

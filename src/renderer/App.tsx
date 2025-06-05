@@ -457,24 +457,35 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
 
   // Theme löschen (mit useCallback, damit es als Abhängigkeit verwendet werden kann)
   const handleDeleteTheme = useCallback(
-    (themeId: string) => {
-      // Das Theme aus dem State entfernen
-      setThemes((prevThemes) =>
-        prevThemes.filter((theme) => theme.id !== themeId)
-      );
+    async (themeId: string) => {
+      console.log(`[UI] Lösche Theme mit ID: ${themeId}`);
+      
+      try {
+        // Zuerst den IPC-Handler aufrufen, um das Theme im DataStore zu löschen
+        const success = await ipcRenderer.invoke("delete-theme", themeId);
+        console.log(`[UI] Theme-Löschung im DataStore: ${success ? 'erfolgreich' : 'fehlgeschlagen'}`);
+        
+        if (success) {
+          // Das Theme aus dem State entfernen
+          setThemes((prevThemes) =>
+            prevThemes.filter((theme) => theme.id !== themeId)
+          );
 
-      // Falls das gelöschte Theme aktiv war, inaktiv setzen
-      if (activeTheme === themeId) {
-        setActiveTheme(null);
+          // Falls das gelöschte Theme aktiv war, inaktiv setzen
+          if (activeTheme === themeId) {
+            setActiveTheme(null);
+          }
+
+          // Aus der Liste der aktiven Themes entfernen
+          setActiveThemes((prevActiveThemes) =>
+            prevActiveThemes.filter((id) => id !== themeId)
+          );
+        } else {
+          console.error(`[UI] Theme ${themeId} konnte nicht gelöscht werden`);
+        }
+      } catch (error) {
+        console.error(`[UI] Fehler beim Löschen des Themes ${themeId}:`, error);
       }
-
-      // Aus der Liste der aktiven Themes entfernen
-      setActiveThemes((prevActiveThemes) =>
-        prevActiveThemes.filter((id) => id !== themeId)
-      );
-
-      // Wenn ein Shortcut für dieses Theme registriert war, diesen entfernen
-      ipcRenderer.invoke("unregister-shortcut", { themeId });
     },
     [activeTheme]
   );
