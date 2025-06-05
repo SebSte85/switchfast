@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ipcRenderer } from "electron";
 import "./styles/index.css";
+import "./styles/trial.css";
 import ApplicationList from "./components/ApplicationList";
 import { ProcessInfo, Theme, WindowInfo } from "../types";
+import TrialManager from "./components/TrialManager";
+import LicenseCheck from "./components/licensing/LicenseCheck";
 
-const App: React.FC = () => {
+const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingText }) => {
   const [applications, setApplications] = useState<ProcessInfo[]>([]);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
@@ -17,11 +20,13 @@ const App: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
-  // Reduzierte Anzahl von Phasen mit besseren Beschreibungen
+  // Ladephasen mit angepassten Texten
   const loadingPhaseTexts = [
-    "Initializing workspace...", // Phase 0: Initialer Ladevorgang
-    "Starting your applications...", // Phase 1: Anwendungen werden gestartet
-    "Registering shortcuts..." // Phase 2: Shortcuts werden registriert
+    initialLoadingText || "Searching for active licence...", // Phase 0: Lizenzprüfung
+    "Initializing workspace...", // Phase 1: Initialer Ladevorgang
+    "Starting your applications...", // Phase 2: Anwendungen werden gestartet
+    "Registering shortcuts...", // Phase 3: Shortcuts werden registriert
+    "Saving your settings..." // Phase 4: Einstellungen werden gespeichert
   ];
 
   // Refresh-Funktion mit useCallback
@@ -156,43 +161,60 @@ const App: React.FC = () => {
 
   // Initial loading of applications
   useEffect(() => {
-    // Lade Anwendungen beim Start
-    const loadInitialData = async () => {
-      try {
-        // Setze die initiale Ladephase (erster Text)
-        setLoadingPhase(0);
-        
-        const apps = await ipcRenderer.invoke("get-running-applications");
-        setApplications(apps || []);
+    // Starte mit der Lizenzprüfung (Phase 0)
+    setLoadingPhase(0);
+    
+    // Nach 2 Sekunden zur nächsten Phase (Workspace-Initialisierung) wechseln
+    const licenseCheckTimer = setTimeout(() => {
+      console.log("[UI] Lizenzprüfung abgeschlossen, wechsle zu Phase 1");
+      setLoadingPhase(1);
+      
+      // Jetzt die eigentliche Initialisierung starten
+      const loadInitialData = async () => {
+        try {
+          const apps = await ipcRenderer.invoke("get-running-applications");
+          setApplications(apps || []);
 
-        // Lade gespeicherte Themes
-        const savedThemes = await ipcRenderer.invoke("get-themes");
-        if (savedThemes && savedThemes.length > 0) {
-          setThemes(savedThemes);
-        }
+          // Wechsle zur Phase 2 (Anwendungen starten)
+          console.log("[UI] Workspace initialisiert, wechsle zu Phase 2");
+          setLoadingPhase(2);
+          
+          // Lade gespeicherte Themes
+          const savedThemes = await ipcRenderer.invoke("get-themes");
+          if (savedThemes && savedThemes.length > 0) {
+            setThemes(savedThemes);
+          }
 
-        // Prüfe, ob es persistente Anwendungen gibt, die gestartet werden müssen
-        const hasPersistentApps = savedThemes && savedThemes.some(
-          (theme: Theme) => theme.persistentProcesses && theme.persistentProcesses.length > 0
-        );
+          // Prüfe, ob es persistente Anwendungen gibt, die gestartet werden müssen
+          const hasPersistentApps = savedThemes && savedThemes.some(
+            (theme: Theme) => theme.persistentProcesses && theme.persistentProcesses.length > 0
+          );
 
-        // Wenn keine persistenten Anwendungen vorhanden sind, beenden wir den Ladezustand sofort
-        // Andernfalls wird der Ladezustand durch die IPC-Events gesteuert
-        if (!hasPersistentApps) {
-          console.log("[UI] Keine persistenten Anwendungen gefunden, beende Ladezustand");
+          // Wechsle zur Phase 3 (Shortcuts registrieren)
+          console.log("[UI] Anwendungen geladen, wechsle zu Phase 3");
+          setLoadingPhase(3);
+
+          // Wenn keine persistenten Anwendungen vorhanden sind, beenden wir den Ladezustand sofort
+          // Andernfalls wird der Ladezustand durch die IPC-Events gesteuert
+          if (!hasPersistentApps) {
+            console.log("[UI] Keine persistenten Anwendungen gefunden, beende Ladezustand");
+            // Kurze Verzögerung, damit der Benutzer die letzte Phase sehen kann
+            setTimeout(() => setLoading(false), 1000);
+          } else {
+            console.log("[UI] Persistente Anwendungen gefunden, Ladezustand bleibt aktiv");
+            // Ladezustand bleibt aktiv, bis apps-started Event empfangen wird
+          }
+        } catch (error) {
+          console.error("Error loading initial data:", error);
+          // Bei Fehlern den Ladezustand beenden, um die Anwendung nicht zu blockieren
           setLoading(false);
-        } else {
-          console.log("[UI] Persistente Anwendungen gefunden, Ladezustand bleibt aktiv");
-          // Ladezustand bleibt aktiv, bis apps-started Event empfangen wird
         }
-      } catch (error) {
-        console.error("Error loading initial data:", error);
-        // Bei Fehlern den Ladezustand beenden, um die Anwendung nicht zu blockieren
-        setLoading(false);
-      }
-    };
+      };
 
-    loadInitialData();
+      loadInitialData();
+    }, 2000); // 2 Sekunden für die Lizenzprüfung
+    
+    return () => clearTimeout(licenseCheckTimer);
   }, []);
   
   // Wir entfernen den Timer-Effekt und steuern stattdessen die Phasen durch die IPC-Events
@@ -237,18 +259,28 @@ const App: React.FC = () => {
     const handleShortcutsRegistered = () => {
       console.log("[UI] shortcuts-registered Event empfangen");
       setShortcutsRegistered(true);
-      // Beende den Ladezustand, wenn die Shortcuts registriert wurden
+      // Wechsle zur letzten Phase (DataStore-Prozess)
+      setLoadingPhase(4);
+      // Wir beenden den Ladezustand nicht hier, sondern warten auf das themes-saved Event
+      console.log("[UI] Warte auf themes-saved Event...");
+    };
+    
+    const handleThemesSaved = () => {
+      console.log("[UI] themes-saved Event empfangen, beende Ladezustand");
+      // Jetzt erst den Ladezustand beenden, nachdem die Themes gespeichert wurden
       setLoading(false);
     };
     
     ipcRenderer.on("apps-starting", handleAppStarting);
     ipcRenderer.on("apps-started", handleAppsStarted);
     ipcRenderer.on("shortcuts-registered", handleShortcutsRegistered);
+    ipcRenderer.on("themes-saved", handleThemesSaved);
     
     return () => {
       ipcRenderer.removeListener("apps-starting", handleAppStarting);
       ipcRenderer.removeListener("apps-started", handleAppsStarted);
       ipcRenderer.removeListener("shortcuts-registered", handleShortcutsRegistered);
+      ipcRenderer.removeListener("themes-saved", handleThemesSaved);
     };
   }, [shortcutsRegistered]);
   
@@ -880,6 +912,17 @@ const App: React.FC = () => {
         />
       )}
     </div>
+  );
+};
+
+// Wrapper-Komponente mit LicenseCheck und TrialManager
+const App: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingText }) => {
+  return (
+    <LicenseCheck>
+      <TrialManager>
+        <AppContent initialLoadingText={initialLoadingText} />
+      </TrialManager>
+    </LicenseCheck>
   );
 };
 

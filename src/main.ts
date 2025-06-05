@@ -23,6 +23,8 @@ import { stderr } from "process";
 import Store from "electron-store";
 import { autoUpdater } from "electron-updater";
 import * as electronLog from "electron-log";
+import { initAnalytics, trackEvent, shutdownAnalytics } from "./main/analytics";
+import { initializeLicenseSystem } from "./main/licenseIntegration";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -239,6 +241,14 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         console.error(`[Shortcut] Theme ${themeId} nicht gefunden`);
         return;
       }
+      
+      // Track shortcut_used event with PostHog
+      trackEvent('shortcut_used', {
+        themeId: themeId,
+        theme_name: theme.name || 'unknown',
+        shortcut: formattedShortcut,
+        action_type: 'activate'
+      });
 
       // PERFORMANCE-OPTIMIERUNG: Sofort das Theme aktivieren, ohne auf PID-Aktualisierung zu warten
       console.log(`[Shortcut] Aktiviere Theme ${themeId} sofort`);
@@ -1530,6 +1540,9 @@ function setupIpcHandlers() {
 app.on("will-quit", () => {
   // Unregister all shortcuts
   globalShortcut.unregisterAll();
+  
+  // Shutdown analytics to ensure all events are sent
+  shutdownAnalytics();
 });
 
 // Funktion zum Aktualisieren der Prozess-IDs eines Themes basierend auf persistenten Identifikatoren
@@ -1760,8 +1773,91 @@ async function fixThemeData() {
   }
 }
 
+// Protokoll-Handler für switchfast:// registrieren
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Wenn eine andere Instanz bereits läuft, beenden wir diese Instanz
+  app.quit();
+} else {
+  // Wenn eine zweite Instanz gestartet wird und ein URL-Argument übergibt
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // Jemand hat versucht, eine zweite Instanz zu starten, wir sollten unsere Instanz fokussieren
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+
+      // URL-Argument verarbeiten (für Deep-Links)
+      handleDeepLink(commandLine.pop());
+    }
+  });
+
+  // Protokoll-Handler für macOS
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+  });
+
+  // Protokoll-Handler für Windows registrieren
+  if (process.platform === 'win32') {
+    // Für Windows-Entwicklung
+    app.setAsDefaultProtocolClient('switchfast');
+  }
+}
+
+/**
+ * Verarbeitet Deep-Links wie switchfast://payment-success?session_id=cs_test_xxx&env=test
+ */
+function handleDeepLink(url: string | undefined) {
+  if (!url) return;
+  
+  try {
+    // URL parsen
+    const urlObj = new URL(url);
+    
+    // Prüfen, ob es sich um unser Protokoll handelt
+    if (urlObj.protocol === 'switchfast:') {
+      console.log(`[Deep-Link] Verarbeite URL: ${url}`);
+      
+      // Payment Success Handler
+      if (urlObj.pathname === '//payment-success') {
+        const sessionId = urlObj.searchParams.get('session_id');
+        const environment = urlObj.searchParams.get('env') || 'test';
+        
+        if (sessionId) {
+          console.log(`[Deep-Link] Payment Success mit Session ID: ${sessionId}, Umgebung: ${environment}`);
+          
+          // Lizenz aktivieren
+          if (mainWindow) {
+            mainWindow.webContents.send('activate-license-from-session', { sessionId, environment });
+            mainWindow.show();
+          }
+        }
+      }
+      
+      // Payment Cancel Handler
+      else if (urlObj.pathname === '//payment-cancel') {
+        console.log('[Deep-Link] Payment wurde abgebrochen');
+        
+        if (mainWindow) {
+          mainWindow.webContents.send('payment-cancelled');
+          mainWindow.show();
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Deep-Link] Fehler bei der Verarbeitung des Deep-Links:', error);
+  }
+}
+
 // App bereit-Event
 app.whenReady().then(async () => {
+  // Initialize analytics
+  initAnalytics();
+  
+  // Lizenzsystem initialisieren
+  initializeLicenseSystem();
+  
   createWindow();
   setupIpcHandlers();
 

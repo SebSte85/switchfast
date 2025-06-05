@@ -1,8 +1,13 @@
-import { app } from "electron";
-import * as fs from "fs";
-import * as path from "path";
+import { app, BrowserWindow } from "electron";
+import fs from "fs";
+import path from "path";
 import * as os from "os";
 import { PersistentProcessIdentifier } from "../types";
+
+// Deklariere globale Variable für TypeScript
+declare global {
+  var mainWindow: BrowserWindow | null;
+}
 
 const THEMES_FILE = "themes.json";
 
@@ -172,6 +177,14 @@ export class DataStore {
       fs.writeFileSync(this.dataPath, jsonContent);
 
       console.log(`[DataStore] Themes erfolgreich in ${this.dataPath} gespeichert.`);
+      
+      // Event an den Renderer senden, dass die Themes gespeichert wurden
+      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+        global.mainWindow.webContents.send('themes-saved');
+        console.log(`[DataStore] Event 'themes-saved' an Renderer gesendet`);
+      } else {
+        console.log(`[DataStore] Konnte Event 'themes-saved' nicht senden, mainWindow nicht verfügbar`);
+      }
 
     } catch (error) {
       console.error(`[DataStore] Fehler beim Speichern der Themes:`, error);

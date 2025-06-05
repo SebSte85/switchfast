@@ -1069,6 +1069,14 @@
     transform: translate(-50%, -50%);
     width: 100%;
   }
+  
+  .trial-footer {
+    @apply text-sm text-green-500 mt-8 opacity-80;
+    position: absolute;
+    bottom: 20px;
+    width: 100%;
+    text-align: center;
+  }
 
   .loading-text {
     @apply text-lg font-medium mb-4 text-[#78d97c];

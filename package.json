@@ -44,8 +44,11 @@
     "electron-log": "^5.0.4",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.1.7",
+    "node-machine-id": "^1.1.12",
+    "posthog-node": "^4.18.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "uuid": "^11.1.0",
     "workfocusmanager": "file:"
   },
   "build": {
