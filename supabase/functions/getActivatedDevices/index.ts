@@ -46,7 +46,11 @@ serve(async (req) => {
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      db: {
+        schema: schema
+      }
+    });
 
     // Request-Body parsen
     const { licenseKey } = await req.json() as RequestBody;
@@ -58,9 +62,9 @@ serve(async (req) => {
       );
     }
 
-    // Lizenz in der Datenbank suchen (mit Schema)
+    // Lizenz in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
     const { data: licenseData, error: licenseError } = await supabase
-      .from(`${schema}.licenses`)
+      .from('licenses')
       .select('id, is_active')
       .eq('license_key', licenseKey)
       .single();
@@ -79,9 +83,9 @@ serve(async (req) => {
       );
     }
 
-    // Aktivierte Geräte für diese Lizenz abrufen (mit Schema)
+    // Aktivierte Geräte für diese Lizenz abrufen (Schema ist bereits im Client konfiguriert)
     const { data: devices, error: devicesError } = await supabase
-      .from(`${schema}.device_activations`)
+      .from('device_activations')
       .select('device_id, device_name, first_activated_at, last_check_in, is_active')
       .eq('license_id', licenseData.id);
 

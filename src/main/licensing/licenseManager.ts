@@ -31,7 +31,7 @@ interface TrialInfo {
 // Konfiguration
 const SUPABASE_API_URL = 'https://foqnvgvtyluvektevlab.supabase.co/functions/v1'; // Supabase Functions URL
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvcW52Z3Z0eWx1dmVrdGV2bGFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMTYwMzUsImV4cCI6MjA2NDU5MjAzNX0.q2A6m7bQuKPb-VZNIBoizUVXS1LsgacM6QOVIaqrN1Q'
-const ACTIVE_ENVIRONMENT = 'test'; // Standard-Umgebung: 'test' oder 'prod'
+const ACTIVE_ENVIRONMENT = process.env.ACTIVE_ENVIRONMENT || 'test'; // Standard-Umgebung: 'test' oder 'prod'
 const LICENSE_CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 Stunden
 const OFFLINE_GRACE_PERIOD = 7 * 24 * 60 * 60 * 1000; // 7 Tage
 const APP_SALT = process.env.DEVICE_ID_SALT || '72a491de66fd8e66ea4eff96cd299dbc'
@@ -120,28 +120,32 @@ export class LicenseManager {
    */
   public async checkLicenseStatus(): Promise<boolean> {
     try {
-      const licenseInfo = this.getLicenseInfo();
-
-      // Wenn keine Lizenz vorhanden ist, prüfen wir den Trial-Status
-      if (!licenseInfo) {
-        return await this.checkTrialStatus();
-      }
-
-      // Prüfen, ob die Lizenz online verifiziert werden kann
+      // Immer zuerst die Edge Function aufrufen, um den Lizenzstatus zu überprüfen
+      // unabhängig davon, ob lokal eine Lizenz gespeichert ist
       try {
+        console.log('Rufe checkLicenseStatus Edge Function auf...');
         const response = await axios.post(`${SUPABASE_API_URL}/checkLicenseStatus`, {
-          licenseKey: licenseInfo.licenseKey,
           deviceId: this.deviceInfo.deviceId
         }, {
           headers: {
-            'x-environment': ACTIVE_ENVIRONMENT
-          }
+            'x-environment': ACTIVE_ENVIRONMENT,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          },
+          timeout: 5000 // Timeout nach 5 Sekunden
         });
 
+        console.log('Edge Function Antwort erhalten:', response.status);
         const data = response.data;
         
         if (data.success && data.is_license_valid && data.is_device_activated) {
           // Lizenz ist gültig und Gerät ist aktiviert
+          // Lokale Lizenzinformationen aktualisieren oder erstellen
+          const licenseInfo = this.getLicenseInfo() || {
+            licenseKey: data.license_key,
+            isActive: true,
+            lastVerified: new Date().toISOString()
+          };
+          
           this.updateLicenseInfo({
             ...licenseInfo,
             isActive: true,
@@ -149,17 +153,31 @@ export class LicenseManager {
           });
           return true;
         } else {
-          // Lizenz ist ungültig oder Gerät ist nicht aktiviert
-          if (!data.is_license_valid) {
-            this.showLicenseInvalidDialog();
-            return false;
-          } else if (!data.is_device_activated) {
-            const activated = await this.activateDevice(licenseInfo.licenseKey);
-            return activated;
+          // Keine gültige Lizenz gefunden oder Gerät nicht aktiviert
+          if (data.success && !data.is_license_valid) {
+            console.log('Keine gültige Lizenz gefunden, prüfe Trial-Status');
+            return await this.checkTrialStatus();
+          } else if (data.success && data.is_license_valid && !data.is_device_activated) {
+            // Lizenz gefunden, aber Gerät nicht aktiviert
+            console.log('Lizenz gefunden, aber Gerät nicht aktiviert');
+            if (data.license_key) {
+              const activated = await this.activateDevice(data.license_key);
+              return activated;
+            }
           }
+          
+          // Fallback auf Trial-Status
+          return await this.checkTrialStatus();
         }
       } catch (error) {
-        console.error('Fehler bei der Online-Verifizierung:', error);
+        console.error('Fehler bei der Online-Lizenzverifizierung:', error);
+        
+        // Bei Serverfehler oder Offline-Zustand lokale Daten verwenden
+        const licenseInfo = this.getLicenseInfo();
+        
+        if (!licenseInfo) {
+          return await this.checkTrialStatus();
+        }
         
         // Offline-Gnadenfrist prüfen
         const lastVerified = new Date(licenseInfo.lastVerified).getTime();
@@ -431,23 +449,83 @@ export class LicenseManager {
    */
   public async openStripeCheckout(email?: string): Promise<void> {
     try {
-      const response = await axios.post(`${SUPABASE_API_URL}/createCheckoutSession`, {
-        deviceId: this.deviceInfo.deviceId,
-        deviceName: this.deviceInfo.deviceName,
-        email
-      }, {
-        headers: {
-          'x-environment': ACTIVE_ENVIRONMENT,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+      // Umgebungsvariablen ausgeben (nur für Debugging)
+      console.log('[License] Umgebungsvariablen:');
+      console.log(`- ACTIVE_ENVIRONMENT: ${ACTIVE_ENVIRONMENT}`);
+      
+      // Stripe API-Schlüssel und Preis-ID basierend auf der aktiven Umgebung auswählen
+      const isProd = ACTIVE_ENVIRONMENT === 'prod';
+      
+      // Direkt die Umgebungsvariablen auslesen
+      const prodKey = process.env.PROD_STRIPE_SECRET_KEY;
+      const testKey = process.env.TEST_STRIPE_SECRET_KEY;
+      const prodPriceId = process.env.PROD_STRIPE_PRICE_ID;
+      const testPriceId = process.env.TEST_STRIPE_PRICE_ID;
+      
+      console.log(`[License] Verfügbare Schlüssel:`);
+      console.log(`- PROD_KEY: ${prodKey ? 'vorhanden' : 'fehlt'}`);
+      console.log(`- TEST_KEY: ${testKey ? 'vorhanden' : 'fehlt'}`);
+      console.log(`- PROD_PRICE_ID: ${prodPriceId ? 'vorhanden' : 'fehlt'}`);
+      console.log(`- TEST_PRICE_ID: ${testPriceId ? 'vorhanden' : 'fehlt'}`);
+      
+      const stripeSecretKey = isProd ? prodKey : testKey;
+      const stripePriceId = isProd ? prodPriceId : testPriceId;
+      
+      // Verwende HTTPS-URLs für Stripe
+      // Basis-URLs für Erfolg und Abbruch
+      const baseSuccessUrl = isProd 
+        ? 'https://switchfast.io/payment/success'
+        : 'https://test.switchfast.io/payment/success';
+      
+      const baseCancelUrl = isProd
+        ? 'https://switchfast.io/payment/cancel'
+        : 'https://test.switchfast.io/payment/cancel';
+      
+      // Füge Parameter hinzu: session_id (von Stripe), deviceId und Umgebung
+      const successUrl = `${baseSuccessUrl}?session_id={CHECKOUT_SESSION_ID}&device_id=${encodeURIComponent(this.deviceInfo.deviceId)}&env=${ACTIVE_ENVIRONMENT}`;
+      const cancelUrl = `${baseCancelUrl}?device_id=${encodeURIComponent(this.deviceInfo.deviceId)}&env=${ACTIVE_ENVIRONMENT}`;
+      
+      console.log(`[License] Öffne Stripe Checkout in ${ACTIVE_ENVIRONMENT}-Umgebung`);
+      console.log(`[License] Verwende Preis-ID: ${stripePriceId || 'NICHT DEFINIERT'}`);
+      
+      if (!stripeSecretKey) {
+        throw new Error('Stripe API-Schlüssel ist nicht konfiguriert');
+      }
+      
+      if (!stripePriceId) {
+        throw new Error('Stripe Preis-ID ist nicht konfiguriert');
+      }
+      
+      // Stripe-Instanz erstellen
+      const Stripe = require('stripe');
+      console.log('[License] Erstelle Stripe-Instanz...');
+      const stripe = new Stripe(stripeSecretKey, {
+        apiVersion: '2023-10-16' // Explizite API-Version angeben
+      });
+      
+      // Checkout-Session erstellen
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price: stripePriceId,
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        customer_email: email || undefined,
+        client_reference_id: this.deviceInfo.deviceId,
+        metadata: {
+          deviceName: this.deviceInfo.deviceName
         }
       });
-
-      const data = response.data;
       
-      if (data.success && data.url) {
+      if (session && session.url) {
         // URL im Standard-Browser öffnen
         const { shell } = require('electron');
-        await shell.openExternal(data.url);
+        await shell.openExternal(session.url);
       } else {
         this.showCheckoutErrorDialog();
       }
@@ -665,19 +743,13 @@ export class LicenseManager {
 
   /**
    * Zeigt einen Dialog an, wenn der Trial abgelaufen ist
+   * (Deaktiviert, da der Dialog nicht mehr angezeigt werden soll)
    */
   private showTrialExpiredDialog(): void {
-    dialog.showMessageBox({
-      type: 'info',
-      title: 'Trial abgelaufen',
-      message: 'Ihr Trial ist abgelaufen. Bitte kaufen Sie eine Lizenz, um SwitchFast weiterhin zu nutzen.',
-      buttons: ['Lizenz kaufen', 'Schließen'],
-      defaultId: 0
-    }).then(result => {
-      if (result.response === 0) {
-        this.openStripeCheckout();
-      }
-    });
+    // Dialog deaktiviert, da er nicht mehr angezeigt werden soll
+    // Stattdessen wird der Benutzer direkt zur Lizenzseite weitergeleitet
+    console.log('[LicenseManager] Trial abgelaufen - Dialog deaktiviert');
+    // this.openStripeCheckout(); // Automatisches Öffnen des Checkouts auch deaktiviert
   }
 
   /**

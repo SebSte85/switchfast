@@ -1,3 +1,12 @@
+// Lade Umgebungsvariablen aus .env.local als erstes
+import * as dotenv from 'dotenv';
+import * as path from "path";
+
+// Bestimme den Pfad zur .env.local-Datei
+const envPath = path.join(process.cwd(), '.env.local');
+dotenv.config({ path: envPath });
+console.log(`[Main] Umgebungsvariablen aus ${envPath} geladen`);
+
 import {
   app,
   BrowserWindow,
@@ -11,7 +20,6 @@ import {
   shell,
   MessageBoxOptions
 } from "electron";
-import path from "path";
 import { spawn, exec, execFile } from "child_process";
 import { DataStore } from "./main/dataStore";
 import { PersistentProcessIdentifier, Theme } from "./types";
@@ -83,21 +91,16 @@ function createWindow() {
   mainWindow.setMenu(null);
 
   // Load the app
-  if (process.env.NODE_ENV === "development") {
-    // Load from webpack dev server in development
-    mainWindow.loadURL("http://localhost:3000");
-    // Open DevTools
-    mainWindow.webContents.openDevTools();
-  } else {
-    // Load from built files in production
-    mainWindow.loadURL(
-      url.format({
-        pathname: path.join(__dirname, "renderer/index.html"),
-        protocol: "file:",
-        slashes: true,
-      })
-    );
-  }
+  // Wir verwenden immer die gebauten Dateien, da wir keinen Webpack Dev Server laufen haben
+  console.log('[Main] Lade Anwendung aus lokalen Dateien');
+  
+  mainWindow.loadURL(
+    url.format({
+      pathname: path.join(__dirname, "renderer/index.html"),
+      protocol: "file:",
+      slashes: true,
+    })
+  );
 
   // Handle window closed
   mainWindow.on("closed", () => {
@@ -107,9 +110,7 @@ function createWindow() {
   // Hide window to tray when minimized instead of taskbar
   mainWindow.on("minimize", (event: Event) => {
     event.preventDefault();
-    if (mainWindow) {
-      mainWindow.hide();
-    }
+    mainWindow?.hide();
   });
 
   // Create system tray

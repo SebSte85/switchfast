@@ -3,6 +3,23 @@
  */
 
 /**
+ * Generiert einen zufälligen String mit der angegebenen Länge
+ * @param length Länge des zu generierenden Strings
+ * @returns Zufälliger String
+ */
+export function generateRandomString(length: number): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Ohne I, O, 0, 1 zur Vermeidung von Verwechslungen
+  let result = '';
+  
+  for (let i = 0; i < length; i++) {
+    const randomIndex = Math.floor(Math.random() * chars.length);
+    result += chars[randomIndex];
+  }
+  
+  return result;
+}
+
+/**
  * Generiert einen eindeutigen Lizenzschlüssel im Format XXXX-XXXX-XXXX-XXXX
  * @returns Generierter Lizenzschlüssel
  */

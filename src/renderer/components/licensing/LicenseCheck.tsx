@@ -22,10 +22,10 @@ const LicenseCheck: React.FC<LicenseCheckProps> = ({ children }) => {
 
   if (isLoading || isChecking) {
     return (
-      <div className="flex justify-center items-center h-screen">
+      <div className="flex justify-center items-center h-screen bg-gray-900">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Lizenz wird überprüft...</p>
+          <p className="mt-4 text-gray-300">Lizenz wird überprüft...</p>
         </div>
       </div>
     );
@@ -34,11 +34,11 @@ const LicenseCheck: React.FC<LicenseCheckProps> = ({ children }) => {
   // Wenn keine gültige Lizenz oder kein aktiver Trial vorhanden ist, zeigen wir die Lizenzseite an
   if (!isLicensed && !isInTrial) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-100">
+      <div className="flex justify-center items-center min-h-screen bg-gray-900">
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold text-gray-800">SwitchFast</h1>
-            <p className="text-gray-600">Ihre Lizenz ist abgelaufen oder nicht gültig</p>
+            <h1 className="text-2xl font-bold text-accent">SwitchFast</h1>
+            <p className="text-gray-300">Ihre Lizenz ist abgelaufen oder nicht gültig</p>
           </div>
           <LicensePage />
         </div>

@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { generateRandomString } from '../_shared/licenseUtils.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -50,18 +51,23 @@ serve(async (req) => {
       );
     }
 
-    // Supabase-Client initialisieren
+    // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        db: {
+          schema: schema
+        }
+      }
     );
 
     // Eindeutigen Lizenzschlüssel generieren (Format: SF-XXXX-XXXX-XXXX)
     const licenseKey = `SF-${generateRandomString(4)}-${generateRandomString(4)}-${generateRandomString(4)}`;
 
-    // Neue Lizenz in der Datenbank erstellen (mit Schema)
+    // Neue Lizenz in der Datenbank erstellen (Schema ist bereits im Client konfiguriert)
     const { data: licenseData, error: licenseError } = await supabaseClient
-      .from(`${schema}.licenses`)
+      .from('licenses')
       .insert({
         license_key: licenseKey,
         email: email,
@@ -80,9 +86,9 @@ serve(async (req) => {
       );
     }
 
-    // Gerät aktivieren (mit Schema)
+    // Gerät aktivieren (Schema ist bereits im Client konfiguriert)
     const { error: deviceError } = await supabaseClient
-      .from(`${schema}.device_activations`)
+      .from('device_activations')
       .insert({
         license_id: licenseData.id,
         device_id: deviceId,
@@ -117,13 +123,3 @@ serve(async (req) => {
     );
   }
 });
-
-// Hilfsfunktion zum Generieren eines zufälligen Strings
-function generateRandomString(length: number): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}

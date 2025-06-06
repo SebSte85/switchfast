@@ -22,8 +22,16 @@ function getEnvironment(req: Request): string {
     return envParam;
   }
   
-  // 3. Fallback auf die Standardumgebung aus den Umgebungsvariablen
+  // 3. Prüfen des Referer-Headers (für Stripe-Webhooks)
+  const referer = req.headers.get('referer') || '';
+  if (referer.includes('stripe.com')) {
+    console.log('Webhook-Aufruf von Stripe erkannt, verwende Test-Umgebung');
+    return 'test';
+  }
+  
+  // 4. Fallback auf die Standardumgebung aus den Umgebungsvariablen
   const defaultEnv = Deno.env.get('ACTIVE_ENVIRONMENT') || 'test';
+  console.log(`Fallback auf Umgebungsvariable: ${defaultEnv}`);
   return defaultEnv;
 }
 
@@ -45,17 +53,61 @@ serve(async (req) => {
     const stripeSecretKey = environment === 'prod' 
       ? Deno.env.get('PROD_STRIPE_SECRET_KEY') 
       : Deno.env.get('TEST_STRIPE_SECRET_KEY');
-      
-    const stripeWebhookSecret = environment === 'prod'
-      ? Deno.env.get('PROD_STRIPE_WEBHOOK_SECRET')
-      : Deno.env.get('TEST_STRIPE_WEBHOOK_SECRET');
+    
+    // Webhook-Secret aus Umgebungsvariablen laden
+    const webhookSecretKey = environment === 'prod' 
+      ? 'PROD_STRIPE_WEBHOOK_SECRET' 
+      : 'TEST_STRIPE_WEBHOOK_SECRET';
+    
+    console.log(`Suche nach Webhook-Secret mit Key: ${webhookSecretKey}`);
+    
+    // TEMPORÄR: Webhook-Secret hart codieren für Debugging
+    let stripeWebhookSecret = Deno.env.get(webhookSecretKey);
+    
+    // Wenn wir in der Test-Umgebung sind und kein Secret gefunden wurde, verwenden wir das hart codierte Secret
+    if (environment === 'test' && !stripeWebhookSecret) {
+      stripeWebhookSecret = 'whsec_IGSFWWT3TV4a9LmA5fBFstEjcNY4KocG';
+      console.log('TEMPORÄR: Verwende hart codiertes TEST Webhook-Secret');
+    }
+    
+    console.log(`Webhook-Secret gefunden: ${stripeWebhookSecret ? 'Ja' : 'Nein'}`);
+    
+    // Alle verfügbaren Umgebungsvariablen ausgeben (nur Namen, keine Werte)
+    console.log('Verfügbare Umgebungsvariablen:', Object.keys(Deno.env.toObject()));
     
     // Stripe-Webhook-Signatur aus dem Header extrahieren
     const signature = req.headers.get('stripe-signature');
     if (!signature) {
       return new Response(
         JSON.stringify({ error: 'Fehlende Stripe-Signatur' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Webhook-Ereignis mit asynchroner Signaturverifizierung verarbeiten
+    const rawBody = await req.text();
+    let event;
+    
+    try {
+      // Stripe-Instanz erstellen
+      const stripe = new Stripe(stripeSecretKey || '');
+      
+      // Asynchrone Methode zur Signaturverifizierung verwenden
+      event = await stripe.webhooks.constructEventAsync(
+        rawBody,
+        signature,
+        stripeWebhookSecret || ''
+      );
+      console.log('Signatur erfolgreich verifiziert mit constructEventAsync!');
+    } catch (err) {
+      console.error('Fehler bei Signaturverifikation (async):', err instanceof Error ? err.message : err);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Ungültige Signatur', 
+          details: err instanceof Error ? err.message : 'Unbekannter Fehler',
+          environment 
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -64,34 +116,28 @@ serve(async (req) => {
       apiVersion: '2023-10-16',
     });
 
-    // Prüfen, ob das Webhook-Secret konfiguriert ist
+    // Wenn kein Webhook-Secret gefunden wurde, können wir die Signatur nicht verifizieren
     if (!stripeWebhookSecret) {
       console.error(`${environment.toUpperCase()}_STRIPE_WEBHOOK_SECRET ist nicht konfiguriert`);
       return new Response(
         JSON.stringify({ error: 'Webhook-Secret ist nicht konfiguriert' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Request-Body als Text abrufen
-    const body = await req.text();
+    // Debug-Informationen zur Signaturverifizierung
+    console.log(`Verwende ${environment} Webhook-Secret: ${stripeWebhookSecret.substring(0, 5)}...`);
+    console.log(`Signatur-Header: ${signature.substring(0, 20)}...`);
 
-    // Stripe-Event konstruieren und verifizieren
-    let event;
-    try {
-      event = stripe.webhooks.constructEvent(body, signature, stripeWebhookSecret);
-    } catch (err) {
-      console.error(`Webhook-Signatur-Verifizierung fehlgeschlagen:`, err);
-      return new Response(
-        JSON.stringify({ error: 'Ungültige Signatur' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-      );
-    }
-
-    // Supabase-Client initialisieren
+    // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        db: {
+          schema: schema
+        }
+      }
     );
 
     // Event-Typ verarbeiten
@@ -104,7 +150,8 @@ serve(async (req) => {
           const customerId = session.customer;
           const paymentId = session.payment_intent;
           const email = session.customer_details?.email;
-          const deviceId = session.metadata?.deviceId;
+          // Device-ID aus den Metadaten oder der client_reference_id extrahieren
+          const deviceId = session.metadata?.deviceId || session.client_reference_id;
           const deviceName = session.metadata?.deviceName || 'Unbenanntes Gerät';
 
           if (!email || !deviceId) {
@@ -118,9 +165,9 @@ serve(async (req) => {
           // Eindeutigen Lizenzschlüssel generieren (Format: SF-XXXX-XXXX-XXXX)
           const licenseKey = `SF-${generateRandomString(4)}-${generateRandomString(4)}-${generateRandomString(4)}`;
 
-          // Neue Lizenz in der Datenbank erstellen (mit Schema)
+          // Neue Lizenz in der Datenbank erstellen (Schema ist bereits im Client konfiguriert)
           const { data: licenseData, error: licenseError } = await supabaseClient
-            .from(`${schema}.licenses`)
+            .from('licenses')
             .insert({
               license_key: licenseKey,
               email: email,
@@ -139,9 +186,9 @@ serve(async (req) => {
             );
           }
 
-          // Gerät aktivieren (mit Schema)
+          // Gerät aktivieren (Schema ist bereits im Client konfiguriert)
           const { error: deviceError } = await supabaseClient
-            .from(`${schema}.device_activations`)
+            .from('device_activations')
             .insert({
               license_id: licenseData.id,
               device_id: deviceId,
@@ -169,9 +216,9 @@ serve(async (req) => {
         const paymentIntentId = charge.payment_intent;
         
         if (paymentIntentId) {
-          // Lizenz finden und deaktivieren (mit Schema)
+          // Lizenz finden und deaktivieren (Schema ist bereits im Client konfiguriert)
           const { data: licenseData, error: licenseError } = await supabaseClient
-            .from(`${schema}.licenses`)
+            .from('licenses')
             .select('id')
             .eq('stripe_payment_id', paymentIntentId)
             .single();

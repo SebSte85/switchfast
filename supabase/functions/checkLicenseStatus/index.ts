@@ -40,72 +40,107 @@ serve(async (req) => {
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === 'prod' ? 'prod' : 'test';
     
-    const { licenseKey, deviceId } = await req.json();
+    const { deviceId } = await req.json();
 
     // Validierung der Eingaben
-    if (!licenseKey || !deviceId) {
+    if (!deviceId) {
       return new Response(
         JSON.stringify({ error: 'Fehlende erforderliche Felder' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
 
-    // Supabase-Client initialisieren
+    // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        db: {
+          schema: schema
+        }
+      }
     );
 
-    // Lizenz in der Datenbank suchen (mit Schema)
-    const { data: licenseData, error: licenseError } = await supabaseClient
-      .from(`${schema}.licenses`)
-      .select('id, is_active')
-      .eq('license_key', licenseKey)
-      .single();
+    // Geräteaktivierung in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
+    const { data: deviceData, error: deviceError } = await supabaseClient
+      .from('device_activations')
+      .select('id, license_id, is_active')
+      .eq('device_id', deviceId)
+      .maybeSingle();
 
-    if (licenseError || !licenseData) {
+    if (deviceError) {
       return new Response(
         JSON.stringify({ 
           success: false, 
-          message: 'Ungültiger Lizenzschlüssel',
+          message: 'Fehler beim Prüfen des Geräts',
+          is_license_valid: false,
+          is_device_activated: false
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
+    // Wenn keine Geräteaktivierung gefunden wurde
+    if (!deviceData) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          message: 'Gerät nicht aktiviert',
           is_license_valid: false,
           is_device_activated: false
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
-
+    
+    // Wenn das Gerät nicht aktiv ist
+    if (!deviceData.is_active) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          message: 'Geräteaktivierung nicht aktiv',
+          is_license_valid: false,
+          is_device_activated: false
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
+    
+    // Lizenz in der Datenbank suchen
+    const { data: licenseData, error: licenseError } = await supabaseClient
+      .from('licenses')
+      .select('id, is_active')
+      .eq('id', deviceData.license_id)
+      .single();
+      
+    if (licenseError || !licenseData) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          message: 'Zugehörige Lizenz nicht gefunden',
+          is_license_valid: false,
+          is_device_activated: true
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
+    
     if (!licenseData.is_active) {
       return new Response(
         JSON.stringify({ 
           success: false, 
           message: 'Diese Lizenz ist nicht aktiv',
           is_license_valid: false,
-          is_device_activated: false
+          is_device_activated: true
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
 
-    // Gerät in der Datenbank suchen
-    const { data: deviceData, error: deviceError } = await supabaseClient
-      .from(`${schema}.device_activations`)
-      .select('id, is_active')
-      .eq('license_id', licenseData.id)
-      .eq('device_id', deviceId)
-      .maybeSingle();
-
-    if (deviceError) {
-      return new Response(
-        JSON.stringify({ error: 'Fehler beim Prüfen des Geräts' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-      );
-    }
-
-    // Wenn das Gerät gefunden wurde und aktiv ist, aktualisieren wir den last_check_in-Zeitstempel
+    // Aktualisiere den last_check_in-Zeitstempel für das Gerät
     if (deviceData && deviceData.is_active) {
       const { error: updateError } = await supabaseClient
-        .from(`${schema}.device_activations`)
+        .from('device_activations')
         .update({
           last_check_in: new Date().toISOString()
         })

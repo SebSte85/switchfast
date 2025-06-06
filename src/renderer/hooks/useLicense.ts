@@ -68,6 +68,21 @@ export function useLicense() {
       return false;
     }
   }, []);
+  
+  // Lizenz mit Stripe Session aktivieren
+  const activateLicenseFromSession = useCallback(async (sessionId: string, environment: string = 'test') => {
+    try {
+      console.log(`[License] Aktiviere Lizenz aus Stripe Session: ${sessionId}, Umgebung: ${environment}`);
+      const success = await ipcRenderer.invoke('license:activateFromSession', { sessionId, environment });
+      if (success) {
+        await fetchLicenseStatus();
+      }
+      return success;
+    } catch (error) {
+      console.error('Fehler bei der Lizenzaktivierung aus Stripe Session:', error);
+      return false;
+    }
+  }, [fetchLicenseStatus]);
 
   // Lizenzstatus prüfen
   const checkLicenseStatus = useCallback(async () => {
@@ -92,6 +107,7 @@ export function useLicense() {
     activateLicense,
     deactivateLicense,
     openStripeCheckout,
+    activateLicenseFromSession,
     checkLicenseStatus,
     refreshStatus: fetchLicenseStatus
   };

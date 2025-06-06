@@ -50,15 +50,20 @@ serve(async (req) => {
       );
     }
 
-    // Supabase-Client initialisieren
+    // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        db: {
+          schema: schema
+        }
+      }
     );
 
-    // Lizenz in der Datenbank suchen (mit Schema)
+    // Lizenz in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
     const { data: licenseData, error: licenseError } = await supabaseClient
-      .from(`${schema}.licenses`)
+      .from('licenses')
       .select('id')
       .eq('license_key', licenseKey)
       .single();
@@ -70,9 +75,9 @@ serve(async (req) => {
       );
     }
 
-    // Gerät in der Datenbank suchen und deaktivieren (mit Schema)
+    // Gerät in der Datenbank suchen und deaktivieren (Schema ist bereits im Client konfiguriert)
     const { data: deviceData, error: deviceError } = await supabaseClient
-      .from(`${schema}.device_activations`)
+      .from('device_activations')
       .select('id, is_active')
       .eq('license_id', licenseData.id)
       .eq('device_id', deviceId)
@@ -99,9 +104,9 @@ serve(async (req) => {
       );
     }
 
-    // Gerät deaktivieren (mit Schema)
+    // Gerät deaktivieren (Schema ist bereits im Client konfiguriert)
     const { error: updateError } = await supabaseClient
-      .from(`${schema}.device_activations`)
+      .from('device_activations')
       .update({
         is_active: false,
         last_check_in: new Date().toISOString()

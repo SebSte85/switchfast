@@ -16,12 +16,12 @@ const LicenseStatus: React.FC<LicenseStatusProps> = ({
   onActivateClick
 }) => {
   return (
-    <div className="p-4 bg-white rounded-lg shadow">
-      <h2 className="text-lg font-semibold mb-4">Lizenzstatus</h2>
+    <div className="p-4 bg-gray-800 rounded-lg shadow text-gray-200 border border-gray-700">
+      <h2 className="text-lg font-semibold mb-4 text-accent">Lizenzstatus</h2>
       
       {isLicensed ? (
         <div className="flex items-center mb-4">
-          <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+          <div className="w-3 h-3 bg-accent rounded-full mr-2"></div>
           <span>Lizenziert</span>
         </div>
       ) : isInTrial ? (
@@ -34,9 +34,9 @@ const LicenseStatus: React.FC<LicenseStatusProps> = ({
             <span className="font-medium">{remainingTrialDays}</span> Tage verbleibend
           </div>
           <div className="mb-4">
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-gray-600 rounded-full h-2">
               <div 
-                className="bg-yellow-500 h-2 rounded-full" 
+                className="bg-accent h-2 rounded-full" 
                 style={{ width: `${Math.min(100, (remainingTrialDays / 7) * 100)}%` }}
               ></div>
             </div>
@@ -53,13 +53,13 @@ const LicenseStatus: React.FC<LicenseStatusProps> = ({
         <div className="flex flex-col space-y-2">
           <button
             onClick={onPurchaseClick}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-dark transition-colors"
           >
             Lizenz kaufen
           </button>
           <button
             onClick={onActivateClick}
-            className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100 transition-colors"
+            className="px-4 py-2 border border-gray-500 rounded hover:bg-gray-700 transition-colors text-gray-200"
           >
             Lizenz aktivieren
           </button>

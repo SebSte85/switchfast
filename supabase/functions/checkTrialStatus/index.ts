@@ -142,9 +142,9 @@ serve(async (req) => {
     const trialEndDate = new Date(trialData.trial_end_date);
     
     if (now > trialEndDate) {
-      // Trial ist abgelaufen, als verwendet markieren (mit Schema)
+      // Trial ist abgelaufen, als verwendet markieren (Schema ist bereits im Client konfiguriert)
       const { error: updateError } = await supabaseClient
-        .from(`${schema}.trial_blocks`)
+        .from('trial_blocks')
         .update({ is_trial_used: true })
         .eq('device_id', deviceId);
 

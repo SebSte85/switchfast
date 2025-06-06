@@ -70,6 +70,12 @@ export function setupLicenseIPC(licenseManager: LicenseManager) {
   ipcMain.handle('license:checkStatus', async () => {
     return await licenseManager.checkLicenseStatus();
   });
+  
+  // Lizenz mit Stripe Session aktivieren
+  ipcMain.handle('license:activateFromSession', async (_, { sessionId, environment }: { sessionId: string, environment: string }) => {
+    console.log(`[LicenseIPC] Aktiviere Lizenz aus Stripe Session: ${sessionId}, Umgebung: ${environment}`);
+    return await licenseManager.activateLicenseFromSession(sessionId, environment);
+  });
 
   // Trial-Status prüfen
   ipcMain.handle('license:checkTrialStatus', async () => {

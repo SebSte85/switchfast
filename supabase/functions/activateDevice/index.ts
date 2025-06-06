@@ -50,15 +50,20 @@ serve(async (req) => {
       );
     }
 
-    // Supabase-Client initialisieren
+    // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        db: {
+          schema: schema
+        }
+      }
     );
 
-    // Lizenz in der Datenbank suchen (mit Schema)
+    // Lizenz in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
     const { data: licenseData, error: licenseError } = await supabaseClient
-      .from(`${schema}.licenses`)
+      .from('licenses')
       .select('id, is_active')
       .eq('license_key', licenseKey)
       .single();
@@ -77,9 +82,9 @@ serve(async (req) => {
       );
     }
 
-    // Anzahl der aktiven Geräte für diese Lizenz prüfen
+    // Anzahl der aktiven Geräte für diese Lizenz prüfen (Schema ist bereits im Client konfiguriert)
     const { data: activeDevices, error: countError } = await supabaseClient
-      .from(`${schema}.device_activations`)
+      .from('device_activations')
       .select('id')
       .eq('license_id', licenseData.id)
       .eq('is_active', true);
@@ -91,9 +96,9 @@ serve(async (req) => {
       );
     }
 
-    // Prüfen, ob das Gerät bereits aktiviert ist
+    // Prüfen, ob das Gerät bereits aktiviert ist (Schema ist bereits im Client konfiguriert)
     const { data: existingDevice, error: deviceCheckError } = await supabaseClient
-      .from(`${schema}.device_activations`)
+      .from('device_activations')
       .select('id, is_active')
       .eq('license_id', licenseData.id)
       .eq('device_id', deviceId)
@@ -110,7 +115,7 @@ serve(async (req) => {
     if (existingDevice) {
       if (existingDevice.is_active) {
         const { error: updateError } = await supabaseClient
-          .from(`${schema}.device_activations`)
+          .from('device_activations')
           .update({
             last_check_in: new Date().toISOString(),
             device_name: deviceName || 'Unbenanntes Gerät'
@@ -145,7 +150,7 @@ serve(async (req) => {
         }
 
         const { error: reactivateError } = await supabaseClient
-          .from(`${schema}.device_activations`)
+          .from('device_activations')
           .update({
             is_active: true,
             last_check_in: new Date().toISOString(),
@@ -172,9 +177,9 @@ serve(async (req) => {
         );
       }
 
-      // Neues Gerät hinzufügen
+      // Neues Gerät hinzufügen (Schema ist bereits im Client konfiguriert)
       const { error: activationError } = await supabaseClient
-        .from(`${schema}.device_activations`)
+        .from('device_activations')
         .insert({
           license_id: licenseData.id,
           device_id: deviceId,

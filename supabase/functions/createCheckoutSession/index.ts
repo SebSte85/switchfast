@@ -96,8 +96,10 @@ serve(async (req) => {
       success_url: `${successUrl}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancelUrl,
       customer_email: email, // Optional: Vorausgefüllte E-Mail-Adresse
+      // Wichtig: Device-ID als client_reference_id übergeben
+      // Dies wird vom Webhook verwendet, um die Lizenz zu aktivieren
+      client_reference_id: deviceId,
       metadata: {
-        deviceId: deviceId,
         deviceName: deviceName || 'Unbenanntes Gerät'
       },
     });

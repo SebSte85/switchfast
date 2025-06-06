@@ -47,8 +47,8 @@ const LicensePage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-md mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">SwitchFast Lizenz</h1>
+    <div className="max-w-md mx-auto p-4 text-gray-200">
+      <h1 className="text-2xl font-bold mb-6 text-accent">SwitchFast Lizenz</h1>
 
       {showActivation ? (
         <LicenseActivation
@@ -66,9 +66,9 @@ const LicensePage: React.FC = () => {
           />
 
           {!isLicensed && (
-            <div className="mt-6 p-4 bg-white rounded-lg shadow">
-              <h2 className="text-lg font-semibold mb-4">Lizenz kaufen</h2>
-              <p className="mb-4 text-sm text-gray-600">
+            <div className="mt-6 p-4 bg-gray-800 rounded-lg shadow text-gray-200 border border-gray-700">
+              <h2 className="text-lg font-semibold mb-4 text-accent">Lizenz kaufen</h2>
+              <p className="mb-4 text-sm text-gray-400">
                 Geben Sie optional Ihre E-Mail-Adresse ein, um den Checkout-Prozess zu beschleunigen.
               </p>
               <div className="mb-4">
@@ -76,13 +76,13 @@ const LicensePage: React.FC = () => {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="E-Mail-Adresse (optional)"
                 />
               </div>
               <button
                 onClick={handlePurchaseClick}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                className="w-full px-4 py-2 bg-accent text-white rounded hover:bg-accent-dark transition-colors"
               >
                 Jetzt kaufen
               </button>
