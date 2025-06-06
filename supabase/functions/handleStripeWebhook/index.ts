@@ -1,233 +1,351 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import Stripe from 'https://esm.sh/stripe@12.0.0';
+// @deno-types="npm:@types/stripe"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Stripe from "https://esm.sh/stripe@12.0.0";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-environment',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-environment, stripe-signature",
 };
 
 // Funktion zum Ermitteln der aktiven Umgebung
 function getEnvironment(req: Request): string {
   // 1. Prüfen des x-environment Headers
-  const envHeader = req.headers.get('x-environment');
-  if (envHeader === 'test' || envHeader === 'prod') {
+  const envHeader = req.headers.get("x-environment");
+  if (envHeader === "test" || envHeader === "prod") {
     return envHeader;
   }
-  
+
   // 2. Prüfen des env Query-Parameters
   const url = new URL(req.url);
-  const envParam = url.searchParams.get('env');
-  if (envParam === 'test' || envParam === 'prod') {
+  const envParam = url.searchParams.get("env");
+  if (envParam === "test" || envParam === "prod") {
     return envParam;
   }
-  
+
   // 3. Prüfen des Referer-Headers (für Stripe-Webhooks)
-  const referer = req.headers.get('referer') || '';
-  if (referer.includes('stripe.com')) {
-    console.log('Webhook-Aufruf von Stripe erkannt, verwende Test-Umgebung');
-    return 'test';
+  const referer = req.headers.get("referer") || "";
+  if (referer.includes("stripe.com")) {
+    console.log("Webhook-Aufruf von Stripe erkannt, verwende Test-Umgebung");
+    return "test";
   }
-  
+
   // 4. Fallback auf die Standardumgebung aus den Umgebungsvariablen
-  const defaultEnv = Deno.env.get('ACTIVE_ENVIRONMENT') || 'test';
+  const defaultEnv = Deno.env.get("ACTIVE_ENVIRONMENT") || "test";
   console.log(`Fallback auf Umgebungsvariable: ${defaultEnv}`);
   return defaultEnv;
 }
 
 serve(async (req) => {
   // CORS-Preflight-Anfragen behandeln
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
     console.log(`Verwende Umgebung: ${environment}`);
-    
+
     // Schema basierend auf der Umgebung auswählen
-    const schema = environment === 'prod' ? 'prod' : 'test';
-    
+    const schema = environment === "prod" ? "prod" : "test";
+
     // Stripe-Konfiguration basierend auf der Umgebung auswählen
-    const stripeSecretKey = environment === 'prod' 
-      ? Deno.env.get('PROD_STRIPE_SECRET_KEY') 
-      : Deno.env.get('TEST_STRIPE_SECRET_KEY');
-    
+    const stripeSecretKey =
+      environment === "prod"
+        ? Deno.env.get("PROD_STRIPE_SECRET_KEY")
+        : Deno.env.get("TEST_STRIPE_SECRET_KEY");
+
     // Webhook-Secret aus Umgebungsvariablen laden
-    const webhookSecretKey = environment === 'prod' 
-      ? 'PROD_STRIPE_WEBHOOK_SECRET' 
-      : 'TEST_STRIPE_WEBHOOK_SECRET';
-    
+    const webhookSecretKey =
+      environment === "prod"
+        ? "PROD_STRIPE_WEBHOOK_SECRET"
+        : "TEST_STRIPE_WEBHOOK_SECRET";
+
     console.log(`Suche nach Webhook-Secret mit Key: ${webhookSecretKey}`);
-    
+
     // TEMPORÄR: Webhook-Secret hart codieren für Debugging
     let stripeWebhookSecret = Deno.env.get(webhookSecretKey);
-    
+
     // Wenn wir in der Test-Umgebung sind und kein Secret gefunden wurde, verwenden wir das hart codierte Secret
-    if (environment === 'test' && !stripeWebhookSecret) {
-      stripeWebhookSecret = 'whsec_IGSFWWT3TV4a9LmA5fBFstEjcNY4KocG';
-      console.log('TEMPORÄR: Verwende hart codiertes TEST Webhook-Secret');
+    if (environment === "test" && !stripeWebhookSecret) {
+      stripeWebhookSecret = "whsec_IGSFWWT3TV4a9LmA5fBFstEjcNY4KocG";
+      console.log("TEMPORÄR: Verwende hart codiertes TEST Webhook-Secret");
     }
-    
-    console.log(`Webhook-Secret gefunden: ${stripeWebhookSecret ? 'Ja' : 'Nein'}`);
-    
+
+    console.log(
+      `Webhook-Secret gefunden: ${stripeWebhookSecret ? "Ja" : "Nein"}`
+    );
+
     // Alle verfügbaren Umgebungsvariablen ausgeben (nur Namen, keine Werte)
-    console.log('Verfügbare Umgebungsvariablen:', Object.keys(Deno.env.toObject()));
-    
+    console.log(
+      "Verfügbare Umgebungsvariablen:",
+      Object.keys(Deno.env.toObject())
+    );
+
     // Stripe-Webhook-Signatur aus dem Header extrahieren
-    const signature = req.headers.get('stripe-signature');
+    const signature = req.headers.get("stripe-signature");
     if (!signature) {
       return new Response(
-        JSON.stringify({ error: 'Fehlende Stripe-Signatur' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Fehlende Stripe-Signatur" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
     // Webhook-Ereignis mit asynchroner Signaturverifizierung verarbeiten
     const rawBody = await req.text();
     let event;
-    
+
     try {
       // Stripe-Instanz erstellen
-      const stripe = new Stripe(stripeSecretKey || '');
-      
+      const stripe = new Stripe(stripeSecretKey || "");
+
       // Asynchrone Methode zur Signaturverifizierung verwenden
       event = await stripe.webhooks.constructEventAsync(
         rawBody,
         signature,
-        stripeWebhookSecret || ''
+        stripeWebhookSecret || ""
       );
-      console.log('Signatur erfolgreich verifiziert mit constructEventAsync!');
+      console.log("Signatur erfolgreich verifiziert mit constructEventAsync!");
     } catch (err) {
-      console.error('Fehler bei Signaturverifikation (async):', err instanceof Error ? err.message : err);
+      console.error(
+        "Fehler bei Signaturverifikation (async):",
+        err instanceof Error ? err.message : err
+      );
       return new Response(
-        JSON.stringify({ 
-          error: 'Ungültige Signatur', 
-          details: err instanceof Error ? err.message : 'Unbekannter Fehler',
-          environment 
+        JSON.stringify({
+          error: "Ungültige Signatur",
+          details: err instanceof Error ? err.message : "Unbekannter Fehler",
+          environment,
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
     // Stripe-Client initialisieren mit dem entsprechenden API-Key
-    const stripe = new Stripe(stripeSecretKey ?? '', {
-      apiVersion: '2023-10-16',
+    const stripe = new Stripe(stripeSecretKey ?? "", {
+      apiVersion: "2023-10-16",
     });
 
     // Wenn kein Webhook-Secret gefunden wurde, können wir die Signatur nicht verifizieren
     if (!stripeWebhookSecret) {
-      console.error(`${environment.toUpperCase()}_STRIPE_WEBHOOK_SECRET ist nicht konfiguriert`);
+      console.error(
+        `${environment.toUpperCase()}_STRIPE_WEBHOOK_SECRET ist nicht konfiguriert`
+      );
       return new Response(
-        JSON.stringify({ error: 'Webhook-Secret ist nicht konfiguriert' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Webhook-Secret ist nicht konfiguriert" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
     // Debug-Informationen zur Signaturverifizierung
-    console.log(`Verwende ${environment} Webhook-Secret: ${stripeWebhookSecret.substring(0, 5)}...`);
+    console.log(
+      `Verwende ${environment} Webhook-Secret: ${stripeWebhookSecret.substring(
+        0,
+        5
+      )}...`
+    );
     console.log(`Signatur-Header: ${signature.substring(0, 20)}...`);
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
       {
         db: {
-          schema: schema
-        }
+          schema: schema,
+        },
       }
     );
 
     // Event-Typ verarbeiten
     switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object;
-        
+      case "checkout.session.completed": {
+        console.log("Verarbeite checkout.session.completed Event");
+        const sessionId = event.data.object.id;
+
+        // Checkout Session mit erweiterten line_items abrufen (Stripe Best Practice)
+        let session;
+        try {
+          session = await stripe.checkout.sessions.retrieve(sessionId, {
+            expand: ["line_items"],
+          });
+          console.log("Checkout Session erfolgreich abgerufen mit line_items");
+        } catch (error) {
+          console.error("Fehler beim Abrufen der Checkout Session:", error);
+          return new Response(
+            JSON.stringify({ error: "Fehler beim Abrufen der Session" }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 500,
+            }
+          );
+        }
+
+        console.log("Session payment_status:", session.payment_status);
+        console.log(
+          "Session client_reference_id:",
+          session.client_reference_id
+        );
+        console.log("Session metadata:", session.metadata);
+
         // Prüfen, ob die Zahlung erfolgreich war
-        if (session.payment_status === 'paid') {
+        if (session.payment_status === "paid") {
           const customerId = session.customer;
           const paymentId = session.payment_intent;
           const email = session.customer_details?.email;
-          // Device-ID aus den Metadaten oder der client_reference_id extrahieren
-          const deviceId = session.metadata?.deviceId || session.client_reference_id;
-          const deviceName = session.metadata?.deviceName || 'Unbenanntes Gerät';
+
+          // Device-ID aus client_reference_id extrahieren (Primary) oder aus metadata (Fallback)
+          const deviceId =
+            session.client_reference_id || session.metadata?.deviceId;
+          const deviceName =
+            session.metadata?.deviceName || "Unbenanntes Gerät";
+
+          console.log("Extrahierte Daten:", {
+            deviceId,
+            deviceName,
+            email,
+            customerId,
+            paymentId,
+          });
 
           if (!email || !deviceId) {
-            console.error('Fehlende erforderliche Metadaten:', { email, deviceId });
+            console.error("Fehlende erforderliche Daten:", {
+              email,
+              deviceId,
+            });
             return new Response(
-              JSON.stringify({ error: 'Fehlende erforderliche Metadaten' }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+              JSON.stringify({
+                error: "Fehlende erforderliche Daten",
+                missing: { email: !email, deviceId: !deviceId },
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 400,
+              }
             );
           }
+
+          // Line items verarbeiten (um zu wissen was gekauft wurde)
+          const lineItems = session.line_items?.data || [];
+          console.log(
+            "Gekaufte Items:",
+            lineItems.map((item) => ({
+              description: item.description,
+              amount: item.amount_total,
+              quantity: item.quantity,
+            }))
+          );
 
           // Eindeutigen Lizenzschlüssel generieren (Format: SF-XXXX-XXXX-XXXX)
-          const licenseKey = `SF-${generateRandomString(4)}-${generateRandomString(4)}-${generateRandomString(4)}`;
+          const licenseKey = `SF-${generateRandomString(
+            4
+          )}-${generateRandomString(4)}-${generateRandomString(4)}`;
 
-          // Neue Lizenz in der Datenbank erstellen (Schema ist bereits im Client konfiguriert)
-          const { data: licenseData, error: licenseError } = await supabaseClient
-            .from('licenses')
-            .insert({
-              license_key: licenseKey,
-              email: email,
-              stripe_customer_id: customerId,
-              stripe_payment_id: paymentId,
-              is_active: true
-            })
-            .select()
-            .single();
+          console.log("Erstelle Lizenz mit Key:", licenseKey);
+
+          // Neue Lizenz in der Datenbank erstellen
+          const { data: licenseData, error: licenseError } =
+            await supabaseClient
+              .from("licenses")
+              .insert({
+                license_key: licenseKey,
+                email: email,
+                stripe_customer_id: customerId,
+                stripe_payment_id: paymentId,
+                is_active: true,
+              })
+              .select()
+              .single();
 
           if (licenseError) {
-            console.error('Fehler beim Erstellen der Lizenz:', licenseError);
+            console.error("Fehler beim Erstellen der Lizenz:", licenseError);
             return new Response(
-              JSON.stringify({ error: 'Fehler beim Erstellen der Lizenz' }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+              JSON.stringify({
+                error: "Fehler beim Erstellen der Lizenz",
+                details: licenseError,
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+              }
             );
           }
 
-          // Gerät aktivieren (Schema ist bereits im Client konfiguriert)
+          console.log("Lizenz erfolgreich erstellt:", licenseData);
+
+          // Gerät aktivieren
           const { error: deviceError } = await supabaseClient
-            .from('device_activations')
+            .from("device_activations")
             .insert({
               license_id: licenseData.id,
               device_id: deviceId,
               device_name: deviceName,
               first_activated_at: new Date().toISOString(),
               last_check_in: new Date().toISOString(),
-              is_active: true
+              is_active: true,
             });
 
           if (deviceError) {
-            console.error('Fehler beim Aktivieren des Geräts:', deviceError);
+            console.error("Fehler beim Aktivieren des Geräts:", deviceError);
             return new Response(
-              JSON.stringify({ error: 'Fehler beim Aktivieren des Geräts' }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+              JSON.stringify({
+                error: "Fehler beim Aktivieren des Geräts",
+                details: deviceError,
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+              }
             );
           }
 
-          console.log(`Lizenz erfolgreich erstellt für ${email} mit Gerät ${deviceId}`);
+          console.log(
+            `✅ Lizenz erfolgreich erstellt für ${email} mit Gerät ${deviceId} (${deviceName})`
+          );
+          console.log(`✅ Lizenzschlüssel: ${licenseKey}`);
+        } else {
+          console.log(
+            `Zahlung noch nicht abgeschlossen. Status: ${session.payment_status}`
+          );
         }
         break;
       }
-      
-      case 'charge.refunded': {
+
+      case "charge.refunded": {
         const charge = event.data.object;
         const paymentIntentId = charge.payment_intent;
-        
+
         if (paymentIntentId) {
           // Lizenz finden und deaktivieren (Schema ist bereits im Client konfiguriert)
-          const { data: licenseData, error: licenseError } = await supabaseClient
-            .from('licenses')
-            .select('id')
-            .eq('stripe_payment_id', paymentIntentId)
-            .single();
+          const { data: licenseData, error: licenseError } =
+            await supabaseClient
+              .from("licenses")
+              .select("id")
+              .eq("stripe_payment_id", paymentIntentId)
+              .single();
 
           if (licenseError || !licenseData) {
-            console.error('Lizenz für Rückerstattung nicht gefunden:', paymentIntentId);
+            console.error(
+              "Lizenz für Rückerstattung nicht gefunden:",
+              paymentIntentId
+            );
             return new Response(
-              JSON.stringify({ error: 'Lizenz nicht gefunden' }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+              JSON.stringify({ error: "Lizenz nicht gefunden" }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 404,
+              }
             );
           }
 
@@ -235,13 +353,16 @@ serve(async (req) => {
           const { error: updateError } = await supabaseClient
             .from(`${schema}.licenses`)
             .update({ is_active: false })
-            .eq('id', licenseData.id);
+            .eq("id", licenseData.id);
 
           if (updateError) {
-            console.error('Fehler beim Deaktivieren der Lizenz:', updateError);
+            console.error("Fehler beim Deaktivieren der Lizenz:", updateError);
             return new Response(
-              JSON.stringify({ error: 'Fehler beim Deaktivieren der Lizenz' }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+              JSON.stringify({ error: "Fehler beim Deaktivieren der Lizenz" }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+              }
             );
           }
 
@@ -249,17 +370,22 @@ serve(async (req) => {
           const { error: devicesError } = await supabaseClient
             .from(`${schema}.device_activations`)
             .update({ is_active: false })
-            .eq('license_id', licenseData.id);
+            .eq("license_id", licenseData.id);
 
           if (devicesError) {
-            console.error('Fehler beim Deaktivieren der Geräte:', devicesError);
+            console.error("Fehler beim Deaktivieren der Geräte:", devicesError);
             return new Response(
-              JSON.stringify({ error: 'Fehler beim Deaktivieren der Geräte' }),
-              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+              JSON.stringify({ error: "Fehler beim Deaktivieren der Geräte" }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 500,
+              }
             );
           }
 
-          console.log(`Lizenz deaktiviert aufgrund von Rückerstattung für Payment Intent ${paymentIntentId}`);
+          console.log(
+            `Lizenz deaktiviert aufgrund von Rückerstattung für Payment Intent ${paymentIntentId}`
+          );
         }
         break;
       }
@@ -271,23 +397,25 @@ serve(async (req) => {
     }
 
     // Erfolgreiche Antwort
-    return new Response(
-      JSON.stringify({ received: true }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({ received: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (error) {
-    console.error('Unerwarteter Fehler:', error);
+    console.error("Unerwarteter Fehler:", error);
     return new Response(
-      JSON.stringify({ error: 'Ein unerwarteter Fehler ist aufgetreten' }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      JSON.stringify({ error: "Ein unerwarteter Fehler ist aufgetreten" }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      }
     );
   }
 });
 
 // Hilfsfunktion zum Generieren eines zufälligen Strings
 function generateRandomString(length: number): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let result = "";
   for (let i = 0; i < length; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
