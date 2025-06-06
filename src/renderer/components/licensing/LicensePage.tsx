@@ -1,95 +1,109 @@
-import React, { useState } from 'react';
-import LicenseStatus from './LicenseStatus';
-import LicenseActivation from './LicenseActivation';
-import { useLicense } from '../../hooks/useLicense';
+import React, { useState } from "react";
+import { useLicense } from "../../hooks/useLicense";
 
 const LicensePage: React.FC = () => {
-  const {
-    isLicensed,
-    isInTrial,
-    remainingTrialDays,
-    isLoading,
-    activateLicense,
-    openStripeCheckout,
-    refreshStatus
-  } = useLicense();
+  const { openStripeCheckout, isLoading } = useLicense();
+  const [email, setEmail] = useState("");
 
-  const [showActivation, setShowActivation] = useState(false);
-  const [email, setEmail] = useState('');
+  const { ipcRenderer } = window.require("electron");
 
   const handlePurchaseClick = async () => {
     await openStripeCheckout(email);
   };
 
-  const handleActivateClick = () => {
-    setShowActivation(true);
-  };
-
-  const handleActivate = async (licenseKey: string) => {
-    const success = await activateLicense(licenseKey);
-    if (success) {
-      setShowActivation(false);
-      await refreshStatus();
-    }
-    return success;
-  };
-
-  const handleCancel = () => {
-    setShowActivation(false);
+  const handleCloseApp = () => {
+    ipcRenderer.invoke("app:quit");
   };
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-full">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto p-4 text-gray-200">
-      <h1 className="text-2xl font-bold mb-6 text-accent">SwitchFast Lizenz</h1>
+    <div className="min-h-screen bg-[#414159] flex items-center justify-center p-6">
+      <div className="max-w-md w-full bg-[#2D2D3F] rounded-lg shadow-xl p-8 border border-gray-700">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg
+              className="w-8 h-8 text-accent"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+              />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">switchfast</h1>
+          <p className="text-gray-400">Trial Period Expired</p>
+        </div>
 
-      {showActivation ? (
-        <LicenseActivation
-          onActivate={handleActivate}
-          onCancel={handleCancel}
-        />
-      ) : (
-        <>
-          <LicenseStatus
-            isLicensed={isLicensed}
-            isInTrial={isInTrial}
-            remainingTrialDays={remainingTrialDays}
-            onPurchaseClick={handlePurchaseClick}
-            onActivateClick={handleActivateClick}
-          />
+        {/* Content */}
+        <div className="text-center mb-8">
+          <p className="text-gray-300 leading-relaxed mb-6">
+            Your free trial has ended. To continue using switchfast, please
+            purchase a license.
+          </p>
+          <p className="text-sm text-gray-400 mb-4">
+            Thank you for trying switchfast! We hope you enjoyed the experience.
+          </p>
+        </div>
 
-          {!isLicensed && (
-            <div className="mt-6 p-4 bg-gray-800 rounded-lg shadow text-gray-200 border border-gray-700">
-              <h2 className="text-lg font-semibold mb-4 text-accent">Lizenz kaufen</h2>
-              <p className="mb-4 text-sm text-gray-400">
-                Geben Sie optional Ihre E-Mail-Adresse ein, um den Checkout-Prozess zu beschleunigen.
+        {/* Purchase Button */}
+        <button
+          onClick={handlePurchaseClick}
+          className="w-full bg-accent hover:bg-accent-dark text-white font-semibold py-3 px-6 rounded-lg transition-colors shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
+        >
+          Purchase License
+        </button>
+
+        {/* Restart Notice */}
+        <div className="mt-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <div className="flex items-start">
+            <svg
+              className="w-5 h-5 text-amber-400 mt-0.5 mr-3 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+              />
+            </svg>
+            <div>
+              <p className="text-sm text-amber-300 font-medium">
+                Important Notice
               </p>
-              <div className="mb-4">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="E-Mail-Adresse (optional)"
-                />
-              </div>
-              <button
-                onClick={handlePurchaseClick}
-                className="w-full px-4 py-2 bg-accent text-white rounded hover:bg-accent-dark transition-colors"
-              >
-                Jetzt kaufen
-              </button>
+              <p className="text-xs text-amber-200 mt-1">
+                After completing your purchase, please restart the application
+                to activate your license.
+              </p>
             </div>
-          )}
-        </>
-      )}
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="mt-8 pt-6 border-t border-gray-600">
+          <button
+            onClick={handleCloseApp}
+            className="w-full text-gray-400 hover:text-gray-300 text-sm py-2 transition-colors"
+          >
+            Close Application
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

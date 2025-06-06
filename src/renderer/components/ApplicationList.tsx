@@ -119,19 +119,23 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       // Hole die aktuellen Prozesse vom Main-Prozess
       const updateProcesses = async () => {
         try {
-          console.log(`[UI] Aktualisiere Prozesse für Popup von Theme ${showProcessPopup} (Counter: ${processUpdateCounter})`);
-          const currentProcesses = await ipcRenderer.invoke("get-running-applications");
+          const currentProcesses = await ipcRenderer.invoke(
+            "get-running-applications"
+          );
           setPopupProcesses(currentProcesses || []);
         } catch (error) {
-          console.error("Fehler beim Aktualisieren der Prozesse für das Popup:", error);
+          console.error(
+            "Fehler beim Aktualisieren der Prozesse für das Popup:",
+            error
+          );
           // Fallback auf die vorhandenen Prozesse
           setPopupProcesses(applications);
         }
       };
-      
+
       updateProcesses();
     }
-  }, [showProcessPopup, processUpdateCounter, applications]);  // Abhängigkeit von processUpdateCounter hinzugefügt
+  }, [showProcessPopup, processUpdateCounter, applications]); // Abhängigkeit von processUpdateCounter hinzugefügt
 
   // Handle process popup open
   const handleProcessPopupOpen = (themeId: string) => {
@@ -145,9 +149,11 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       const filterAssignedApps = (
         currentApp: ProcessInfo
       ): ProcessInfo | null => {
-        // Prüfe, ob die aktuelle App in einer Gruppe ist
-        const isAssigned = themes.some((theme) =>
-          theme.applications.includes(currentApp.id)
+        // Prüfe, ob die aktuelle App in einer Gruppe ist (sowohl applications als auch processes Array)
+        const isAssigned = themes.some(
+          (theme) =>
+            theme.applications.includes(currentApp.id) ||
+            (theme.processes && theme.processes.includes(currentApp.id))
         );
 
         // Wenn die Haupt-App selbst zugewiesen ist, verstecke sie komplett
@@ -166,14 +172,21 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           ) || [];
 
         // Prüfe, ob Kindprozesse in einer Gruppe sind
-        const hasAssignedChildren = currentApp.children?.some(child => 
-          themes.some(theme => theme.applications.includes(child.id))
-        ) || false;
+        const hasAssignedChildren =
+          currentApp.children?.some((child) =>
+            themes.some(
+              (theme) =>
+                theme.applications.includes(child.id) ||
+                (theme.processes && theme.processes.includes(child.id))
+            )
+          ) || false;
 
         // Wenn alle Fenster und Kindprozesse zugewiesen sind, verstecke die App komplett
-        if (hasAssignedChildren && 
-            (assignedWindows.length === (currentApp.windows?.length || 0)) && 
-            (currentApp.windows?.length || 0) > 0) {
+        if (
+          hasAssignedChildren &&
+          assignedWindows.length === (currentApp.windows?.length || 0) &&
+          (currentApp.windows?.length || 0) > 0
+        ) {
           return null;
         }
 
@@ -187,11 +200,32 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           ?.map((child) => filterAssignedApps(child))
           .filter((child): child is ProcessInfo => child !== null);
 
-        // Wenn weder Fenster noch Kinder übrig sind, zeige die App nicht an
+        // Intelligentere Filterlogik: Nur verstecken wenn wirklich alle Fenster/Kinder zugewiesen sind
+        const hadWindows = currentApp.windows && currentApp.windows.length > 0;
+        const hadChildren =
+          currentApp.children && currentApp.children.length > 0;
+        const hasUnassignedWindows =
+          unassignedWindows && unassignedWindows.length > 0;
+        const hasFilteredChildren =
+          filteredChildren && filteredChildren.length > 0;
+
+        // Nur verstecken, wenn SOWOHL Fenster UND Kinder ursprünglich vorhanden waren UND alle zugewiesen sind
         if (
-          (!unassignedWindows || unassignedWindows.length === 0) &&
-          (!filteredChildren || filteredChildren.length === 0)
+          hadWindows &&
+          hadChildren &&
+          !hasUnassignedWindows &&
+          !hasFilteredChildren
         ) {
+          return null;
+        }
+
+        // Apps nur mit Fenstern (aber ohne Kinder): Verstecken nur wenn alle Fenster zugewiesen sind
+        if (hadWindows && !hadChildren && !hasUnassignedWindows) {
+          return null;
+        }
+
+        // Apps nur mit Kindern (aber ohne Fenster): Verstecken nur wenn alle Kinder zugewiesen sind
+        if (!hadWindows && hadChildren && !hasFilteredChildren) {
           return null;
         }
 
@@ -441,10 +475,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       // Erzwinge eine Aktualisierung der Prozessliste im Popup ohne das Popup zu schließen
       if (showProcessPopup === themeId) {
         // Erhöhe den Counter, um eine Aktualisierung des useEffect auszulösen
-        setProcessUpdateCounter(prev => prev + 1);
-        
-        // Log für Debugging
-        console.log(`[UI] Prozess ${processId} aus Theme ${themeId} entfernt, aktualisiere Anzeige`);
+        setProcessUpdateCounter((prev) => prev + 1);
       }
     }
   };
@@ -457,7 +488,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     );
   };
 
-// Render process popup
+  // Render process popup
   const renderProcessPopup = () => {
     if (!showProcessPopup) return null;
 
@@ -466,74 +497,80 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
     // Filtere die Prozesse, die zu diesem Theme gehören
     const themeProcesses: ProcessInfo[] = [];
-    
+
     // Helper-Funktion zum Sammeln der Prozesse, die zu diesem Theme gehören
     const collectProcessesForTheme = () => {
-      // Debugging-Informationen ausgeben
-      console.log(`[UI] Suche Prozesse für Theme ${theme.name} (${theme.id})`);
-      console.log(`[UI] Theme hat ${theme.applications.length} Einträge im applications-Array`);
-      console.log(`[UI] Theme hat ${theme.processes ? theme.processes.length : 0} Einträge im processes-Array`);
-      console.log(`[UI] Theme hat ${theme.persistentProcesses ? theme.persistentProcesses.length : 0} persistente Prozesse`);
-      
       // Alle verfügbaren Prozesse durchgehen
       for (const process of popupProcesses) {
         let shouldInclude = false;
-        
+
         // 1. Prüfen, ob die Prozess-ID direkt im applications-Array ist
         if (theme.applications.includes(process.id)) {
-          console.log(`[UI] Prozess ${process.name} (${process.id}) im applications-Array gefunden`);
           shouldInclude = true;
         }
-        
+
         // 2. Prüfen, ob die Prozess-ID im processes-Array ist (für wiederhergestellte Prozesse)
-        if (!shouldInclude && theme.processes && theme.processes.includes(process.id)) {
-          console.log(`[UI] Prozess ${process.name} (${process.id}) im processes-Array gefunden`);
+        if (
+          !shouldInclude &&
+          theme.processes &&
+          theme.processes.includes(process.id)
+        ) {
           shouldInclude = true;
         }
-        
+
         // 3. Prüfen, ob der Prozess Fenster hat, die im Theme enthalten sind
         if (!shouldInclude && process.windows && process.windows.length > 0) {
           const hasWindowInTheme = process.windows.some((window) => {
-            return theme.applications.includes(window.hwnd) || 
-                   theme.applications.includes(`w${window.hwnd}`);
+            return (
+              theme.applications.includes(window.hwnd) ||
+              theme.applications.includes(`w${window.hwnd}`)
+            );
           });
-          
+
           if (hasWindowInTheme) {
-            console.log(`[UI] Prozess ${process.name} (${process.id}) hat Fenster im applications-Array`);
             shouldInclude = true;
           }
         }
-        
+
         // 4. Prüfen, ob der Prozess zu einem persistenten Prozess passt
-        if (!shouldInclude && theme.persistentProcesses && theme.persistentProcesses.length > 0 && process.name) {
+        if (
+          !shouldInclude &&
+          theme.persistentProcesses &&
+          theme.persistentProcesses.length > 0 &&
+          process.name
+        ) {
           for (const persistentProcess of theme.persistentProcesses) {
             // Name-Matching
-            const matchesName = persistentProcess.executableName && 
-                               process.name.toLowerCase() === persistentProcess.executableName.toLowerCase();
-            
+            const matchesName =
+              persistentProcess.executableName &&
+              process.name.toLowerCase() ===
+                persistentProcess.executableName.toLowerCase();
+
             // Pfad-Matching
-            const matchesPath = persistentProcess.executablePath && 
-                              process.path && 
-                              process.path.toLowerCase() === persistentProcess.executablePath.toLowerCase();
-            
+            const matchesPath =
+              persistentProcess.executablePath &&
+              process.path &&
+              process.path.toLowerCase() ===
+                persistentProcess.executablePath.toLowerCase();
+
             // Titel-Matching
-            const matchesTitle = persistentProcess.titlePattern && 
-                               process.title && 
-                               process.title.includes(persistentProcess.titlePattern);
-            
+            const matchesTitle =
+              persistentProcess.titlePattern &&
+              process.title &&
+              process.title.includes(persistentProcess.titlePattern);
+
             if (matchesName && (matchesPath || matchesTitle)) {
-              console.log(`[UI] Prozess ${process.name} (${process.id}) passt zu persistentem Identifikator`);
               shouldInclude = true;
               break;
             }
           }
         }
-        
+
         // Wenn der Prozess zu diesem Theme gehört und noch nicht in der Liste ist, füge ihn hinzu
-        if (shouldInclude && !themeProcesses.some(p => p.id === process.id)) {
+        if (shouldInclude && !themeProcesses.some((p) => p.id === process.id)) {
           themeProcesses.push(process);
         }
-        
+
         // Rekursiv Kindprozesse prüfen
         if (process.children && process.children.length > 0) {
           for (const child of process.children) {
@@ -543,10 +580,8 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           }
         }
       }
-      
-      console.log(`[UI] Insgesamt ${themeProcesses.length} Prozesse für Theme ${theme.name} gefunden`);
     };
-    
+
     // Prozesse sammeln
     collectProcessesForTheme();
 
@@ -598,9 +633,10 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       {/* Groups-Sektion */}
       <section className="groups-section">
         {!showOnlyShortcuts && (
-          <h2 className="groups-title font-extrabold">GROUPS
-            <button 
-              className="add-group-button" 
+          <h2 className="groups-title font-extrabold">
+            GROUPS
+            <button
+              className="add-group-button"
               onClick={() => setShowNewGroupInput(true)}
               title="Neue Gruppe hinzufügen"
             >
@@ -716,7 +752,11 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   <div className="group-item-content">
                     {!showOnlyShortcuts && (
                       <div className="group-item-name">
-                        {theme.name} ({(theme.processes && theme.processes.length > 0) ? theme.processes.length : theme.applications.length})
+                        {theme.name} (
+                        {theme.processes && theme.processes.length > 0
+                          ? theme.processes.length
+                          : theme.applications.length}
+                        )
                       </div>
                     )}
                     <div className="group-item-actions">
@@ -793,9 +833,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                   />
                 ))
               ) : (
-                <div className="no-processes">
-                  Alle Processes sind Groups zugeordnet
-                </div>
+                <div className="no-processes">No processes found</div>
               )}
             </div>
           </section>

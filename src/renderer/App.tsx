@@ -7,7 +7,9 @@ import { ProcessInfo, Theme, WindowInfo } from "../types";
 import TrialManager from "./components/TrialManager";
 import LicenseCheck from "./components/licensing/LicenseCheck";
 
-const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingText }) => {
+const AppContent: React.FC<{ initialLoadingText?: string }> = ({
+  initialLoadingText,
+}) => {
   const [applications, setApplications] = useState<ProcessInfo[]>([]);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
@@ -26,14 +28,14 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
     "Initializing workspace...", // Phase 1: Initialer Ladevorgang
     "Starting your applications...", // Phase 2: Anwendungen werden gestartet
     "Registering shortcuts...", // Phase 3: Shortcuts werden registriert
-    "Saving your settings..." // Phase 4: Einstellungen werden gespeichert
+    "Saving your settings...", // Phase 4: Einstellungen werden gespeichert
   ];
 
   // Refresh-Funktion mit useCallback
   const fetchApplications = useCallback(async () => {
     // Loading-State setzen - nur für manuelle Aktualisierungen
     setIsRefreshing(true);
-    
+
     // Nur im Entwicklungsmodus detaillierte Logs ausgeben
     if (process.env.NODE_ENV === "development") {
       console.log("[REFRESH] --------------------------------");
@@ -163,22 +165,22 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
   useEffect(() => {
     // Starte mit der Lizenzprüfung (Phase 0)
     setLoadingPhase(0);
-    
+
     // Nach 2 Sekunden zur nächsten Phase (Workspace-Initialisierung) wechseln
     const licenseCheckTimer = setTimeout(() => {
-      console.log("[UI] Lizenzprüfung abgeschlossen, wechsle zu Phase 1");
       setLoadingPhase(1);
-      
+
       // Jetzt die eigentliche Initialisierung starten
       const loadInitialData = async () => {
         try {
           const apps = await ipcRenderer.invoke("get-running-applications");
+
           setApplications(apps || []);
 
           // Wechsle zur Phase 2 (Anwendungen starten)
-          console.log("[UI] Workspace initialisiert, wechsle zu Phase 2");
+
           setLoadingPhase(2);
-          
+
           // Lade gespeicherte Themes
           const savedThemes = await ipcRenderer.invoke("get-themes");
           if (savedThemes && savedThemes.length > 0) {
@@ -186,22 +188,24 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
           }
 
           // Prüfe, ob es persistente Anwendungen gibt, die gestartet werden müssen
-          const hasPersistentApps = savedThemes && savedThemes.some(
-            (theme: Theme) => theme.persistentProcesses && theme.persistentProcesses.length > 0
-          );
+          const hasPersistentApps =
+            savedThemes &&
+            savedThemes.some(
+              (theme: Theme) =>
+                theme.persistentProcesses &&
+                theme.persistentProcesses.length > 0
+            );
 
           // Wechsle zur Phase 3 (Shortcuts registrieren)
-          console.log("[UI] Anwendungen geladen, wechsle zu Phase 3");
+
           setLoadingPhase(3);
 
           // Wenn keine persistenten Anwendungen vorhanden sind, beenden wir den Ladezustand sofort
           // Andernfalls wird der Ladezustand durch die IPC-Events gesteuert
           if (!hasPersistentApps) {
-            console.log("[UI] Keine persistenten Anwendungen gefunden, beende Ladezustand");
             // Kurze Verzögerung, damit der Benutzer die letzte Phase sehen kann
             setTimeout(() => setLoading(false), 1000);
           } else {
-            console.log("[UI] Persistente Anwendungen gefunden, Ladezustand bleibt aktiv");
             // Ladezustand bleibt aktiv, bis apps-started Event empfangen wird
           }
         } catch (error) {
@@ -213,77 +217,71 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
 
       loadInitialData();
     }, 2000); // 2 Sekunden für die Lizenzprüfung
-    
+
     return () => clearTimeout(licenseCheckTimer);
   }, []);
-  
+
   // Wir entfernen den Timer-Effekt und steuern stattdessen die Phasen durch die IPC-Events
-  
+
   // Listener für das Starten von Anwendungen und Shortcut-Registrierung
   useEffect(() => {
     const handleAppStarting = () => {
-      console.log("[UI] apps-starting Event empfangen, setze loading=true");
       setLoading(true);
       // Setze die Phase auf 1 (zweiter Text), wenn der Ladevorgang beginnt
       setLoadingPhase(1);
     };
-    
+
     const handleAppsStarted = () => {
-      console.log("[UI] apps-started Event empfangen, aktualisiere Anwendungen");
       // Lade die Anwendungen neu, aber behalte den Ladezustand bei
       // bis die Anwendungen vollständig geladen sind und Shortcuts registriert sind
       const updateApps = async () => {
         try {
           const apps = await ipcRenderer.invoke("get-running-applications");
           setApplications(apps || []);
-          
-          // Wir beenden den Ladezustand noch nicht, sondern warten auf die Shortcut-Registrierung
-          console.log("[UI] Anwendungen aktualisiert, warte auf Shortcut-Registrierung");
+
           // Setze die Phase auf 2 (dritter Text), für die Shortcut-Registrierung
           setLoadingPhase(2);
-          
+
           // Wenn bereits Shortcuts registriert wurden, können wir den Ladezustand beenden
           if (shortcutsRegistered) {
-            console.log("[UI] Shortcuts bereits registriert, beende Ladezustand");
             setLoading(false);
           }
         } catch (error) {
-          console.error("[UI] Fehler beim Aktualisieren der Anwendungen:", error);
           setLoading(false);
         }
       };
-      
+
       updateApps();
     };
-    
+
     const handleShortcutsRegistered = () => {
-      console.log("[UI] shortcuts-registered Event empfangen");
       setShortcutsRegistered(true);
       // Wechsle zur letzten Phase (DataStore-Prozess)
       setLoadingPhase(4);
       // Wir beenden den Ladezustand nicht hier, sondern warten auf das themes-saved Event
-      console.log("[UI] Warte auf themes-saved Event...");
     };
-    
+
     const handleThemesSaved = () => {
-      console.log("[UI] themes-saved Event empfangen, beende Ladezustand");
       // Jetzt erst den Ladezustand beenden, nachdem die Themes gespeichert wurden
       setLoading(false);
     };
-    
+
     ipcRenderer.on("apps-starting", handleAppStarting);
     ipcRenderer.on("apps-started", handleAppsStarted);
     ipcRenderer.on("shortcuts-registered", handleShortcutsRegistered);
     ipcRenderer.on("themes-saved", handleThemesSaved);
-    
+
     return () => {
       ipcRenderer.removeListener("apps-starting", handleAppStarting);
       ipcRenderer.removeListener("apps-started", handleAppsStarted);
-      ipcRenderer.removeListener("shortcuts-registered", handleShortcutsRegistered);
+      ipcRenderer.removeListener(
+        "shortcuts-registered",
+        handleShortcutsRegistered
+      );
       ipcRenderer.removeListener("themes-saved", handleThemesSaved);
     };
   }, [shortcutsRegistered]);
-  
+
   // Laden der laufenden Anwendungen und Refresh-Intervall
   useEffect(() => {
     // Anwendungen alle 5 Minuten aktualisieren
@@ -408,7 +406,11 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
 
   // Handler für Theme-Aktivierung durch Shortcuts
   useEffect(() => {
-    const handleActivateThemeAndMinimize = (_: any, themeId: string, freshTheme?: Theme) => {
+    const handleActivateThemeAndMinimize = (
+      _: any,
+      themeId: string,
+      freshTheme?: Theme
+    ) => {
       setActiveThemes([themeId]);
 
       // For backward compatibility
@@ -419,7 +421,10 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
       try {
         // Verwende das direkt mitgesendete Theme, wenn vorhanden
         if (freshTheme) {
-          console.log(`[FOCUS] Verwende direkt mitgesendetes Theme für ${themeId}:`, freshTheme);
+          console.log(
+            `[FOCUS] Verwende direkt mitgesendetes Theme für ${themeId}:`,
+            freshTheme
+          );
           applyFocusMode(themeId, true, freshTheme);
         } else {
           applyFocusMode(themeId, true);
@@ -458,13 +463,10 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
   // Theme löschen (mit useCallback, damit es als Abhängigkeit verwendet werden kann)
   const handleDeleteTheme = useCallback(
     async (themeId: string) => {
-      console.log(`[UI] Lösche Theme mit ID: ${themeId}`);
-      
       try {
         // Zuerst den IPC-Handler aufrufen, um das Theme im DataStore zu löschen
         const success = await ipcRenderer.invoke("delete-theme", themeId);
-        console.log(`[UI] Theme-Löschung im DataStore: ${success ? 'erfolgreich' : 'fehlgeschlagen'}`);
-        
+
         if (success) {
           // Das Theme aus dem State entfernen
           setThemes((prevThemes) =>
@@ -518,22 +520,28 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
             : theme
         )
       );
-      
+
       // Dann den IPC-Handler aufrufen, um persistente Identifikatoren zu erstellen
       // Nur für numerische Prozess-IDs (keine Fenster-Handles)
-      const numId = typeof appId === 'string' ? parseInt(appId, 10) : appId;
-      if (!isNaN(numId) && numId < 100000) { // Fenster-Handles sind typischerweise sehr große Zahlen
-        console.log(`[UI] Rufe IPC-Handler add-process-to-theme für Prozess ${numId} und Thema ${themeId} auf`);
-        ipcRenderer.invoke('add-process-to-theme', themeId, numId)
-          .then(success => {
+      const numId = typeof appId === "string" ? parseInt(appId, 10) : appId;
+      if (!isNaN(numId) && numId < 100000) {
+        // Fenster-Handles sind typischerweise sehr große Zahlen
+
+        ipcRenderer
+          .invoke("add-process-to-theme", themeId, numId)
+          .then((success) => {
             if (success) {
-              console.log(`[UI] Prozess ${numId} erfolgreich zum Thema ${themeId} hinzugefügt mit persistentem Identifikator.`);
             } else {
-              console.error(`[UI] Fehler beim Hinzufügen des Prozesses ${numId} zum Thema ${themeId} mit persistentem Identifikator.`);
+              console.error(
+                `[UI] Fehler beim Hinzufügen des Prozesses ${numId} zum Thema ${themeId} mit persistentem Identifikator.`
+              );
             }
           })
-          .catch(error => {
-            console.error(`[UI] Fehler beim Aufruf des IPC-Handlers add-process-to-theme:`, error);
+          .catch((error) => {
+            console.error(
+              `[UI] Fehler beim Aufruf des IPC-Handlers add-process-to-theme:`,
+              error
+            );
           });
       }
     },
@@ -554,22 +562,31 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
             : theme
         )
       );
-      
+
       // Dann den IPC-Handler aufrufen, um persistente Identifikatoren zu entfernen
       // Nur für numerische Prozess-IDs (keine Fenster-Handles)
-      const numId = typeof appId === 'string' ? parseInt(appId, 10) : appId;
-      if (!isNaN(numId) && numId < 100000) { // Fenster-Handles sind typischerweise sehr große Zahlen
-        console.log(`[UI] Rufe IPC-Handler remove-process-from-theme für Prozess ${numId} und Thema ${themeId} auf`);
-        ipcRenderer.invoke('remove-process-from-theme', themeId, numId)
-          .then(success => {
+      const numId = typeof appId === "string" ? parseInt(appId, 10) : appId;
+      if (!isNaN(numId) && numId < 100000) {
+        // Fenster-Handles sind typischerweise sehr große Zahlen
+
+        ipcRenderer
+          .invoke("remove-process-from-theme", themeId, numId)
+          .then((success) => {
             if (success) {
-              console.log(`[UI] Prozess ${numId} erfolgreich aus Thema ${themeId} entfernt mit persistentem Identifikator.`);
+              console.log(
+                `[UI] Prozess ${numId} erfolgreich aus Thema ${themeId} entfernt mit persistentem Identifikator.`
+              );
             } else {
-              console.error(`[UI] Fehler beim Entfernen des Prozesses ${numId} aus Thema ${themeId} mit persistentem Identifikator.`);
+              console.error(
+                `[UI] Fehler beim Entfernen des Prozesses ${numId} aus Thema ${themeId} mit persistentem Identifikator.`
+              );
             }
           })
-          .catch(error => {
-            console.error(`[UI] Fehler beim Aufruf des IPC-Handlers remove-process-from-theme:`, error);
+          .catch((error) => {
+            console.error(
+              `[UI] Fehler beim Aufruf des IPC-Handlers remove-process-from-theme:`,
+              error
+            );
           });
       }
     },
@@ -621,7 +638,11 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
   };
 
   // Modified to support multiple themes with PERFORMANCE-OPTIMIERUNG
-  const applyFocusMode = async (themeId: string, active: boolean, providedTheme?: Theme) => {
+  const applyFocusMode = async (
+    themeId: string,
+    active: boolean,
+    providedTheme?: Theme
+  ) => {
     if (!active) {
       return;
     }
@@ -633,17 +654,20 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
     } else {
       // Schneller Zugriff auf lokalen State zuerst, dann erst Datenbank-Abfrage
       currentTheme = themes.find((t) => t.id === themeId);
-      
+
       // Nur wenn nicht im lokalen State gefunden, aus Datenbank laden
       if (!currentTheme) {
         try {
           currentTheme = await ipcRenderer.invoke("get-theme", themeId);
         } catch (error) {
-          console.error(`[FOCUS] Fehler beim Laden des Themes ${themeId}:`, error);
+          console.error(
+            `[FOCUS] Fehler beim Laden des Themes ${themeId}:`,
+            error
+          );
         }
       }
     }
-    
+
     if (!currentTheme) {
       console.error(`[FOCUS] Theme ${themeId} konnte nicht gefunden werden`);
       return;
@@ -661,7 +685,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
         }
       }
     }
-    
+
     // 1.1 Sammle Prozess-IDs aus dem processes-Array - optimiert
     if (currentTheme.processes && currentTheme.processes.length > 0) {
       for (let i = 0; i < currentTheme.processes.length; i++) {
@@ -673,7 +697,10 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
     }
 
     // 2. Sammle Fenster-Handles aus dem windows-Array - optimiert
-    if ((currentTheme as any).windows && (currentTheme as any).windows.length > 0) {
+    if (
+      (currentTheme as any).windows &&
+      (currentTheme as any).windows.length > 0
+    ) {
       const windows = (currentTheme as any).windows;
       for (let i = 0; i < windows.length; i++) {
         const window = windows[i];
@@ -831,13 +858,18 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
         <div className="drag-region"></div>
         <div className="window-controls">
           <button
-            className={`refresh-button ${isRefreshing ? 'refreshing' : ''}`}
+            className={`refresh-button ${isRefreshing ? "refreshing" : ""}`}
             onClick={fetchApplications}
             title="Anwendungen aktualisieren"
             disabled={isRefreshing}
           >
             {isRefreshing ? (
-              <svg className="spinner" width="12" height="12" viewBox="0 0 16 16">
+              <svg
+                className="spinner"
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+              >
                 <circle
                   className="path"
                   cx="8"
@@ -927,7 +959,9 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingT
 };
 
 // Wrapper-Komponente mit LicenseCheck und TrialManager
-const App: React.FC<{ initialLoadingText?: string }> = ({ initialLoadingText }) => {
+const App: React.FC<{ initialLoadingText?: string }> = ({
+  initialLoadingText,
+}) => {
   return (
     <LicenseCheck>
       <TrialManager>

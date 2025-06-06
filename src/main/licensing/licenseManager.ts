@@ -544,6 +544,47 @@ export class LicenseManager {
         throw new Error("Stripe Preis-ID ist nicht konfiguriert");
       }
 
+      // **NEU: Prüfung vor Checkout-Erstellung, ob bereits eine Lizenz existiert**
+      try {
+        const preCheckResponse = await axios.post(
+          `${SUPABASE_API_URL}/createCheckoutSession`,
+          {
+            deviceId: this.deviceInfo.deviceId,
+            deviceName: this.deviceInfo.deviceName,
+            email: email,
+          },
+          {
+            headers: {
+              "x-environment": ACTIVE_ENVIRONMENT,
+            },
+          }
+        );
+
+        if (preCheckResponse.data.success && preCheckResponse.data.url) {
+          // Checkout-URL im Browser öffnen
+          const { shell } = require("electron");
+          await shell.openExternal(preCheckResponse.data.url);
+          return;
+        }
+      } catch (error: any) {
+        // Spezielle Behandlung für bereits lizenzierte Geräte
+        if (error.response && error.response.status === 409) {
+          const errorData = error.response.data;
+          if (errorData.error === "DEVICE_ALREADY_LICENSED") {
+            this.showDeviceAlreadyLicensedDialog(
+              errorData.userMessage,
+              errorData.existingLicenseEmail,
+              errorData.suggestions || []
+            );
+            return;
+          }
+        }
+
+        // Andere Fehler werfen, um sie unten zu behandeln
+        throw error;
+      }
+
+      // Legacy-Fallback (falls die neue Validierung nicht funktioniert)
       // Stripe-Instanz erstellen
       const Stripe = require("stripe");
       console.log("[License] Erstelle Stripe-Instanz...");
@@ -919,6 +960,41 @@ export class LicenseManager {
         "Der Stripe Checkout konnte nicht geöffnet werden. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support.",
       buttons: ["OK"],
     });
+  }
+
+  /**
+   * Zeigt einen Dialog an, wenn das Gerät bereits lizenziert ist
+   */
+  private showDeviceAlreadyLicensedDialog(
+    message: string,
+    existingEmail?: string,
+    suggestions: string[] = []
+  ): void {
+    const suggestionText =
+      suggestions.length > 0
+        ? "\n\nMögliche Lösungen:\n• " + suggestions.join("\n• ")
+        : "";
+
+    dialog
+      .showMessageBox({
+        type: "warning",
+        title: "Gerät bereits lizenziert",
+        message: message + suggestionText,
+        detail: existingEmail
+          ? `Die bestehende Lizenz ist mit der E-Mail-Adresse "${existingEmail}" verknüpft.`
+          : "Falls Sie Probleme mit Ihrer Lizenz haben, kontaktieren Sie bitte unseren Support.",
+        buttons: ["Support kontaktieren", "OK"],
+        defaultId: 1,
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          // Support-URL öffnen
+          const { shell } = require("electron");
+          shell.openExternal(
+            "mailto:support@switchfast.io?subject=Lizenz-Problem&body=Ich%20habe%20ein%20Problem%20mit%20meiner%20Lizenz."
+          );
+        }
+      });
   }
 
   /**

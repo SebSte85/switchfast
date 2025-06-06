@@ -236,6 +236,52 @@ serve(async (req) => {
             );
           }
 
+          // **NEU: Zusätzliche Sicherheitsprüfung - doppelte Geräte-Aktivierungen verhindern**
+          const { data: existingActivation, error: activationCheckError } =
+            await supabaseClient
+              .from("device_activations")
+              .select(
+                `
+              id,
+              is_active,
+              license_id,
+              licenses!inner(
+                id,
+                is_active,
+                email
+              )
+            `
+              )
+              .eq("device_id", deviceId)
+              .eq("is_active", true)
+              .eq("licenses.is_active", true)
+              .maybeSingle();
+
+          if (activationCheckError) {
+            console.error(
+              "Fehler bei der Validierung bestehender Aktivierungen:",
+              activationCheckError
+            );
+          } else if (existingActivation) {
+            console.log(
+              `⚠️ Gerät ${deviceId} hat bereits eine aktive Lizenz. Überspringe Lizenz-Erstellung.`
+            );
+
+            // Webhook als erfolgreich behandeln, aber keine neue Lizenz erstellen
+            return new Response(
+              JSON.stringify({
+                success: true,
+                message:
+                  "Gerät bereits lizenziert - keine neue Lizenz erstellt",
+                existing_license: true,
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 200,
+              }
+            );
+          }
+
           // Line items verarbeiten (um zu wissen was gekauft wurde)
           const lineItems = session.line_items?.data || [];
           console.log(
@@ -366,9 +412,9 @@ serve(async (req) => {
             );
           }
 
-          // Alle Geräte für diese Lizenz deaktivieren (mit Schema)
+          // Alle Geräte für diese Lizenz deaktivieren
           const { error: devicesError } = await supabaseClient
-            .from(`${schema}.device_activations`)
+            .from("device_activations")
             .update({ is_active: false })
             .eq("license_id", licenseData.id);
 

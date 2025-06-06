@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { useLicense } from '../../hooks/useLicense';
-import LicensePage from './LicensePage';
+import React, { useEffect, useState } from "react";
+import { useLicense } from "../../hooks/useLicense";
+import LicensePage from "./LicensePage";
 
 interface LicenseCheckProps {
   children: React.ReactNode;
@@ -33,17 +33,7 @@ const LicenseCheck: React.FC<LicenseCheckProps> = ({ children }) => {
 
   // Wenn keine gültige Lizenz oder kein aktiver Trial vorhanden ist, zeigen wir die Lizenzseite an
   if (!isLicensed && !isInTrial) {
-    return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-900">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold text-accent">SwitchFast</h1>
-            <p className="text-gray-300">Ihre Lizenz ist abgelaufen oder nicht gültig</p>
-          </div>
-          <LicensePage />
-        </div>
-      </div>
-    );
+    return <LicensePage />;
   }
 
   // Wenn eine gültige Lizenz oder ein aktiver Trial vorhanden ist, zeigen wir die App an
