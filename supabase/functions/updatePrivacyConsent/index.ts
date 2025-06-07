@@ -41,7 +41,7 @@ serve(async (req) => {
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
 
-    const { deviceId } = await req.json();
+    const { deviceId, consentGiven } = await req.json();
 
     // Validierung der Eingaben
     if (!deviceId) {
@@ -49,6 +49,16 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
       });
+    }
+
+    if (typeof consentGiven !== "boolean") {
+      return new Response(
+        JSON.stringify({ error: "Consent-Status muss ein Boolean sein" }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        }
+      );
     }
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
@@ -62,20 +72,23 @@ serve(async (req) => {
       }
     );
 
-    // Trial-Status in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
-    const { data: trialData, error: trialError } = await supabaseClient
+    // Prüfen, ob bereits ein Trial-Eintrag existiert
+    const { data: existingTrialData, error: selectError } = await supabaseClient
       .from("trial_blocks")
       .select("*")
       .eq("device_id", deviceId)
       .maybeSingle();
 
-    if (trialError) {
-      console.error("Trial-Fehler:", JSON.stringify(trialError));
+    if (selectError) {
+      console.error(
+        "Fehler beim Abrufen des Trial-Status:",
+        JSON.stringify(selectError)
+      );
       return new Response(
         JSON.stringify({
           error: "Fehler beim Abrufen des Trial-Status",
-          details: trialError.message,
-          code: trialError.code,
+          details: selectError.message,
+          code: selectError.code,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -84,8 +97,41 @@ serve(async (req) => {
       );
     }
 
-    // Wenn kein Trial-Eintrag gefunden wurde, erstellen wir einen neuen
-    if (!trialData) {
+    if (existingTrialData) {
+      // Trial-Eintrag existiert, aktualisiere den Consent-Status
+      const { error: updateError } = await supabaseClient
+        .from("trial_blocks")
+        .update({ privacy_consent_given: consentGiven })
+        .eq("device_id", deviceId);
+
+      if (updateError) {
+        console.error(
+          "Fehler beim Aktualisieren des Consent-Status:",
+          JSON.stringify(updateError)
+        );
+        return new Response(
+          JSON.stringify({
+            error: "Fehler beim Aktualisieren des Consent-Status",
+            details: updateError.message,
+            code: updateError.code,
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 500,
+          }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Privacy Consent erfolgreich aktualisiert",
+          consentGiven: consentGiven,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } else {
+      // Noch kein Trial-Eintrag vorhanden, erstelle einen neuen
       const trialStartDate = new Date();
       const trialEndDate = new Date(trialStartDate);
       trialEndDate.setDate(trialEndDate.getDate() + 7); // 7 Tage Trial
@@ -97,16 +143,19 @@ serve(async (req) => {
           trial_start_date: trialStartDate.toISOString(),
           trial_end_date: trialEndDate.toISOString(),
           is_trial_used: false,
-          privacy_consent_given: false,
+          privacy_consent_given: consentGiven,
         })
         .select("*")
         .maybeSingle();
 
       if (insertError) {
-        console.error("Insert-Fehler:", JSON.stringify(insertError));
+        console.error(
+          "Fehler beim Erstellen des Trial-Eintrags:",
+          JSON.stringify(insertError)
+        );
         return new Response(
           JSON.stringify({
-            error: "Fehler beim Erstellen des Trial-Status",
+            error: "Fehler beim Erstellen des Trial-Eintrags",
             details: insertError.message,
             code: insertError.code,
           }),
@@ -120,78 +169,14 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
-          is_trial_active: true,
-          trial_start_date: newTrialData.trial_start_date,
-          trial_end_date: newTrialData.trial_end_date,
-          remaining_days: 7,
-          message: "Trial gestartet",
+          message: "Trial-Eintrag erstellt und Privacy Consent gesetzt",
+          consentGiven: consentGiven,
+          trialCreated: true,
+          trialData: newTrialData,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    // Prüfen, ob der Trial bereits verwendet wurde
-    if (trialData.is_trial_used) {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          is_trial_active: false,
-          trial_start_date: trialData.trial_start_date,
-          trial_end_date: trialData.trial_end_date,
-          remaining_days: 0,
-          message: "Trial wurde bereits verwendet",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Prüfen, ob der Trial abgelaufen ist
-    const now = new Date();
-    const trialEndDate = new Date(trialData.trial_end_date);
-
-    if (now > trialEndDate) {
-      // Trial ist abgelaufen, als verwendet markieren (Schema ist bereits im Client konfiguriert)
-      const { error: updateError } = await supabaseClient
-        .from("trial_blocks")
-        .update({ is_trial_used: true })
-        .eq("device_id", deviceId);
-
-      if (updateError) {
-        console.error(
-          "Fehler beim Aktualisieren des Trial-Status:",
-          updateError
-        );
-      }
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          is_trial_active: false,
-          trial_start_date: trialData.trial_start_date,
-          trial_end_date: trialData.trial_end_date,
-          remaining_days: 0,
-          message: "Trial ist abgelaufen",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Trial ist aktiv, verbleibende Tage berechnen
-    const remainingDays = Math.ceil(
-      (trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        is_trial_active: true,
-        trial_start_date: trialData.trial_start_date,
-        trial_end_date: trialData.trial_end_date,
-        remaining_days: remainingDays,
-        message: "Trial ist aktiv",
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
   } catch (error) {
     console.error("Unerwarteter Fehler:", error);
     return new Response(

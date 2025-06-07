@@ -26,6 +26,7 @@ interface TrialInfo {
   isTrialActive: boolean;
   remainingDays: number;
   email?: string;
+  privacyConsentGiven?: boolean;
 }
 
 // Konfiguration
@@ -690,15 +691,29 @@ export class LicenseManager {
    * Gibt die Trial-Informationen zurück
    */
   public getTrialInfo(): TrialInfo | null {
+    console.log("📋 [LicenseManager DEBUG] Rufe Trial Info ab...");
     try {
       const storedTrialInfo = secureStore.get("trialInfo") as
         | TrialInfo
         | undefined;
 
-      if (!storedTrialInfo) return null;
+      console.log(
+        "💾 [LicenseManager DEBUG] Gespeicherte Trial Info:",
+        storedTrialInfo
+      );
+
+      if (!storedTrialInfo) {
+        console.log("❌ [LicenseManager DEBUG] Keine Trial Info gefunden");
+        return null;
+      }
 
       const now = new Date();
       const trialEndDate = new Date(storedTrialInfo.trialEndDate);
+
+      console.log("⏰ [LicenseManager DEBUG] Zeit-Vergleich:", {
+        now: now.toISOString(),
+        trialEndDate: trialEndDate.toISOString(),
+      });
 
       // Berechne verbleibende Tage
       const diffTime = Math.max(0, trialEndDate.getTime() - now.getTime());
@@ -707,18 +722,32 @@ export class LicenseManager {
       // Aktualisiere Trial-Status
       const isTrialActive = now < trialEndDate;
 
+      console.log("🧮 [LicenseManager DEBUG] Berechnete Werte:", {
+        diffTime,
+        diffDays,
+        isTrialActive,
+      });
+
       const updatedTrialInfo: TrialInfo = {
         ...storedTrialInfo,
         isTrialActive,
         remainingDays: diffDays,
       };
 
+      console.log(
+        "📝 [LicenseManager DEBUG] Aktualisierte Trial Info:",
+        updatedTrialInfo
+      );
+
       // Speichere aktualisierte Informationen
       secureStore.set("trialInfo", updatedTrialInfo);
 
       return updatedTrialInfo;
     } catch (error) {
-      console.error("Fehler beim Abrufen der Trial-Informationen:", error);
+      console.error(
+        "💥 [LicenseManager DEBUG] Fehler beim Abrufen der Trial-Informationen:",
+        error
+      );
       return null;
     }
   }
@@ -854,6 +883,135 @@ export class LicenseManager {
     // Stattdessen wird der Benutzer direkt zur Lizenzseite weitergeleitet
     console.log("[LicenseManager] Trial abgelaufen - Dialog deaktiviert");
     // this.openStripeCheckout(); // Automatisches Öffnen des Checkouts auch deaktiviert
+  }
+
+  /**
+   * Gibt den Privacy Consent Status zurück
+   */
+  public getPrivacyConsentStatus(): boolean {
+    console.log("🔍 [LicenseManager DEBUG] Prüfe Privacy Consent Status...");
+    try {
+      const trialInfo = this.getTrialInfo();
+      console.log(
+        "📋 [LicenseManager DEBUG] Trial Info für Consent-Prüfung:",
+        trialInfo
+      );
+
+      if (trialInfo && trialInfo.privacyConsentGiven !== undefined) {
+        console.log(
+          "✅ [LicenseManager DEBUG] Consent aus Trial Info:",
+          trialInfo.privacyConsentGiven
+        );
+        return trialInfo.privacyConsentGiven;
+      }
+
+      // Prüfen, ob es einen separaten Consent-Eintrag gibt
+      const consentStatus = secureStore.get("privacyConsentGiven") as
+        | boolean
+        | undefined;
+      console.log(
+        "💾 [LicenseManager DEBUG] Consent aus secureStore:",
+        consentStatus
+      );
+      const finalStatus = consentStatus ?? false;
+      console.log(
+        "🔒 [LicenseManager DEBUG] Finaler Consent Status:",
+        finalStatus
+      );
+      return finalStatus;
+    } catch (error) {
+      console.error(
+        "💥 [LicenseManager DEBUG] Fehler beim Abrufen des Privacy Consent Status:",
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Setzt den Privacy Consent Status
+   */
+  public async setPrivacyConsent(consentGiven: boolean): Promise<boolean> {
+    console.log(
+      `🔒 [LicenseManager DEBUG] Setze Privacy Consent: ${consentGiven}`
+    );
+    try {
+      // In lokaler Speicherung setzen
+      secureStore.set("privacyConsentGiven", consentGiven);
+      console.log(
+        `💾 [LicenseManager DEBUG] Privacy Consent in secureStore gesetzt`
+      );
+
+      // Auch in Trial-Informationen aktualisieren, falls vorhanden
+      const trialInfo = this.getTrialInfo();
+      console.log(`📋 [LicenseManager DEBUG] Aktuelle Trial Info:`, trialInfo);
+
+      if (trialInfo) {
+        const updatedTrialInfo: TrialInfo = {
+          ...trialInfo,
+          privacyConsentGiven: consentGiven,
+        };
+        this.updateTrialInfo(updatedTrialInfo);
+        console.log(
+          `📝 [LicenseManager DEBUG] Trial Info mit Consent aktualisiert:`,
+          updatedTrialInfo
+        );
+      }
+
+      // Auch in der Datenbank aktualisieren
+      console.log(
+        `🌐 [LicenseManager DEBUG] Aktualisiere Consent in Datenbank...`
+      );
+      try {
+        const response = await axios.post(
+          `${SUPABASE_API_URL}/updatePrivacyConsent`,
+          {
+            deviceId: this.deviceInfo.deviceId,
+            consentGiven: consentGiven,
+          },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "x-environment": ACTIVE_ENVIRONMENT,
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+          }
+        );
+
+        console.log(
+          `📡 [LicenseManager DEBUG] Datenbank Response:`,
+          response.data
+        );
+
+        if (response.data && response.data.success) {
+          console.log(
+            `✅ [LicenseManager DEBUG] Privacy Consent in Datenbank aktualisiert: ${consentGiven}`
+          );
+        } else {
+          console.warn(
+            `⚠️ [LicenseManager DEBUG] Warnung: Privacy Consent konnte nicht in Datenbank aktualisiert werden:`,
+            response.data
+          );
+        }
+      } catch (dbError) {
+        console.error(
+          "💥 [LicenseManager DEBUG] Fehler beim Aktualisieren des Privacy Consents in der Datenbank:",
+          dbError
+        );
+        // Lokaler Consent bleibt bestehen, auch wenn Datenbank-Update fehlschlägt
+      }
+
+      console.log(
+        `🎉 [LicenseManager DEBUG] Privacy Consent lokal gesetzt: ${consentGiven}`
+      );
+      return true;
+    } catch (error) {
+      console.error(
+        "💥 [LicenseManager DEBUG] Fehler beim Setzen des Privacy Consents:",
+        error
+      );
+      return false;
+    }
   }
 
   /**

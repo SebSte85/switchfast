@@ -1,6 +1,6 @@
 {
   "name": "switchfast",
-  "version": "0.1.1",
+  "version": "0.1.0-beta.1",
   "description": "Desktop app to manage application focus by grouping them under themes",
   "main": "dist/main.js",
   "scripts": {
@@ -52,8 +52,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "stripe": "^18.2.1",
-    "uuid": "^11.1.0",
-    "workfocusmanager": "file:"
+    "uuid": "^11.1.0"
   },
   "build": {
     "appId": "com.switchfast.app",

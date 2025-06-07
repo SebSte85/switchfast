@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { ipcRenderer } from "electron";
-import TrialSignupModal from "./TrialSignupModal";
+import PrivacyConsentModal from "./PrivacyConsentModal";
 import { useLicense } from "../hooks/useLicense";
 import "./TrialManager.css";
+import console from "console";
 
 interface LicenseStatus {
   isLicensed: boolean;
@@ -16,38 +17,133 @@ interface LicenseStatus {
 const TrialManager: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [showTrialSignup, setShowTrialSignup] = useState<boolean>(false);
+  const [showPrivacyConsent, setShowPrivacyConsent] = useState<boolean>(false);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(
     null
   );
-  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activationSuccess, setActivationSuccess] = useState<boolean | null>(
     null
   );
+  const [isLoading, setIsLoading] = useState(true);
 
-  // License Hook für die Aktivierung
   const { activateLicenseFromSession } = useLicense();
 
-  // Lizenzstatus beim Laden der Komponente abrufen
+  // Beim Laden des Komponenten: Lizenzstatus und Privacy Consent prüfen
   useEffect(() => {
     const checkLicenseStatus = async () => {
       try {
+        console.log("🔍 [TrialManager DEBUG] Starte Lizenzstatus-Prüfung...");
+
+        // Zuerst Lizenzstatus prüfen
         const status = await ipcRenderer.invoke("license:getStatus");
         setLicenseStatus(status);
 
-        // Wir zeigen das Trial-Popup nicht mehr automatisch an
-        // if (!status.isLicensed && !status.isInTrial) {
-        //   setShowTrialSignup(true);
-        // }
+        console.log("📋 [TrialManager DEBUG] Lizenzstatus erhalten:", status);
+
+        // Wenn bereits lizenziert oder im Trial → kein Modal anzeigen
+        if (status.isLicensed || status.isInTrial) {
+          console.log(
+            "✅ [TrialManager DEBUG] Bereits lizenziert oder im Trial - keine weitere Aktion nötig"
+          );
+          return;
+        }
+
+        // Privacy Consent prüfen
+        const consentGiven = await ipcRenderer.invoke(
+          "privacy:getConsentStatus"
+        );
+        console.log(
+          "🔒 [TrialManager DEBUG] Privacy Consent Status:",
+          consentGiven
+        );
+
+        if (!consentGiven) {
+          console.log(
+            "❌ [TrialManager DEBUG] Kein Privacy Consent - zeige Modal"
+          );
+          setShowPrivacyConsent(true);
+          return;
+        }
+
+        console.log("✅ [TrialManager DEBUG] Privacy Consent bereits gegeben");
+
+        // Consent bereits gegeben, aber kein aktiver Trial
+        // Prüfen, ob Trial überhaupt möglich ist (noch nicht verwendet)
+        const trialInfo = await ipcRenderer.invoke("license:getTrialInfo");
+        console.log("📋 [TrialManager DEBUG] Trial Info erhalten:", trialInfo);
+
+        if (!trialInfo) {
+          // Noch nie Trial gestartet → Trial automatisch aktivieren
+          console.log(
+            "🆕 [TrialManager DEBUG] Kein Trial-Eintrag gefunden - aktiviere automatisch"
+          );
+          await activateTrialAutomatically();
+        } else if (trialInfo.remainingDays <= 0 || !trialInfo.isTrialActive) {
+          // Trial abgelaufen oder deaktiviert → Keine weiteren Trials möglich
+          console.log(
+            "⏰ [TrialManager DEBUG] Trial abgelaufen - Lizenz erforderlich"
+          );
+          console.log("📋 [TrialManager DEBUG] Trial Details:", {
+            remainingDays: trialInfo.remainingDays,
+            isTrialActive: trialInfo.isTrialActive,
+          });
+          // LicenseCheck Component wird Benutzer zur Lizenz-Kaufseite weiterleiten
+          // Hier zeigen wir keine Modals an
+        } else {
+          // Trial sollte eigentlich aktiv sein, aber status.isInTrial war false
+          // Das ist inkonsistent - Trial automatisch reaktivieren
+          console.warn(
+            "⚠️ [TrialManager DEBUG] Inkonsistenter Trial-Status - reaktiviere Trial"
+          );
+          console.warn("⚠️ [TrialManager DEBUG] Inkonsistenz Details:", {
+            statusIsInTrial: status.isInTrial,
+            trialInfoIsActive: trialInfo.isTrialActive,
+            remainingDays: trialInfo.remainingDays,
+          });
+          await activateTrialAutomatically();
+        }
       } catch (error) {
-        console.error("Fehler beim Abrufen des Lizenzstatus:", error);
+        console.error(
+          "💥 [TrialManager DEBUG] Fehler beim Abrufen des Lizenzstatus:",
+          error
+        );
       } finally {
+        console.log(
+          "🏁 [TrialManager DEBUG] Lizenzstatus-Prüfung abgeschlossen"
+        );
         setIsLoading(false);
       }
     };
 
     checkLicenseStatus();
   }, []);
+
+  // Hilfsfunktion für automatische Trial-Aktivierung
+  const activateTrialAutomatically = async () => {
+    try {
+      console.log("🚀 [TrialManager DEBUG] Aktiviere Trial automatisch...");
+      const trialResult = await ipcRenderer.invoke("activate-trial", {
+        email: "user@example.com",
+      });
+
+      if (trialResult.success) {
+        console.log("✅ [TrialManager DEBUG] Trial erfolgreich aktiviert");
+        // Lizenzstatus aktualisieren
+        const status = await ipcRenderer.invoke("license:getStatus");
+        setLicenseStatus(status);
+      } else {
+        console.error(
+          "❌ [TrialManager DEBUG] Trial-Aktivierung fehlgeschlagen:",
+          trialResult.error
+        );
+      }
+    } catch (error) {
+      console.error(
+        "💥 [TrialManager DEBUG] Fehler bei automatischer Trial-Aktivierung:",
+        error
+      );
+    }
+  };
 
   // IPC-Handler für die Lizenzaktivierung nach erfolgreicher Zahlung
   useEffect(() => {
@@ -113,16 +209,40 @@ const TrialManager: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [activateLicenseFromSession]);
 
-  // Trial-Signup abgeschlossen
-  const handleTrialComplete = async () => {
-    setShowTrialSignup(false);
-
-    // Lizenzstatus aktualisieren
+  // Privacy Consent akzeptiert
+  const handlePrivacyAccept = async () => {
+    console.log(
+      "✅ [TrialManager DEBUG] Privacy Consent akzeptiert - speichere..."
+    );
     try {
-      const status = await ipcRenderer.invoke("license:getStatus");
-      setLicenseStatus(status);
+      // Consent in der Datenbank speichern
+      const result = await ipcRenderer.invoke("privacy:setConsent", true);
+      console.log(
+        "💾 [TrialManager DEBUG] Privacy Consent gespeichert, Ergebnis:",
+        result
+      );
+      setShowPrivacyConsent(false);
+
+      // Trial direkt aktivieren ohne E-Mail-Eingabe
+      await activateTrialAutomatically();
     } catch (error) {
-      console.error("Fehler beim Aktualisieren des Lizenzstatus:", error);
+      console.error(
+        "💥 [TrialManager DEBUG] Fehler beim Speichern des Consents oder Trial-Aktivierung:",
+        error
+      );
+    }
+  };
+
+  // Privacy Consent abgelehnt
+  const handlePrivacyDecline = async () => {
+    try {
+      // Consent als abgelehnt speichern
+      await ipcRenderer.invoke("privacy:setConsent", false);
+      setShowPrivacyConsent(false);
+      // App schließen, da ohne Consent keine Nutzung möglich
+      await ipcRenderer.invoke("app:quit");
+    } catch (error) {
+      console.error("Fehler beim Speichern des Consents:", error);
     }
   };
 
@@ -133,14 +253,17 @@ const TrialManager: React.FC<{ children: React.ReactNode }> = ({
 
   return (
     <>
-      {showTrialSignup && (
+      {showPrivacyConsent && (
         <div className="modal-overlay">
-          <TrialSignupModal onComplete={handleTrialComplete} />
+          <PrivacyConsentModal
+            onAccept={handlePrivacyAccept}
+            onDecline={handlePrivacyDecline}
+          />
         </div>
       )}
 
-      {/* Zeige die Hauptanwendung, wenn kein Trial-Signup angezeigt wird */}
-      {!showTrialSignup && children}
+      {/* Zeige die Hauptanwendung, wenn kein Modal angezeigt wird */}
+      {!showPrivacyConsent && children}
     </>
   );
 };

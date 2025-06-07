@@ -1046,16 +1046,16 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   );
 };
 
-// Wrapper-Komponente mit LicenseCheck und TrialManager
+// Wrapper-Komponente mit TrialManager und LicenseCheck (Reihenfolge geändert!)
 const App: React.FC<{ initialLoadingText?: string }> = ({
   initialLoadingText,
 }) => {
   return (
-    <LicenseCheck>
-      <TrialManager>
+    <TrialManager>
+      <LicenseCheck>
         <AppContent initialLoadingText={initialLoadingText} />
-      </TrialManager>
-    </LicenseCheck>
+      </LicenseCheck>
+    </TrialManager>
   );
 };
 

@@ -6,12 +6,14 @@ Diese Dokumentation beschreibt das Lizenzsystem für die SwitchFast Electron-App
 
 Das Lizenzsystem besteht aus folgenden Komponenten:
 
-1. **Electron-App**: 
+1. **Electron-App**:
+
    - LicenseManager im Main-Prozess
    - UI-Komponenten im Renderer-Prozess
    - IPC-Kommunikation zwischen Main und Renderer
 
 2. **Supabase**:
+
    - Datenbanktabellen für Lizenzen, Geräteaktivierungen und Trial-Blocks in separaten Schemas (`test` und `prod`)
    - Edge Functions für die serverseitige Logik mit Umgebungstrennung
 
@@ -25,6 +27,7 @@ Das Lizenzsystem besteht aus folgenden Komponenten:
 ### Tabellen
 
 1. **licenses**:
+
    - `id` (UUID): Primärschlüssel
    - `license_key` (TEXT): Eindeutiger Lizenzschlüssel
    - `email` (TEXT): E-Mail des Kunden
@@ -35,6 +38,7 @@ Das Lizenzsystem besteht aus folgenden Komponenten:
    - `is_active` (BOOLEAN): Lizenzstatus
 
 2. **device_activations**:
+
    - `id` (UUID): Primärschlüssel
    - `license_id` (UUID): Fremdschlüssel zur licenses-Tabelle
    - `device_id` (TEXT): Eindeutige Geräte-ID
@@ -49,6 +53,7 @@ Das Lizenzsystem besteht aus folgenden Komponenten:
    - `trial_start_date` (TIMESTAMP): Startdatum der Trial-Periode
    - `trial_end_date` (TIMESTAMP): Enddatum der Trial-Periode
    - `is_trial_used` (BOOLEAN): Trial-Status
+   - `privacy_consent_given` (BOOLEAN): Privacy Consent Status für PostHog Tracking
 
 ## Edge Functions
 
@@ -91,11 +96,13 @@ Die UI-Komponenten im Renderer-Prozess umfassen:
 Das Lizenzsystem unterstützt eine strikte Trennung zwischen Test- und Produktionsumgebung:
 
 ### Datenbank
+
 - Verwendung separater PostgreSQL-Schemas (`test` und `prod`) innerhalb derselben Supabase-Instanz
 - Jedes Schema enthält identische Tabellen für Lizenzen, Geräteaktivierungen und Trial-Blocks
 - Vollständige Datenisolation zwischen den Umgebungen
 
 ### Edge Functions
+
 - Dynamische Erkennung der aktiven Umgebung über:
   1. HTTP-Header `x-environment` (`test` oder `prod`)
   2. Query-Parameter `env` (`test` oder `prod`)
@@ -105,12 +112,14 @@ Das Lizenzsystem unterstützt eine strikte Trennung zwischen Test- und Produktio
 - CORS-Header-Unterstützung für `x-environment`
 
 ### Stripe-Integration
+
 - Separate API-Schlüssel für Test- und Produktionsumgebung
 - Separate Webhook-Secrets für Test- und Produktionsumgebung
 - Separate Preis-IDs für Test- und Produktionsumgebung
 - Umgebungsparameter werden an Success- und Cancel-URLs angehängt
 
 ### Electron-App
+
 - Muss bei API-Aufrufen die gewünschte Umgebung über Header `x-environment` oder Query-Parameter `env` angeben
 - Kann zwischen Test- und Produktionsumgebung wechseln (z.B. für Entwicklungs- und Testzwecke)
 
@@ -126,11 +135,13 @@ Das Lizenzsystem unterstützt eine strikte Trennung zwischen Test- und Produktio
 ## Umgebungsvariablen
 
 ### Supabase
+
 - `SUPABASE_URL`: URL der Supabase-Instanz
 - `SUPABASE_SERVICE_ROLE_KEY`: Service-Role-Key für Supabase
 - `ACTIVE_ENVIRONMENT`: Standard-Umgebung (`test` oder `prod`), wenn keine andere angegeben ist
 
 ### Stripe
+
 - `TEST_STRIPE_SECRET_KEY`: Geheimer Schlüssel für Stripe Testumgebung
 - `PROD_STRIPE_SECRET_KEY`: Geheimer Schlüssel für Stripe Produktionsumgebung
 - `TEST_STRIPE_WEBHOOK_SECRET`: Webhook-Secret für Stripe Testumgebung
@@ -148,19 +159,25 @@ Das Lizenzsystem unterstützt eine strikte Trennung zwischen Test- und Produktio
 ## Benutzerablauf
 
 1. **Erster Start**:
-   - 7-tägige Trial-Periode beginnt
-   - Trial-Informationen werden lokal und remote gespeichert
+
+   - Privacy Consent Screen wird angezeigt
+   - Nutzer muss Datenschutz und Privacy Notice bestätigen
+   - Nach Consent-Bestätigung beginnt 7-tägige Trial-Periode
+   - Trial-Informationen und Consent-Status werden lokal und remote gespeichert
 
 2. **Trial-Ablauf**:
+
    - Benutzer wird aufgefordert, eine Lizenz zu kaufen oder zu aktivieren
    - Stripe Checkout kann direkt geöffnet werden
 
 3. **Lizenzkauf**:
+
    - Benutzer kauft eine Lizenz über Stripe Checkout
    - Nach erfolgreicher Zahlung wird eine Lizenz erstellt und das Gerät aktiviert
    - Benutzer kann die App weiter verwenden
 
 4. **Lizenzaktivierung auf weiteren Geräten**:
+
    - Benutzer kann die Lizenz auf bis zu 3 Geräten aktivieren
    - Lizenzschlüssel wird eingegeben und das Gerät aktiviert
 

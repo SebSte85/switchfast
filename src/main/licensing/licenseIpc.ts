@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron';
-import { LicenseManager } from './licenseManager';
+import { ipcMain } from "electron";
+import { LicenseManager } from "./licenseManager";
 
 interface DeviceInfo {
   id: string;
@@ -10,133 +10,175 @@ interface DeviceInfo {
 
 export function setupLicenseIPC(licenseManager: LicenseManager) {
   // Lizenzstatus abrufen
-  ipcMain.handle('license:getStatus', async () => {
+  ipcMain.handle("license:getStatus", async () => {
     const isLicensed = licenseManager.isLicensed();
     const isInTrial = licenseManager.isInTrial();
     const remainingTrialDays = licenseManager.getRemainingTrialDays();
     const licenseInfo = licenseManager.getLicenseInfo();
-    
+
     return {
       isLicensed,
       isInTrial,
       remainingTrialDays,
       licenseKey: licenseInfo?.licenseKey || null,
       email: licenseInfo?.email || null,
-      purchaseDate: licenseInfo?.purchaseDate || null
+      purchaseDate: licenseInfo?.purchaseDate || null,
     };
   });
 
   // Lizenz aktivieren
-  ipcMain.handle('license:activate', async (_, licenseKey: string) => {
+  ipcMain.handle("license:activate", async (_, licenseKey: string) => {
     return await licenseManager.activateDevice(licenseKey);
   });
 
   // Lizenz deaktivieren
-  ipcMain.handle('license:deactivate', async () => {
+  ipcMain.handle("license:deactivate", async () => {
     const licenseInfo = licenseManager.getLicenseInfo();
     if (!licenseInfo) return false;
-    
+
     return await licenseManager.deactivateDevice(licenseInfo.licenseKey);
   });
 
   // Trial aktivieren
-  ipcMain.handle('activate-trial', async (_, { email }) => {
+  ipcMain.handle("activate-trial", async (_, { email }) => {
     try {
       // Validierung der E-Mail
-      if (!email || typeof email !== 'string' || !email.includes('@')) {
-        return { success: false, error: 'Ungültige E-Mail-Adresse' };
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        return { success: false, error: "Ungültige E-Mail-Adresse" };
       }
-      
+
       // Trial aktivieren
       const result = await licenseManager.activateTrial(email);
-      
+
       return { success: true, ...result };
     } catch (error) {
-      console.error('Fehler bei der Trial-Aktivierung:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unbekannter Fehler bei der Trial-Aktivierung' 
+      console.error("Fehler bei der Trial-Aktivierung:", error);
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unbekannter Fehler bei der Trial-Aktivierung",
       };
     }
   });
 
   // Stripe Checkout öffnen
-  ipcMain.handle('license:openCheckout', async (_, email?: string) => {
+  ipcMain.handle("license:openCheckout", async (_, email?: string) => {
     await licenseManager.openStripeCheckout(email);
     return true;
   });
 
   // Lizenzstatus prüfen
-  ipcMain.handle('license:checkStatus', async () => {
+  ipcMain.handle("license:checkStatus", async () => {
     return await licenseManager.checkLicenseStatus();
   });
-  
+
   // Lizenz mit Stripe Session aktivieren
-  ipcMain.handle('license:activateFromSession', async (_, { sessionId, environment }: { sessionId: string, environment: string }) => {
-    console.log(`[LicenseIPC] Aktiviere Lizenz aus Stripe Session: ${sessionId}, Umgebung: ${environment}`);
-    return await licenseManager.activateLicenseFromSession(sessionId, environment);
-  });
+  ipcMain.handle(
+    "license:activateFromSession",
+    async (
+      _,
+      { sessionId, environment }: { sessionId: string; environment: string }
+    ) => {
+      console.log(
+        `[LicenseIPC] Aktiviere Lizenz aus Stripe Session: ${sessionId}, Umgebung: ${environment}`
+      );
+      return await licenseManager.activateLicenseFromSession(
+        sessionId,
+        environment
+      );
+    }
+  );
 
   // Trial-Status prüfen
-  ipcMain.handle('license:checkTrialStatus', async () => {
+  ipcMain.handle("license:checkTrialStatus", async () => {
     return await licenseManager.checkTrialStatus();
   });
 
   // Aktivierte Geräte abrufen
-  ipcMain.handle('license:getDevices', async () => {
+  ipcMain.handle("license:getDevices", async () => {
     const licenseInfo = licenseManager.getLicenseInfo();
     if (!licenseInfo) return [];
-    
+
     try {
-      const devices = await licenseManager.getActivatedDevices(licenseInfo.licenseKey);
+      const devices = await licenseManager.getActivatedDevices(
+        licenseInfo.licenseKey
+      );
       return devices.map((device: any) => ({
         id: device.device_id,
         name: device.device_name,
         firstActivated: device.first_activated_at,
-        lastCheckIn: device.last_check_in
+        lastCheckIn: device.last_check_in,
       }));
     } catch (error) {
-      console.error('Fehler beim Abrufen der aktivierten Geräte:', error);
+      console.error("Fehler beim Abrufen der aktivierten Geräte:", error);
       return [];
     }
   });
 
   // Bestimmtes Gerät deaktivieren
-  ipcMain.handle('license:deactivateDevice', async (_, deviceId: string) => {
+  ipcMain.handle("license:deactivateDevice", async (_, deviceId: string) => {
     const licenseInfo = licenseManager.getLicenseInfo();
     if (!licenseInfo) return false;
-    
+
     try {
-      return await licenseManager.deactivateSpecificDevice(licenseInfo.licenseKey, deviceId);
+      return await licenseManager.deactivateSpecificDevice(
+        licenseInfo.licenseKey,
+        deviceId
+      );
     } catch (error) {
-      console.error('Fehler beim Deaktivieren des Geräts:', error);
+      console.error("Fehler beim Deaktivieren des Geräts:", error);
       return false;
     }
   });
 
   // Aktuelles Gerät abrufen
-  ipcMain.handle('license:getCurrentDevice', async () => {
+  ipcMain.handle("license:getCurrentDevice", async () => {
     return licenseManager.getDeviceId();
   });
-  
+
   // Lizenz nach erfolgreicher Stripe-Zahlung aktivieren
-  ipcMain.on('activate-license-from-session', async (_, data: { sessionId: string, environment: string }) => {
-    console.log(`[IPC] Aktiviere Lizenz aus Stripe Session: ${data.sessionId}, Umgebung: ${data.environment}`);
-    try {
-      const success = await licenseManager.activateLicenseFromSession(data.sessionId, data.environment);
-      if (success) {
-        console.log('[IPC] Lizenzaktivierung erfolgreich');
-      } else {
-        console.error('[IPC] Lizenzaktivierung fehlgeschlagen');
+  ipcMain.on(
+    "activate-license-from-session",
+    async (_, data: { sessionId: string; environment: string }) => {
+      console.log(
+        `[IPC] Aktiviere Lizenz aus Stripe Session: ${data.sessionId}, Umgebung: ${data.environment}`
+      );
+      try {
+        const success = await licenseManager.activateLicenseFromSession(
+          data.sessionId,
+          data.environment
+        );
+        if (success) {
+          console.log("[IPC] Lizenzaktivierung erfolgreich");
+        } else {
+          console.error("[IPC] Lizenzaktivierung fehlgeschlagen");
+        }
+      } catch (error) {
+        console.error("[IPC] Fehler bei der Lizenzaktivierung:", error);
       }
-    } catch (error) {
-      console.error('[IPC] Fehler bei der Lizenzaktivierung:', error);
     }
-  });
-  
+  );
+
   // Benachrichtigung über abgebrochene Zahlung
-  ipcMain.on('payment-cancelled', () => {
-    console.log('[IPC] Zahlung wurde abgebrochen');
+  ipcMain.on("payment-cancelled", () => {
+    console.log("[IPC] Zahlung wurde abgebrochen");
     // Optional: Hier könnte eine Benachrichtigung an den Benutzer angezeigt werden
+  });
+
+  // Privacy Consent Status abrufen
+  ipcMain.handle("privacy:getConsentStatus", async () => {
+    return licenseManager.getPrivacyConsentStatus();
+  });
+
+  // Privacy Consent setzen
+  ipcMain.handle("privacy:setConsent", async (_, consentGiven: boolean) => {
+    return await licenseManager.setPrivacyConsent(consentGiven);
+  });
+
+  // Trial-Informationen abrufen
+  ipcMain.handle("license:getTrialInfo", async () => {
+    return licenseManager.getTrialInfo();
   });
 }

@@ -1,0 +1,243 @@
+/* Privacy Consent Modal Styling */
+.privacy-consent-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.consent-content {
+  background-color: #2d2d3f;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 700px;
+  max-height: 90vh;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.consent-header {
+  padding: 24px 24px 16px 24px;
+  text-align: center;
+  background-color: #2d2d3f;
+  border-bottom: 1px solid #353548;
+}
+
+.consent-header h2 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.consent-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: #cccccc;
+  opacity: 0.9;
+}
+
+.consent-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.consent-section {
+  margin-bottom: 24px;
+}
+
+.consent-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.consent-section h3 {
+  color: #ffffff;
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.consent-section p {
+  color: #cccccc;
+  margin: 0 0 12px 0;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.consent-section ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #cccccc;
+}
+
+.consent-section li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.consent-notice {
+  background-color: #1a1a24;
+  padding: 16px;
+  border-radius: 8px;
+  border-left: 4px solid #78d97c;
+  margin-top: 24px;
+}
+
+.consent-notice p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #ffffff;
+}
+
+.consent-link {
+  color: #78d97c;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.consent-link:hover {
+  text-decoration: underline;
+}
+
+.consent-actions {
+  padding: 24px;
+  background-color: #1a1a24;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #353548;
+}
+
+.decline-button {
+  background-color: transparent;
+  color: #cccccc;
+  border: 2px solid #555;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  flex: 1;
+  max-width: 180px;
+}
+
+.decline-button:hover:not(:disabled) {
+  background-color: #ff5555;
+  border-color: #ff5555;
+  color: white;
+}
+
+.decline-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.accept-button {
+  background: linear-gradient(135deg, #78d97c 0%, #59a85c 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 600;
+  flex: 2;
+  min-height: 48px;
+}
+
+.accept-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #59a85c 0%, #4a8a4d 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(120, 217, 124, 0.3);
+}
+
+.accept-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.consent-footer {
+  padding: 0 24px 24px 24px;
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .privacy-consent-modal {
+    padding: 10px;
+  }
+
+  .consent-content {
+    max-width: 100%;
+    max-height: 95vh;
+  }
+
+  .consent-header {
+    padding: 20px 16px 12px 16px;
+  }
+
+  .consent-header h2 {
+    font-size: 22px;
+  }
+
+  .consent-body {
+    padding: 20px 16px;
+  }
+
+  .consent-actions {
+    padding: 16px;
+    flex-direction: column;
+  }
+
+  .decline-button,
+  .accept-button {
+    max-width: none;
+    width: 100%;
+  }
+
+  .consent-footer {
+    padding: 0 16px 16px 16px;
+  }
+}
+
+/* Scrollbar Styling für bessere UX */
+.consent-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.consent-body::-webkit-scrollbar-track {
+  background: #1a1a24;
+  border-radius: 4px;
+}
+
+.consent-body::-webkit-scrollbar-thumb {
+  background: #78d97c;
+  border-radius: 4px;
+}
+
+.consent-body::-webkit-scrollbar-thumb:hover {
+  background: #59a85c;
+}
