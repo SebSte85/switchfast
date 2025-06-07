@@ -13,6 +13,9 @@
     "watch:electron": "tsc -w",
     "watch:react": "webpack --config webpack.config.js --watch",
     "package": "npx electron-builder build --win",
+    "build:prod": "cross-env ACTIVE_ENVIRONMENT=prod npm run build:full",
+    "package:prod": "cross-env ACTIVE_ENVIRONMENT=prod npm run package",
+    "release": "npm run build:prod && npm run package:prod",
     "test": "jest"
   },
   "author": "",
@@ -24,6 +27,7 @@
     "@types/react-dom": "^18.2.15",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "css-loader": "^6.8.1",
     "electron": "27.3.11",
     "electron-builder": "^24.6.4",
