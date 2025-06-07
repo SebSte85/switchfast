@@ -26,18 +26,25 @@ import { PersistentProcessIdentifier, Theme } from "./types";
 import * as url from "url";
 import * as fs from "fs";
 import * as os from "os";
-import { error } from "console";
 import { stderr } from "process";
 import Store from "electron-store";
 import { autoUpdater } from "electron-updater";
 import * as electronLog from "electron-log";
 import { initAnalytics, trackEvent, shutdownAnalytics } from "./main/analytics";
 import { initializeLicenseSystem } from "./main/licenseIntegration";
+import AutoLaunch from "auto-launch";
 
 // Keep a global reference of objects to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 const dataStore = new DataStore();
+
+// AutoLaunch für Windows Autostart
+const autoLauncher = new AutoLaunch({
+  name: "SwitchFast",
+  path: process.execPath,
+  isHidden: false,
+});
 
 // Types
 interface WindowInfo {
@@ -475,6 +482,8 @@ function unregisterThemeShortcut(themeId: string): boolean {
  */
 async function getRunningApplications(): Promise<ProcessInfo[]> {
   try {
+    console.log("[getRunningApplications] Starting process query...");
+
     // PowerShell-Befehl zum Abrufen der Prozesse
     const command = `
       $processes = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath;
@@ -503,10 +512,13 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
 
           # Prüfe, ob es sich um eine relevante Anwendung handelt
           $processName = $process.Name.ToLower()
-          if ($desktopApps -contains $processName -or 
-              $processName -match "brave|chrome|firefox|msedge|opera" -or
-              $process.MainWindowHandle -ne 0 -or 
-              $process.MainWindowTitle) {
+          
+          # Vereinfachte Logik: Alle Prozesse mit MainWindowTitle oder bekannte Apps
+          if ($process.MainWindowTitle -and $process.MainWindowTitle.Trim() -ne "" -and 
+              $process.MainWindowTitle -ne $process.Name) {
+            $relevantProcess = $true;
+          } elseif ($desktopApps -contains $processName -or 
+              $processName -match "brave|chrome|firefox|msedge|opera") {
             $relevantProcess = $true;
           }
 
@@ -517,44 +529,79 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
               $p.Name 
             }
 
-            $results += [PSCustomObject]@{
-              Id = $p.ProcessId;
-              ParentId = $p.ParentProcessId;
-              Name = $p.Name;
-              Title = $title;
-              Path = $p.ExecutablePath;
-            }
+            # Output as semicolon-separated values to avoid JSON issues
+            $safeName = $p.Name -replace ';', ','
+            $safeTitle = $title -replace ';', ','
+            $safePath = if ($p.ExecutablePath) { $p.ExecutablePath -replace ';', ',' } else { "" }
+            
+            "$($p.ProcessId);$($p.ParentProcessId);$safeName;$safeTitle;$safePath"
           }
         }
       }
-      
-      # Als JSON ausgeben
-      $results | ConvertTo-Json
     `;
 
     // PowerShell-Befehl ausführen und Ausgabe verarbeiten
     const stdout = await runPowerShellCommand(command);
+    console.log(
+      "[getRunningApplications] PowerShell output length:",
+      stdout?.length || 0
+    );
 
     if (!stdout || stdout.trim() === "") {
+      console.log(
+        "[getRunningApplications] No output from PowerShell, returning empty array"
+      );
       return [];
     }
 
-    // JSON-Ausgabe parsen
-    const processData = JSON.parse(stdout);
+    // Parse semicolon-separated values
+    const lines = stdout.split("\n").filter((line) => line.trim() !== "");
+    console.log("[getRunningApplications] Parsed", lines.length, "lines");
 
-    // Prozesse mit IDs, Namen, Titeln und Pfaden extrahieren
-    const processes: ProcessInfo[] = Array.isArray(processData)
-      ? processData.map((proc: any) => ({
-          id: proc.Id,
-          parentId: proc.ParentId,
-          name: formatAppName(proc.Name.toLowerCase().replace(".exe", "")),
-          title: proc.Title || proc.Name,
-          path: proc.Path || "",
-        }))
-      : [];
+    const processes: ProcessInfo[] = lines
+      .map((line) => {
+        const parts = line.trim().split(";");
+        if (parts.length !== 5) {
+          console.log("[getRunningApplications] Skipping invalid line:", line);
+          return null;
+        }
 
+        const [idStr, parentIdStr, name, title, path] = parts;
+        const id = parseInt(idStr);
+        const parentId = parseInt(parentIdStr);
+
+        if (isNaN(id)) {
+          console.log(
+            "[getRunningApplications] Skipping line with invalid ID:",
+            line
+          );
+          return null;
+        }
+
+        return {
+          id,
+          parentId: isNaN(parentId) ? undefined : parentId,
+          name: formatAppName(name.toLowerCase().replace(".exe", "")),
+          title: title || name,
+          path: path || "",
+        } as ProcessInfo;
+      })
+      .filter((proc): proc is ProcessInfo => proc !== null);
+
+    console.log(
+      "[getRunningApplications] Returning",
+      processes.length,
+      "processes"
+    );
+    if (processes.length > 0) {
+      console.log(
+        "[getRunningApplications] First few processes:",
+        processes.slice(0, 3)
+      );
+    }
     return processes;
   } catch (error) {
+    console.error("[getRunningApplications] Error:", error);
     return [];
   }
 }
@@ -887,12 +934,25 @@ async function showDesktopExceptApps(
       });
     }
 
-    // Sammle alle zu schützenden Fenster
-    const allProtectedWindows = new Set<number>();
+    // Sammle alle zu schützenden Fenster und Prozess-IDs getrennt
+    const protectedWindowHandles = new Set<number>();
+    const protectedProcessIds = new Set<number>();
 
     appIdsToProtect.forEach((id) => {
-      // Füge nur das spezifische Handle oder die spezifische PID hinzu
-      allProtectedWindows.add(id);
+      // Prüfe, ob die ID ein Window-Handle ist (im windowToPidMap vorhanden)
+      if (windowToPidMap.has(id)) {
+        // Es ist ein Window-Handle
+        protectedWindowHandles.add(id);
+      } else {
+        // Es ist eine Prozess-ID
+        protectedProcessIds.add(id);
+        // Füge alle Fenster dieser Prozess-ID hinzu
+        if (pidToWindowsMap.has(id)) {
+          pidToWindowsMap
+            .get(id)!
+            .forEach((hwnd) => protectedWindowHandles.add(hwnd));
+        }
+      }
     });
 
     // Füge eigene Anwendung zu den geschützten Fenstern hinzu
@@ -901,10 +961,10 @@ async function showDesktopExceptApps(
     if (pidToWindowsMap.has(ourProcessId)) {
       pidToWindowsMap
         .get(ourProcessId)!
-        .forEach((hwnd) => allProtectedWindows.add(hwnd));
+        .forEach((hwnd) => protectedWindowHandles.add(hwnd));
     }
 
-    const protectedWindowsArray = Array.from(allProtectedWindows);
+    const protectedWindowsArray = Array.from(protectedWindowHandles);
     console.log(
       "[showDesktopExceptApps] All protected windows:",
       protectedWindowsArray
@@ -1004,9 +1064,9 @@ async function showDesktopExceptApps(
           $processId = 0
           [void][WindowUtils]::GetWindowThreadProcessId($hwnd, [ref]$processId)
           
-          # Wenn es sich um unsere eigene App oder ein geschütztes Fenster handelt
+          # Wenn es sich um unsere eigene App oder ein spezifisch geschütztes Fenster handelt
           $hwndInt = $hwnd.ToInt32()
-          if ($processId -eq $ourProcessId -or $protectedWindowsSet.Contains($hwndInt) -or $protectedWindowsSet.Contains($processId)) {
+          if ($processId -eq $ourProcessId -or $protectedWindowsSet.Contains($hwndInt)) {
               if ([WindowUtils]::IsIconic($hwnd)) {
                   [void]$windowsToRestore.Add($hwnd)
               }
@@ -1102,7 +1162,13 @@ function runPowerShellCommand(script: string): Promise<string> {
 // Funktion zum Abrufen der Prozesse mit Fenstern
 async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
   try {
+    console.log("[getProcessesWithWindows] Starting...");
     const processes = await getRunningApplications();
+    console.log(
+      "[getProcessesWithWindows] Got",
+      processes.length,
+      "base processes"
+    );
     const themes = dataStore.getThemes();
 
     // PowerShell command für Fensterabfrage
@@ -1163,7 +1229,15 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
 
     // Hole die Fenster
     const windowsOutput = await runPowerShellCommand(command);
+    console.log(
+      "[getProcessesWithWindows] Windows output length:",
+      windowsOutput?.length || 0
+    );
+
     if (!windowsOutput || windowsOutput.trim() === "") {
+      console.log(
+        "[getProcessesWithWindows] No windows output, returning empty array"
+      );
       return [];
     }
 
@@ -1208,10 +1282,18 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
     });
 
     // Filtere Prozesse ohne Fenster heraus
-    return processesWithWindows.filter(
+    const result = processesWithWindows.filter(
       (p) => p.windows && p.windows.length > 0
     );
+
+    console.log(
+      "[getProcessesWithWindows] Returning",
+      result.length,
+      "processes with windows"
+    );
+    return result;
   } catch (error) {
+    console.error("[getProcessesWithWindows] Error:", error);
     return [];
   }
 }
@@ -1323,42 +1405,11 @@ function setupIpcHandlers() {
           return false;
         }
 
-        // Fenster zum Thema hinzufügen
-        dataStore.addWindowsToTheme(themeId, windows);
-
-        // Initialisiere persistentProcesses, falls nicht vorhanden
-        if (!theme.persistentProcesses) {
-          theme.persistentProcesses = [];
-        }
-
-        // Für jedes Fenster auch einen persistenten Prozessidentifikator speichern
+        // Prozessinformationen abrufen für persistente Identifikatoren
         const processes = await getRunningApplications();
 
-        for (const window of windows) {
-          // Prozess in der Liste der laufenden Prozesse finden
-          const process = processes.find((p) => p.id === window.processId);
-
-          if (process) {
-            // Persistenten Identifikator erstellen
-            const persistentId = createPersistentIdentifier(process);
-
-            // Prüfen, ob der persistente Identifikator bereits existiert
-            const exists = theme.persistentProcesses.some(
-              (p: PersistentProcessIdentifier) =>
-                p.executableName === persistentId.executableName
-            );
-
-            if (!exists) {
-              console.log(
-                `[IPC] Füge persistenten Identifikator für ${process.name} (${process.id}) zum Thema ${theme.id} hinzu.`
-              );
-              theme.persistentProcesses.push(persistentId);
-
-              // Thema aktualisieren
-              dataStore.updateTheme(themeId, theme);
-            }
-          }
-        }
+        // Fenster zum Thema hinzufügen (inklusive automatischer Erstellung von persistenten Identifikatoren)
+        dataStore.addWindowsToTheme(themeId, windows, processes);
 
         return true;
       } catch (error) {
@@ -1418,6 +1469,47 @@ function setupIpcHandlers() {
   // App quit handler
   ipcMain.handle("app:quit", () => {
     app.quit();
+  });
+
+  // Autostart-Handler
+  ipcMain.handle("autostart:enable", async () => {
+    try {
+      await autoLauncher.enable();
+      return true;
+    } catch (error) {
+      console.error("Fehler beim Aktivieren des Autostarts:", error);
+      return false;
+    }
+  });
+
+  ipcMain.handle("autostart:disable", async () => {
+    try {
+      await autoLauncher.disable();
+      return true;
+    } catch (error) {
+      console.error("Fehler beim Deaktivieren des Autostarts:", error);
+      return false;
+    }
+  });
+
+  ipcMain.handle("autostart:is-enabled", async () => {
+    try {
+      return await autoLauncher.isEnabled();
+    } catch (error) {
+      console.error("Fehler beim Prüfen des Autostart-Status:", error);
+      return false;
+    }
+  });
+
+  // Device ID Handler
+  ipcMain.handle("get-device-id", async () => {
+    try {
+      const { machineId } = require("node-machine-id");
+      return await machineId();
+    } catch (error) {
+      console.error("Fehler beim Abrufen der Device-ID:", error);
+      return "Unknown";
+    }
   });
 
   // Compact mode handler
@@ -1688,12 +1780,20 @@ function setupIpcHandlers() {
           if (mainWindow) {
             mainWindow.setSize(newSize.width, newSize.height, true);
 
-            // Wenn Kompaktmodus aktiviert wird, positioniere das Fenster in der unteren rechten Ecke
             if (isCompact) {
+              // Wenn Kompaktmodus aktiviert wird, positioniere das Fenster in der unteren rechten Ecke
               const { width: screenWidth, height: screenHeight } =
                 require("electron").screen.getPrimaryDisplay().workAreaSize;
               const xPosition = screenWidth - newSize.width - 20; // 20px Abstand vom Rand
               const yPosition = screenHeight - newSize.height - 20; // 20px Abstand vom Rand
+
+              mainWindow.setPosition(xPosition, yPosition);
+            } else {
+              // Wenn Vollansicht aktiviert wird, positioniere das Fenster in der Mitte des Bildschirms
+              const { width: screenWidth, height: screenHeight } =
+                require("electron").screen.getPrimaryDisplay().workAreaSize;
+              const xPosition = Math.round((screenWidth - newSize.width) / 2);
+              const yPosition = Math.round((screenHeight - newSize.height) / 2);
 
               mainWindow.setPosition(xPosition, yPosition);
             }
@@ -2462,15 +2562,21 @@ function findMatchingProcess(
 async function restoreProcessAssociations() {
   console.log("[Restore] Beginne Wiederherstellung der Prozesszuordnungen...");
 
+  // Bereinige zuerst konflikthafte Prozess-IDs (für Browser-Subprozesse)
+  dataStore.cleanupConflictingProcessIds();
+
   // Alle gespeicherten Themen abrufen
   const themes = dataStore.getThemes();
 
-  // Aktuelle Prozesse abrufen
-  const currentProcesses = await getRunningApplications();
+  // Aktuelle Prozesse MIT Windows abrufen (wichtig für restoreWindowHandles)
+  const currentProcesses = await getProcessesWithWindows();
 
   console.log(
     `[Restore] ${themes.length} Themen und ${currentProcesses.length} laufende Prozesse gefunden.`
   );
+
+  // Window-Handles für Browser-Subprozesse wiederherstellen
+  await restoreWindowHandles(themes, currentProcesses);
 
   // Liste der zu startenden Anwendungen
   const applicationsToStart: PersistentProcessIdentifier[] = [];
@@ -2495,13 +2601,19 @@ async function restoreProcessAssociations() {
             `[Restore] Passenden Prozess gefunden: ${matchingProcess.name} (${matchingProcess.id})`
           );
 
-          // Prozess zum Thema hinzufügen (ohne doppelte Einträge)
-          if (!theme.processes.includes(matchingProcess.id)) {
+          // Nur Prozess-ID hinzufügen wenn das Theme keine Window-Handles hat
+          if (!theme.windows || theme.windows.length === 0) {
+            if (!theme.processes.includes(matchingProcess.id)) {
+              console.log(
+                `[Restore] Füge Prozess ${matchingProcess.id} zum Thema ${theme.id} hinzu.`
+              );
+              theme.processes.push(matchingProcess.id);
+              dataStore.updateTheme(theme.id, theme);
+            }
+          } else {
             console.log(
-              `[Restore] Füge Prozess ${matchingProcess.id} zum Thema ${theme.id} hinzu.`
+              `[Restore] Theme "${theme.name}" hat Window-Handles, überspringe Prozess-ID-Zuordnung`
             );
-            theme.processes.push(matchingProcess.id);
-            dataStore.updateTheme(theme.id, theme);
           }
         } else {
           console.log(
@@ -2574,6 +2686,131 @@ async function restoreProcessAssociations() {
       mainWindow.webContents.send("apps-started");
     }
   }
+}
+
+/**
+ * Stellt Window-Handles nach einem Neustart wieder her
+ * Basiert auf dem titlePattern der persistenten Prozesse
+ */
+async function restoreWindowHandles(
+  themes: any[],
+  currentProcesses: ProcessInfo[]
+): Promise<void> {
+  console.log("[Restore] Beginne Wiederherstellung der Window-Handles...");
+
+  for (const theme of themes) {
+    // Nur Themes mit persistenten Prozessen und existierenden Windows bearbeiten
+    if (!theme.persistentProcesses || theme.persistentProcesses.length === 0) {
+      continue;
+    }
+
+    if (!theme.windows || theme.windows.length === 0) {
+      continue;
+    }
+
+    console.log(
+      `[Restore] Verarbeite Theme "${theme.name}" mit ${theme.windows.length} Window-Handles...`
+    );
+
+    // Sammle alle aktuellen Fenster für dieses Theme basierend auf titlePattern
+    const newWindows: WindowInfo[] = [];
+
+    theme.persistentProcesses.forEach((persistentProcess: any) => {
+      if (!persistentProcess.titlePattern) {
+        return;
+      }
+
+      console.log(
+        `[Restore] Suche Fenster für Pattern: "${persistentProcess.titlePattern}"`
+      );
+
+      // Finde passende Prozesse für diesen persistenten Prozess
+      const matchingProcesses = currentProcesses.filter((process) => {
+        return (
+          process.name.toLowerCase() ===
+          persistentProcess.executableName.toLowerCase()
+        );
+      });
+
+      console.log(
+        `[Restore] Gefunden ${matchingProcesses.length} passende Prozesse für "${persistentProcess.executableName}"`
+      );
+
+      // Für jeden passenden Prozess, sammle alle Fenster die dem titlePattern entsprechen
+      matchingProcesses.forEach((process) => {
+        if (process.windows && process.windows.length > 0) {
+          process.windows.forEach((window) => {
+            // Überprüfe, ob dieses Fenster das richtige Titel-Pattern hat
+            if (window.title.includes(persistentProcess.titlePattern)) {
+              newWindows.push({
+                hwnd: window.hwnd,
+                processId: window.processId,
+                title: window.title,
+              });
+              console.log(
+                `[Restore] Gefunden passendes Fenster: ${window.title} (hwnd: ${window.hwnd})`
+              );
+            }
+          });
+        }
+      });
+    });
+
+    // Aktualisiere die Window-Handles für dieses Theme
+    if (newWindows.length > 0) {
+      console.log(
+        `[Restore] Ersetze alte Window-Handles für Theme "${theme.name}"`
+      );
+
+      // Entferne alle alten Window-Handles aus dem applications Array
+      if (theme.windows && theme.windows.length > 0) {
+        theme.windows.forEach((oldWindow: WindowInfo) => {
+          const appIndex = theme.applications.indexOf(oldWindow.hwnd);
+          if (appIndex >= 0) {
+            theme.applications.splice(appIndex, 1);
+            console.log(
+              `[Restore] Entfernt altes Window-Handle ${oldWindow.hwnd} aus applications`
+            );
+          }
+        });
+      }
+
+      // Setze die neuen Window-Handles
+      theme.windows = newWindows;
+
+      // Füge alle neuen Window-Handles zum applications Array hinzu
+      newWindows.forEach((newWindow) => {
+        if (!theme.applications.includes(newWindow.hwnd)) {
+          theme.applications.push(newWindow.hwnd);
+          console.log(
+            `[Restore] Window-Handle ${newWindow.hwnd} zu applications hinzugefügt für "${newWindow.title}"`
+          );
+        }
+      });
+
+      console.log(
+        `[Restore] Theme "${theme.name}" aktualisiert mit ${newWindows.length} Window-Handles`
+      );
+
+      // Entferne die Prozess-ID aus dem processes Array, da Window-Handles verwendet werden
+      const processIds = newWindows.map((w: WindowInfo) => w.processId);
+      theme.processes = theme.processes.filter(
+        (pid: number) => !processIds.includes(pid)
+      );
+      console.log(
+        `[Restore] Prozess-IDs aus Theme "${theme.name}" entfernt, da Window-Handles verwendet werden`
+      );
+
+      // Speichere die Änderungen
+      dataStore.updateTheme(theme.id, theme);
+    } else {
+      console.log(
+        `[Restore] Keine neuen Window-Handles für Theme "${theme.name}" gefunden`
+      );
+    }
+  }
+
+  console.log("[Restore] Wiederherstellung der Window-Handles abgeschlossen.");
 }
 
 /**
@@ -2731,8 +2968,14 @@ async function updateProcessAssociations(): Promise<void> {
   // Alle gespeicherten Themen abrufen
   const themes = dataStore.getThemes();
 
-  // Aktuelle Prozesse abrufen (sollte jetzt auch die neu gestarteten Anwendungen enthalten)
-  const currentProcesses = await getRunningApplications();
+  // Aktuelle Prozesse MIT Windows abrufen (wichtig für titlePattern-Matching)
+  const currentProcesses = await getProcessesWithWindows();
+
+  // Sammle alle neu gestarteten Prozesse und ihre potentiellen Theme-Matches
+  const processThemeMatches = new Map<
+    number,
+    Array<{ themeId: string; score: number }>
+  >();
 
   // Für jedes Thema
   themes.forEach((theme) => {
@@ -2745,19 +2988,70 @@ async function updateProcessAssociations(): Promise<void> {
           persistentId
         );
 
-        if (matchingProcess) {
-          // Prozess zum Thema hinzufügen (ohne doppelte Einträge)
-          if (!theme.processes.includes(matchingProcess.id)) {
-            console.log(
-              `[Restore] Füge neu gestarteten Prozess ${matchingProcess.id} (${matchingProcess.name}) zum Thema ${theme.id} hinzu.`
+        if (matchingProcess && !theme.processes.includes(matchingProcess.id)) {
+          // Berechne Match-Score basierend auf titlePattern
+          let matchScore = 1; // Basis-Score für Executable-Match
+
+          // Bonus-Score für titlePattern-Match
+          if (
+            persistentId.titlePattern &&
+            matchingProcess.windows &&
+            matchingProcess.windows.length > 0
+          ) {
+            const hasMatchingWindow = matchingProcess.windows.some((window) =>
+              window.title.includes(persistentId.titlePattern!)
             );
-            theme.processes.push(matchingProcess.id);
-            dataStore.updateTheme(theme.id, theme);
+            if (hasMatchingWindow) {
+              matchScore += 10; // Höherer Score für titlePattern-Match
+            }
           }
+
+          // Füge Match zur Map hinzu
+          if (!processThemeMatches.has(matchingProcess.id)) {
+            processThemeMatches.set(matchingProcess.id, []);
+          }
+          processThemeMatches.get(matchingProcess.id)!.push({
+            themeId: theme.id,
+            score: matchScore,
+          });
         }
       });
     }
   });
+
+  // Verarbeite jeden Prozess und weise ihn dem Theme mit dem höchsten Score zu
+  for (const [processId, matches] of processThemeMatches.entries()) {
+    if (matches.length === 0) continue;
+
+    // Sortiere nach Score (höchster zuerst)
+    matches.sort((a, b) => b.score - a.score);
+
+    const bestMatch = matches[0];
+    const matchingProcess = currentProcesses.find((p) => p.id === processId);
+
+    if (matchingProcess) {
+      // Finde das entsprechende Theme
+      const theme = themes.find((t) => t.id === bestMatch.themeId);
+      if (theme) {
+        console.log(
+          `[Restore] Füge neu gestarteten Prozess ${processId} (${matchingProcess.name}) zum Thema ${theme.id} hinzu (Score: ${bestMatch.score}).`
+        );
+
+        // Füge den Prozess nur zu diesem einen Theme hinzu
+        theme.processes.push(processId);
+        dataStore.updateTheme(theme.id, theme);
+
+        // Log wenn andere Themes auch gematcht hätten
+        if (matches.length > 1) {
+          console.log(
+            `[Restore] Prozess ${processId} hätte auch zu ${
+              matches.length - 1
+            } anderen Themes gepasst, aber wurde dem besten Match zugeordnet.`
+          );
+        }
+      }
+    }
+  }
 
   console.log("[Restore] Aktualisierung der Prozesszuordnungen abgeschlossen.");
 }

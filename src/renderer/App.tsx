@@ -3,6 +3,7 @@ import { ipcRenderer } from "electron";
 import "./styles/index.css";
 import "./styles/trial.css";
 import ApplicationList from "./components/ApplicationList";
+import Settings from "./components/Settings";
 import { ProcessInfo, Theme, WindowInfo } from "../types";
 import TrialManager from "./components/TrialManager";
 import LicenseCheck from "./components/licensing/LicenseCheck";
@@ -21,6 +22,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   const [compactMode, setCompactMode] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Ladephasen mit angepassten Texten
   const loadingPhaseTexts = [
@@ -676,36 +678,61 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     // PERFORMANCE-OPTIMIERUNG: Verwende Set für schnellere Lookups
     const appIdsToProtectSet = new Set<number>();
 
-    // 1. Sammle reguläre Prozess-IDs aus applications - optimiert
-    if (currentTheme.applications && currentTheme.applications.length > 0) {
+    // Sammle Window-Handles aus dem windows-Array für präzise Fenster-Kontrolle
+    // WICHTIG: Wir bevorzugen Window-Handles über Prozess-IDs für Browser-Subprozesse
+    const hasWindowHandles =
+      (currentTheme as any).windows && (currentTheme as any).windows.length > 0;
+    const windowHandlesUsed = new Set<number>();
+
+    if (hasWindowHandles) {
+      const windows = (currentTheme as any).windows;
+      for (let i = 0; i < windows.length; i++) {
+        const window = windows[i];
+        if (window.hwnd) {
+          // Verwende Window-Handle für präzise Fenster-Kontrolle
+          appIdsToProtectSet.add(window.hwnd);
+          windowHandlesUsed.add(window.hwnd);
+        }
+      }
+    }
+
+    // Sammle Prozess-IDs aus dem processes-Array nur wenn keine entsprechenden Window-Handles existieren
+    if (currentTheme.processes && currentTheme.processes.length > 0) {
+      for (let i = 0; i < currentTheme.processes.length; i++) {
+        const processId = currentTheme.processes[i];
+        if (typeof processId === "number") {
+          // Prüfe, ob für diesen Prozess bereits Window-Handles vorhanden sind
+          let hasWindowForProcess = false;
+          if (hasWindowHandles) {
+            const windows = (currentTheme as any).windows;
+            for (let j = 0; j < windows.length; j++) {
+              if (windows[j].processId === processId && windows[j].hwnd) {
+                hasWindowForProcess = true;
+                break;
+              }
+            }
+          }
+
+          // Füge Prozess-ID nur hinzu, wenn kein Window-Handle für diesen Prozess existiert
+          if (!hasWindowForProcess) {
+            appIdsToProtectSet.add(processId);
+          }
+        }
+      }
+    }
+
+    // Sammle aus applications Array nur wenn es keine Window-Handles gibt
+    // Das applications Array kann sowohl Prozess-IDs als auch Window-Handles enthalten
+    if (
+      currentTheme.applications &&
+      currentTheme.applications.length > 0 &&
+      !hasWindowHandles
+    ) {
       for (let i = 0; i < currentTheme.applications.length; i++) {
         const id = currentTheme.applications[i];
         if (typeof id === "number") {
           appIdsToProtectSet.add(id);
         }
-      }
-    }
-
-    // 1.1 Sammle Prozess-IDs aus dem processes-Array - optimiert
-    if (currentTheme.processes && currentTheme.processes.length > 0) {
-      for (let i = 0; i < currentTheme.processes.length; i++) {
-        const id = currentTheme.processes[i];
-        if (typeof id === "number") {
-          appIdsToProtectSet.add(id);
-        }
-      }
-    }
-
-    // 2. Sammle Fenster-Handles aus dem windows-Array - optimiert
-    if (
-      (currentTheme as any).windows &&
-      (currentTheme as any).windows.length > 0
-    ) {
-      const windows = (currentTheme as any).windows;
-      for (let i = 0; i < windows.length; i++) {
-        const window = windows[i];
-        if (window.hwnd) appIdsToProtectSet.add(window.hwnd);
-        if (window.processId) appIdsToProtectSet.add(window.processId);
       }
     }
 
@@ -769,9 +796,43 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     theme: Theme,
     allApps: ProcessInfo[]
   ) => {
+    // Sammle alle geschützten IDs - WICHTIG: Priorisiere Window-Handles über Prozess-IDs
+    const protectedIds = new Set<number>();
+
+    // Prüfe, ob Window-Handles vorhanden sind
+    const hasWindowHandles =
+      (theme as any).windows && (theme as any).windows.length > 0;
+
+    // Füge Window-Handles hinzu (höchste Priorität für Browser-Subprozesse)
+    if (hasWindowHandles) {
+      const windows = (theme as any).windows;
+      for (let i = 0; i < windows.length; i++) {
+        const window = windows[i];
+        if (window.hwnd) {
+          protectedIds.add(window.hwnd);
+        }
+        // WICHTIG: Füge KEINE Prozess-IDs hinzu, wenn Window-Handles vorhanden sind
+        // Das verhindert, dass andere Browser-Fenster mit derselben Prozess-ID geschützt werden
+      }
+    } else {
+      // Nur wenn keine Window-Handles vorhanden sind, verwende Prozess-IDs
+      if (theme.processes && theme.processes.length > 0) {
+        theme.processes.forEach((processId) => protectedIds.add(processId));
+      }
+
+      // Füge applications hinzu nur wenn keine Window-Handles vorhanden sind
+      if (theme.applications && theme.applications.length > 0) {
+        theme.applications.forEach((id) => {
+          if (typeof id === "number") {
+            protectedIds.add(id);
+          }
+        });
+      }
+    }
+
     // Bestimme, welche Anwendungen minimiert werden sollen
     const appsToMinimize = allApps
-      .filter((app) => !theme.applications.includes(app.id))
+      .filter((app) => !protectedIds.has(app.id))
       .map((app) => app.id);
 
     if (appsToMinimize.length === 0) {
@@ -847,7 +908,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         <div className="app-brand">
           <div className="app-logo">
             <img
-              src="../assets/logo.svg"
+              src={require("../assets/logo.svg")}
               width="16"
               height="16"
               alt="Switchfast Logo"
@@ -857,6 +918,31 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         </div>
         <div className="drag-region"></div>
         <div className="window-controls">
+          <button
+            className="settings-button"
+            onClick={() => setShowSettings(!showSettings)}
+            title="Settings"
+          >
+            <svg
+              className="w-3 h-3"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+          </button>
           <button
             className={`refresh-button ${isRefreshing ? "refreshing" : ""}`}
             onClick={fetchApplications}
@@ -935,7 +1021,9 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
           </button>
         </div>
       </div>
-      {loading ? (
+      {showSettings ? (
+        <Settings onClose={() => setShowSettings(false)} />
+      ) : loading ? (
         <div className="loading-animation">
           <div className="loading-text">{loadingPhaseTexts[loadingPhase]}</div>
           <div className="loading-process-item"></div>

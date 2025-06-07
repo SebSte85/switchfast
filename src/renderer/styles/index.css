@@ -429,8 +429,8 @@
   /* Gruppen-Sektion - kompakter */
   .groups-section {
     @apply sticky top-0 z-10 bg-[#414159];
-    padding-top: 8px;
-    padding-bottom: 12px;
+    padding-top: 2px;
+    padding-bottom: 4px;
     margin-bottom: 0;
     /* Fügt einen subtilen Schatten-Effekt am unteren Rand hinzu, wenn gescrollt wird */
     box-shadow: 0 3px 8px -6px rgba(0, 0, 0, 0.3);
@@ -448,15 +448,15 @@
     letter-spacing: 0.05em;
     margin-bottom: 8px;
   }
-  
-  /* Modernere Gruppenüberschrift */
+
+  /* Modernere Gruppenüberschrift - angepasst um gleiches Padding wie Processes zu haben */
   .groups-title {
     @apply text-lg font-bold text-[#78d97c] uppercase tracking-wide flex items-center gap-1;
     letter-spacing: 0.05em;
     font-weight: 600;
     position: relative;
     padding-left: 10px;
-    margin-bottom: 12px;
+    margin-bottom: 2px; /* Gleich wie processes-title */
   }
 
   .mode-indicator {
@@ -523,7 +523,7 @@
 
   /* Prozesse-Sektion */
   .processes-section {
-    padding-top: 8px;
+    padding-top: 16px;
   }
 
   /* Prozesse-Überschrift modernisieren */
@@ -656,6 +656,40 @@
     margin-left: 12px;
   }
 
+  /* Accordion Transition Container */
+  .process-children-container {
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, opacity 0.2s ease-out;
+  }
+
+  .process-children-container.collapsed {
+    max-height: 0;
+    opacity: 0;
+  }
+
+  .process-children-container.expanded {
+    max-height: 1000px; /* Große genug für die meisten Fälle */
+    opacity: 1;
+  }
+
+  /* Transition für den Expander-Button */
+  .process-expander svg {
+    transition: transform 0.2s ease-out;
+  }
+
+  .process-expander:hover svg {
+    transform: scale(1.1);
+  }
+
+  /* Subtile Chevron-Rotation beim Expandieren */
+  .process-expander {
+    transition: all 0.2s ease-out;
+  }
+
+  .process-expander:hover {
+    background: rgba(120, 217, 124, 0.3);
+  }
+
   .no-processes {
     @apply text-gray-400 py-4 text-center italic;
   }
@@ -774,10 +808,6 @@
     opacity: 1 !important;
   }
 
-  .process-children {
-    margin-left: 12px;
-  }
-
   .process-item.has-children {
     @apply border-l-4 border-amber-400 bg-[#1a1a24];
   }
@@ -866,6 +896,21 @@
     @apply w-6 h-6 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-[#78d97c]/20 transition-colors;
   }
 
+  .settings-button {
+    @apply w-6 h-6 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-[#78d97c]/20 transition-colors;
+    /* Remove focus ring */
+    outline: none !important;
+  }
+
+  .settings-button:focus {
+    outline: none !important;
+  }
+
+  .settings-button:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
   /* Kompaktmodus klar vom Normalmodus unterscheiden */
   .compact-mode.app-container-simple {
     min-height: 90px;
@@ -943,6 +988,143 @@
   /* Gruppe für Shortcut-only Ansicht */
   .compact-mode .group-item-content {
     @apply flex flex-col items-center justify-center;
+  }
+
+  /* Settings Seite */
+  .settings-container {
+    @apply flex flex-col h-full bg-[#2D2D3F];
+    min-height: 100vh;
+  }
+
+  .settings-slide-in {
+    animation: slideInFromLeft 0.3s ease-out;
+  }
+
+  .settings-slide-out {
+    animation: slideOutToLeft 0.3s ease-in;
+  }
+
+  .settings-header {
+    @apply flex items-center justify-between p-4 border-b border-[#353548];
+    background: rgba(45, 45, 63, 0.95);
+    backdrop-filter: blur(8px);
+  }
+
+  .settings-title {
+    @apply flex items-center text-white font-bold text-lg;
+  }
+
+  .settings-close-button {
+    @apply text-white/60 hover:text-white hover:bg-white/10 rounded-full p-2 transition-colors;
+  }
+
+  .settings-content {
+    @apply flex-1 p-6 overflow-y-auto;
+  }
+
+  .settings-section {
+    @apply mb-8;
+  }
+
+  .settings-section-title {
+    @apply text-[#78d97c] font-bold text-sm uppercase tracking-wider mb-4 border-b border-[#353548] pb-2;
+  }
+
+  .settings-item {
+    @apply flex items-center justify-between p-4 bg-[#1a1a24] rounded-lg mb-3;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    gap: 1.5rem; /* Mehr Abstand zwischen Text und Toggle */
+  }
+
+  .settings-item-info {
+    @apply flex-1;
+  }
+
+  .settings-item-label {
+    @apply text-white font-medium mb-1;
+  }
+
+  .settings-item-description {
+    @apply text-white/60 text-sm;
+  }
+
+  .settings-item-control {
+    @apply flex items-center;
+  }
+
+  .settings-loading {
+    @apply text-[#78d97c];
+  }
+
+  /* Toggle Switch */
+  .toggle-switch {
+    @apply relative w-12 h-6 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-[#78d97c]/50;
+    cursor: pointer;
+  }
+
+  .toggle-switch.enabled {
+    @apply bg-[#78d97c];
+  }
+
+  .toggle-switch.disabled {
+    @apply bg-gray-600;
+  }
+
+  .toggle-switch.saving {
+    @apply opacity-75 cursor-not-allowed;
+  }
+
+  .toggle-slider {
+    @apply absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform flex items-center justify-center;
+  }
+
+  .toggle-switch.enabled .toggle-slider {
+    @apply transform translate-x-6;
+  }
+
+  .toggle-switch.disabled .toggle-slider {
+    @apply transform translate-x-0;
+  }
+
+  .toggle-spinner {
+    @apply text-gray-500;
+  }
+
+  /* Animations */
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes slideInFromLeft {
+    from {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideOutToLeft {
+    from {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+  }
+
+  .animate-spin {
+    animation: spin 1s linear infinite;
   }
 
   /* Frameless Titelleiste */
@@ -1069,7 +1251,7 @@
     transform: translate(-50%, -50%);
     width: 100%;
   }
-  
+
   .trial-footer {
     @apply text-sm text-green-500 mt-8 opacity-80;
     position: absolute;
@@ -1133,7 +1315,7 @@
       transform: translateX(100%);
     }
   }
-  
+
   @keyframes pulse {
     0% {
       opacity: 0.7;
@@ -1316,12 +1498,97 @@
   /* Process Popup */
   .process-popup-overlay {
     @apply fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50;
+    animation: fadeIn 0.2s ease-out;
   }
 
   .process-popup {
     @apply bg-[#2D2D3F] rounded-lg shadow-xl w-[90%] max-w-[500px] flex flex-col;
     max-height: 85vh;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: slideInUp 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes fadeOut {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes slideOutDown {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(20px) scale(0.95);
+    }
+  }
+
+  /* Closing animations */
+  .process-popup-overlay.popup-closing {
+    animation: fadeOut 0.2s ease-in;
+  }
+
+  .process-popup.popup-closing {
+    animation: slideOutDown 0.2s ease-in;
+  }
+
+  /* Empty State für neue Gruppe */
+  .group-item-empty {
+    @apply border-dashed border-[#78d97c]/60 text-[#78d97c]/80 hover:border-[#78d97c] hover:text-[#78d97c];
+    background: rgba(45, 45, 63, 0.3) !important;
+    transition: all 0.3s ease;
+  }
+
+  .group-item-empty:hover {
+    background: rgba(45, 45, 63, 0.6) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 0 15px rgba(120, 217, 124, 0.3);
+  }
+
+  .group-empty-icon {
+    @apply text-2xl font-light;
+    line-height: 1;
+  }
+
+  /* Transition für Empty State zu Edit Mode */
+  .group-input-container.browser-style {
+    animation: morphToEdit 0.3s ease-out;
+  }
+
+  @keyframes morphToEdit {
+    from {
+      transform: scale(0.9);
+      opacity: 0.7;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 
   .process-popup-header {

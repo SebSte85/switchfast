@@ -117,54 +117,60 @@ const ProcessTree: React.FC<ProcessTreeProps> = ({
               </span>
             </div>
 
-            {/* Children */}
-            {isExpanded && hasChildren && (
-              <div className="process-children">
-                {/* Rekursiver Aufruf für Unterprozesse */}
-                {process.children && process.children.length > 0 && (
-                  <ProcessTree
-                    processes={process.children}
-                    selectedProcessIds={selectedProcessIds}
-                    onProcessClick={onProcessClick}
-                    level={level + 1}
-                  />
-                )}
+            {/* Children mit Accordion Transition */}
+            {hasChildren && (
+              <div
+                className={`process-children-container ${
+                  isExpanded ? "expanded" : "collapsed"
+                }`}
+              >
+                <div className="process-children">
+                  {/* Rekursiver Aufruf für Unterprozesse */}
+                  {process.children && process.children.length > 0 && (
+                    <ProcessTree
+                      processes={process.children}
+                      selectedProcessIds={selectedProcessIds}
+                      onProcessClick={onProcessClick}
+                      level={level + 1}
+                    />
+                  )}
 
-                {/* Windows des Prozesses */}
-                {process.windows &&
-                  process.windows.map((window) => (
-                    <div
-                      key={window.hwnd}
-                      className={`window-item ${
-                        selectedProcessIds.has(window.hwnd) ? "selected" : ""
-                      }`}
-                      onClick={() =>
-                        onProcessClick?.({
-                          ...process,
-                          id: window.hwnd,
-                          title: window.title,
-                        })
-                      }
-                      draggable="true"
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(
-                          "application",
-                          `w${window.hwnd}`
-                        );
-                        e.currentTarget.classList.add("dragging");
-                      }}
-                      onDragEnd={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.currentTarget.classList.remove("dragging");
-                      }}
-                    >
-                      <span className="window-title">{window.title}</span>
-                      <span className="process-drag-handle">
-                        <DragHandle />
-                      </span>
-                    </div>
-                  ))}
+                  {/* Windows des Prozesses */}
+                  {process.windows &&
+                    process.windows.map((window) => (
+                      <div
+                        key={window.hwnd}
+                        className={`window-item ${
+                          selectedProcessIds.has(window.hwnd) ? "selected" : ""
+                        }`}
+                        onClick={() =>
+                          onProcessClick?.({
+                            ...process,
+                            id: window.hwnd,
+                            title: window.title,
+                          })
+                        }
+                        draggable="true"
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData(
+                            "application",
+                            `w${window.hwnd}`
+                          );
+                          e.currentTarget.classList.add("dragging");
+                        }}
+                        onDragEnd={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.currentTarget.classList.remove("dragging");
+                        }}
+                      >
+                        <span className="window-title">{window.title}</span>
+                        <span className="process-drag-handle">
+                          <DragHandle />
+                        </span>
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
           </div>

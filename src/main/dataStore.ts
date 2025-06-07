@@ -67,10 +67,13 @@ export class DataStore {
           color: theme.color || "",
           processes: theme.processes || [],
           persistentProcesses: theme.persistentProcesses || [],
-          windows: theme.windows || []
+          windows: theme.windows || [],
         }));
       } catch (parseError) {
-        console.error(`[DataStore] Fehler beim Parsen der Themedatei ${filePath}:`, parseError);
+        console.error(
+          `[DataStore] Fehler beim Parsen der Themedatei ${filePath}:`,
+          parseError
+        );
         return null;
       }
     };
@@ -84,42 +87,63 @@ export class DataStore {
         const themes = _parseThemes(data, this.dataPath);
         if (themes) {
           this.themes = themes;
-          console.log(`[DataStore] ${this.themes.length} Themen erfolgreich aus ${this.dataPath} geladen.`);
+          console.log(
+            `[DataStore] ${this.themes.length} Themen erfolgreich aus ${this.dataPath} geladen.`
+          );
           loadedSuccessfully = true;
         }
       } catch (readError) {
-        console.error(`[DataStore] Fehler beim Lesen von ${this.dataPath}:`, readError);
+        console.error(
+          `[DataStore] Fehler beim Lesen von ${this.dataPath}:`,
+          readError
+        );
       }
     } else {
-      console.warn(`[DataStore] Haupt-Themedatei ${this.dataPath} nicht gefunden.`);
+      console.warn(
+        `[DataStore] Haupt-Themedatei ${this.dataPath} nicht gefunden.`
+      );
     }
 
     // 2. Wenn Hauptdatei nicht geladen werden konnte, versuche Backup
     if (!loadedSuccessfully && fs.existsSync(backupPath)) {
-      console.warn(`[DataStore] Versuche, aus Backup-Datei ${backupPath} zu laden.`);
+      console.warn(
+        `[DataStore] Versuche, aus Backup-Datei ${backupPath} zu laden.`
+      );
       try {
         const backupData = fs.readFileSync(backupPath, "utf8");
         const backupThemes = _parseThemes(backupData, backupPath);
         if (backupThemes) {
           this.themes = backupThemes;
-          console.log(`[DataStore] ${this.themes.length} Themen erfolgreich aus Backup ${backupPath} geladen.`);
+          console.log(
+            `[DataStore] ${this.themes.length} Themen erfolgreich aus Backup ${backupPath} geladen.`
+          );
           loadedSuccessfully = true;
           // Versuche, die Hauptdatei mit den Backup-Daten zu reparieren
           try {
-            console.log(`[DataStore] Versuche, ${this.dataPath} mit Daten aus Backup zu reparieren.`);
+            console.log(
+              `[DataStore] Versuche, ${this.dataPath} mit Daten aus Backup zu reparieren.`
+            );
             this.saveThemes(); // Nutzt die neue, robuste saveThemes Methode
           } catch (repairSaveError) {
-            console.error(`[DataStore] Fehler beim Reparieren von ${this.dataPath} mit Backup-Daten:`, repairSaveError);
+            console.error(
+              `[DataStore] Fehler beim Reparieren von ${this.dataPath} mit Backup-Daten:`,
+              repairSaveError
+            );
           }
         }
       } catch (backupReadError) {
-        console.error(`[DataStore] Fehler beim Lesen der Backup-Datei ${backupPath}:`, backupReadError);
+        console.error(
+          `[DataStore] Fehler beim Lesen der Backup-Datei ${backupPath}:`,
+          backupReadError
+        );
       }
     }
 
     // 3. Wenn immer noch nicht geladen, initialisiere als leer
     if (!loadedSuccessfully) {
-      console.warn("[DataStore] Weder Haupt- noch Backup-Themedatei konnte geladen werden. Initialisiere mit leeren Themes.");
+      console.warn(
+        "[DataStore] Weder Haupt- noch Backup-Themedatei konnte geladen werden. Initialisiere mit leeren Themes."
+      );
       this.themes = [];
     }
   }
@@ -140,7 +164,9 @@ export class DataStore {
           fs.unlinkSync(backupPath);
         }
         fs.renameSync(this.dataPath, backupPath);
-        console.log(`[DataStore] Backup erstellt: ${this.dataPath} -> ${backupPath}`);
+        console.log(
+          `[DataStore] Backup erstellt: ${this.dataPath} -> ${backupPath}`
+        );
       }
 
       // 2. Sicherstellen, dass der Ordner existiert
@@ -151,7 +177,7 @@ export class DataStore {
 
       // 3. Aktuellen In-Memory-Zustand (this.themes) in themes.json schreiben
       //    Sicherstellen, dass alle Themes die notwendigen Felder haben und bestehende Daten beibehalten werden
-      const themesToSave = this.themes.map(theme => {
+      const themesToSave = this.themes.map((theme) => {
         // Stelle sicher, dass wir alle vorhandenen Felder des Themes beibehalten
         // und nur fehlende Felder mit Standardwerten initialisieren
         return {
@@ -159,33 +185,44 @@ export class DataStore {
           id: theme.id,
           name: theme.name,
           // Verwende die vorhandenen Arrays, wenn sie existieren, sonst leere Arrays
-          applications: Array.isArray(theme.applications) ? theme.applications : [],
+          applications: Array.isArray(theme.applications)
+            ? theme.applications
+            : [],
           shortcut: theme.shortcut || "",
           color: theme.color || "",
           // WICHTIG: Stelle sicher, dass processes und persistentProcesses korrekt beibehalten werden
           processes: Array.isArray(theme.processes) ? theme.processes : [],
-          persistentProcesses: Array.isArray(theme.persistentProcesses) ? theme.persistentProcesses : [],
-          windows: Array.isArray(theme.windows) ? theme.windows : []
+          persistentProcesses: Array.isArray(theme.persistentProcesses)
+            ? theme.persistentProcesses
+            : [],
+          windows: Array.isArray(theme.windows) ? theme.windows : [],
         };
       });
 
       // Für Debugging: Zeige die zu speichernden Themes an
-      console.log(`[DataStore] Speichere ${themesToSave.length} Themes. Erstes Theme:`, 
-                 themesToSave.length > 0 ? JSON.stringify(themesToSave[0], null, 2) : 'Keine Themes');
+      console.log(
+        `[DataStore] Speichere ${themesToSave.length} Themes. Erstes Theme:`,
+        themesToSave.length > 0
+          ? JSON.stringify(themesToSave[0], null, 2)
+          : "Keine Themes"
+      );
 
       const jsonContent = JSON.stringify(themesToSave, null, 2);
       fs.writeFileSync(this.dataPath, jsonContent);
 
-      console.log(`[DataStore] Themes erfolgreich in ${this.dataPath} gespeichert.`);
-      
+      console.log(
+        `[DataStore] Themes erfolgreich in ${this.dataPath} gespeichert.`
+      );
+
       // Event an den Renderer senden, dass die Themes gespeichert wurden
       if (global.mainWindow && !global.mainWindow.isDestroyed()) {
-        global.mainWindow.webContents.send('themes-saved');
+        global.mainWindow.webContents.send("themes-saved");
         console.log(`[DataStore] Event 'themes-saved' an Renderer gesendet`);
       } else {
-        console.log(`[DataStore] Konnte Event 'themes-saved' nicht senden, mainWindow nicht verfügbar`);
+        console.log(
+          `[DataStore] Konnte Event 'themes-saved' nicht senden, mainWindow nicht verfügbar`
+        );
       }
-
     } catch (error) {
       console.error(`[DataStore] Fehler beim Speichern der Themes:`, error);
 
@@ -197,12 +234,19 @@ export class DataStore {
             fs.unlinkSync(this.dataPath);
           }
           fs.renameSync(backupPath, this.dataPath);
-          console.log(`[DataStore] Wiederherstellung aus Backup erfolgreich: ${backupPath} -> ${this.dataPath}`);
+          console.log(
+            `[DataStore] Wiederherstellung aus Backup erfolgreich: ${backupPath} -> ${this.dataPath}`
+          );
         } else {
-          console.warn(`[DataStore] Kein Backup (${backupPath}) für Wiederherstellung gefunden.`);
+          console.warn(
+            `[DataStore] Kein Backup (${backupPath}) für Wiederherstellung gefunden.`
+          );
         }
       } catch (restoreError) {
-        console.error(`[DataStore] Kritischer Fehler beim Wiederherstellen aus Backup:`, restoreError);
+        console.error(
+          `[DataStore] Kritischer Fehler beim Wiederherstellen aus Backup:`,
+          restoreError
+        );
         // An dieser Stelle könnte die themes.json fehlen oder korrupt sein, und das Backup auch.
       }
       // Den ursprünglichen Speicherfehler weiterwerfen, damit er behandelt werden kann
@@ -214,59 +258,74 @@ export class DataStore {
     return this.themes;
   }
 
-  
   getTheme(themeId: string): Theme | undefined {
-    return this.themes.find(theme => theme.id === themeId);
+    return this.themes.find((theme) => theme.id === themeId);
   }
 
   setThemes(themes: Theme[]): void {
     // Sichere die aktuellen Themes, um Daten zu erhalten
     const currentThemes = [...this.themes];
-    
+
     // Erstelle eine Map der aktuellen Themes nach ID für schnellen Zugriff
     const currentThemesMap = new Map<string, Theme>();
-    currentThemes.forEach(theme => {
+    currentThemes.forEach((theme) => {
       currentThemesMap.set(theme.id, theme);
     });
-    
+
     // Für jedes neue Theme, behalte die persistentProcesses und processes aus dem aktuellen Theme bei,
     // wenn sie nicht im neuen Theme definiert sind
-    const mergedThemes = themes.map(newTheme => {
+    const mergedThemes = themes.map((newTheme) => {
       const currentTheme = currentThemesMap.get(newTheme.id);
-      
+
       // Wenn es kein entsprechendes aktuelles Theme gibt, verwende das neue Theme unverändert
       if (!currentTheme) {
         return {
           ...newTheme,
-          processes: Array.isArray(newTheme.processes) ? newTheme.processes : [],
-          persistentProcesses: Array.isArray(newTheme.persistentProcesses) ? newTheme.persistentProcesses : [],
-          windows: Array.isArray(newTheme.windows) ? newTheme.windows : []
+          processes: Array.isArray(newTheme.processes)
+            ? newTheme.processes
+            : [],
+          persistentProcesses: Array.isArray(newTheme.persistentProcesses)
+            ? newTheme.persistentProcesses
+            : [],
+          windows: Array.isArray(newTheme.windows) ? newTheme.windows : [],
         };
       }
-      
+
       // Behalte die persistentProcesses und processes bei, wenn sie im neuen Theme nicht definiert sind
       return {
         ...newTheme,
-        processes: Array.isArray(newTheme.processes) && newTheme.processes.length > 0 
-          ? newTheme.processes 
-          : (Array.isArray(currentTheme.processes) ? currentTheme.processes : []),
-        persistentProcesses: Array.isArray(newTheme.persistentProcesses) && newTheme.persistentProcesses.length > 0 
-          ? newTheme.persistentProcesses 
-          : (Array.isArray(currentTheme.persistentProcesses) ? currentTheme.persistentProcesses : []),
-        windows: Array.isArray(newTheme.windows) && newTheme.windows.length > 0 
-          ? newTheme.windows 
-          : (Array.isArray(currentTheme.windows) ? currentTheme.windows : [])
+        processes:
+          Array.isArray(newTheme.processes) && newTheme.processes.length > 0
+            ? newTheme.processes
+            : Array.isArray(currentTheme.processes)
+            ? currentTheme.processes
+            : [],
+        persistentProcesses:
+          Array.isArray(newTheme.persistentProcesses) &&
+          newTheme.persistentProcesses.length > 0
+            ? newTheme.persistentProcesses
+            : Array.isArray(currentTheme.persistentProcesses)
+            ? currentTheme.persistentProcesses
+            : [],
+        windows:
+          Array.isArray(newTheme.windows) && newTheme.windows.length > 0
+            ? newTheme.windows
+            : Array.isArray(currentTheme.windows)
+            ? currentTheme.windows
+            : [],
       };
     });
-    
+
     // Debug-Ausgabe
     if (mergedThemes.length > 0) {
       const firstTheme = mergedThemes[0];
-      console.log(`[DataStore] setThemes - Erstes Theme nach Zusammenführung: ${firstTheme.name}, ` +
-                  `processes: ${firstTheme.processes?.length || 0}, ` +
-                  `persistentProcesses: ${firstTheme.persistentProcesses?.length || 0}`);
+      console.log(
+        `[DataStore] setThemes - Erstes Theme nach Zusammenführung: ${firstTheme.name}, ` +
+          `processes: ${firstTheme.processes?.length || 0}, ` +
+          `persistentProcesses: ${firstTheme.persistentProcesses?.length || 0}`
+      );
     }
-    
+
     this.themes = mergedThemes;
     this.saveThemes();
   }
@@ -276,45 +335,58 @@ export class DataStore {
     const newTheme = {
       ...theme,
       processes: theme.processes || [],
-      persistentProcesses: theme.persistentProcesses || []
+      persistentProcesses: theme.persistentProcesses || [],
     };
-    
+
     // Sichere die aktuellen Themes, bevor wir das neue hinzufügen
     // Dies ist wichtig, um die persistenten Prozesse der bestehenden Themes zu sichern
     const currentThemes = JSON.parse(JSON.stringify(this.themes)); // Tiefe Kopie erstellen
-    
+
     // Vor dem Hinzufügen des neuen Themes, stelle sicher, dass alle bestehenden Themes
     // ihre Arrays korrekt initialisiert haben
-    this.themes = this.themes.map(existingTheme => ({
+    this.themes = this.themes.map((existingTheme) => ({
       ...existingTheme,
-      processes: Array.isArray(existingTheme.processes) ? existingTheme.processes : [],
-      persistentProcesses: Array.isArray(existingTheme.persistentProcesses) ? existingTheme.persistentProcesses : [],
-      windows: Array.isArray(existingTheme.windows) ? existingTheme.windows : []
+      processes: Array.isArray(existingTheme.processes)
+        ? existingTheme.processes
+        : [],
+      persistentProcesses: Array.isArray(existingTheme.persistentProcesses)
+        ? existingTheme.persistentProcesses
+        : [],
+      windows: Array.isArray(existingTheme.windows)
+        ? existingTheme.windows
+        : [],
     }));
-    
+
     // Füge das neue Theme hinzu
     this.themes.push(newTheme);
-    console.log(`[DataStore] Neues Thema hinzugefügt: ${newTheme.name} (${newTheme.id})`);
-    
+    console.log(
+      `[DataStore] Neues Thema hinzugefügt: ${newTheme.name} (${newTheme.id})`
+    );
+
     // Für Debugging: Zeige den Zustand der Themes vor dem Speichern
     if (this.themes.length > 1) {
       const firstTheme = this.themes[0];
-      console.log(`[DataStore] Vor dem Speichern - Erstes Theme: ${firstTheme.name}, ` +
-                  `processes: ${firstTheme.processes?.length || 0}, ` +
-                  `persistentProcesses: ${firstTheme.persistentProcesses?.length || 0}`);
+      console.log(
+        `[DataStore] Vor dem Speichern - Erstes Theme: ${firstTheme.name}, ` +
+          `processes: ${firstTheme.processes?.length || 0}, ` +
+          `persistentProcesses: ${firstTheme.persistentProcesses?.length || 0}`
+      );
     }
-    
+
     // Speichere die Themes
     try {
       this.saveThemes();
     } catch (error) {
       // Bei einem Fehler stellen wir den vorherigen Zustand wieder her
-      console.error(`[DataStore] Fehler beim Speichern nach Hinzufügen des Themes:`, error);
+      console.error(
+        `[DataStore] Fehler beim Speichern nach Hinzufügen des Themes:`,
+        error
+      );
       this.themes = currentThemes;
       throw error;
     }
   }
-  
+
   updateTheme(themeId: string, updatedTheme: Theme): void {
     console.log(`[DataStore] Updating theme ${themeId}:`, updatedTheme);
 
@@ -322,7 +394,7 @@ export class DataStore {
     if (index !== -1) {
       // Sichere den aktuellen Zustand aller Themes, bevor wir Änderungen vornehmen
       const currentThemes = [...this.themes];
-      
+
       const existingTheme = this.themes[index];
       console.log(`[DataStore] Existing theme:`, existingTheme);
 
@@ -347,16 +419,21 @@ export class DataStore {
         ...existingWindowHandles,
       ];
       console.log(`[DataStore] Combined applications:`, combinedApplications);
-      
+
       // WICHTIG: Stelle sicher, dass persistente Prozesse korrekt beibehalten werden
       // Wenn updatedTheme persistentProcesses enthält, verwende diese
       // Andernfalls behalte die existierenden persistentProcesses bei
-      const persistentProcesses = updatedTheme.persistentProcesses && updatedTheme.persistentProcesses.length > 0 
-        ? updatedTheme.persistentProcesses 
-        : existingTheme.persistentProcesses || [];
-      
-      console.log(`[DataStore] Persistent processes (${persistentProcesses.length}):`, persistentProcesses);
-      
+      const persistentProcesses =
+        updatedTheme.persistentProcesses &&
+        updatedTheme.persistentProcesses.length > 0
+          ? updatedTheme.persistentProcesses
+          : existingTheme.persistentProcesses || [];
+
+      console.log(
+        `[DataStore] Persistent processes (${persistentProcesses.length}):`,
+        persistentProcesses
+      );
+
       // Prozess-IDs beibehalten
       const processes = updatedTheme.processes || existingTheme.processes || [];
       console.log(`[DataStore] Processes:`, processes);
@@ -366,16 +443,19 @@ export class DataStore {
         ...updatedTheme,
         applications: combinedApplications,
         persistentProcesses: persistentProcesses,
-        processes: processes
+        processes: processes,
       };
 
       console.log(`[DataStore] Final updated theme:`, this.themes[index]);
-      
+
       try {
         this.saveThemes();
       } catch (error) {
         // Bei einem Fehler stellen wir den vorherigen Zustand wieder her
-        console.error(`[DataStore] Fehler beim Speichern nach Aktualisieren des Themes:`, error);
+        console.error(
+          `[DataStore] Fehler beim Speichern nach Aktualisieren des Themes:`,
+          error
+        );
         this.themes = currentThemes;
         throw error;
       }
@@ -385,20 +465,22 @@ export class DataStore {
   // Methode zum Löschen eines Themes anhand seiner ID
   deleteTheme(themeId: string): boolean {
     console.log(`[DataStore] Lösche Theme mit ID ${themeId}`);
-    
+
     // Anzahl der Themes vor dem Löschen
     const originalLength = this.themes.length;
-    
+
     // Filtere das zu löschende Theme heraus
-    this.themes = this.themes.filter(theme => theme.id !== themeId);
-    
+    this.themes = this.themes.filter((theme) => theme.id !== themeId);
+
     // Prüfe, ob ein Theme entfernt wurde
     const newLength = this.themes.length;
     const themeRemoved = originalLength > newLength;
-    
+
     if (themeRemoved) {
-      console.log(`[DataStore] Theme mit ID ${themeId} erfolgreich entfernt. Verbleibende Themes: ${newLength}`);
-      
+      console.log(
+        `[DataStore] Theme mit ID ${themeId} erfolgreich entfernt. Verbleibende Themes: ${newLength}`
+      );
+
       // Speichere die Änderungen
       this.saveThemes();
       return true;
@@ -408,8 +490,18 @@ export class DataStore {
     }
   }
 
-  addWindowsToTheme(themeId: string, newWindows: WindowInfo[]) {
+  addWindowsToTheme(
+    themeId: string,
+    newWindows: WindowInfo[],
+    processes?: any[]
+  ) {
     console.log(`[DataStore] Adding windows to theme ${themeId}:`, newWindows);
+    console.log(
+      `[DataStore] Processes parameter:`,
+      processes
+        ? `${processes.length} processes provided`
+        : "No processes provided"
+    );
 
     const themes = this.getThemes();
     const theme = themes.find((t) => t.id === themeId);
@@ -425,6 +517,7 @@ export class DataStore {
     if (!theme.windows) theme.windows = [];
     if (!theme.processes) theme.processes = [];
     if (!theme.applications) theme.applications = [];
+    if (!theme.persistentProcesses) theme.persistentProcesses = [];
 
     // Add each window
     newWindows.forEach((window) => {
@@ -440,17 +533,61 @@ export class DataStore {
           title: window.title,
         });
 
-        // Add process ID to processes array if not already there
-        if (!theme.processes.includes(window.processId)) {
-          theme.processes.push(window.processId);
-          console.log(`[DataStore] Added process ID ${window.processId}`);
-        }
+        // WICHTIG: Für Browser-Subprozesse NICHT die Prozess-ID hinzufügen
+        // wenn bereits Window-Handles verwendet werden, um Konflikte zu vermeiden
+        console.log(
+          `[DataStore] Skipping process ID ${window.processId} for window-based assignment to avoid conflicts with other themes`
+        );
 
         // Add window handle to applications array
         if (!theme.applications.includes(window.hwnd)) {
           theme.applications.push(window.hwnd);
           console.log(
             `[DataStore] Added window handle ${window.hwnd} to applications`
+          );
+        }
+
+        // WICHTIG: Erstelle auch persistente Identifikatoren für Window-Handles
+        // damit sie nach einem Neustart wiederhergestellt werden können
+        if (processes) {
+          console.log(
+            `[DataStore] Looking for process ${window.processId} in ${processes.length} processes`
+          );
+          const process = processes.find((p) => p.id === window.processId);
+          if (process) {
+            console.log(`[DataStore] Found process:`, process);
+            // Import createPersistentIdentifier function (this will be handled in main.ts)
+            const persistentId = {
+              executablePath: process.path || "",
+              executableName: process.name,
+              titlePattern: window.title, // Verwende den Fenstertitel als Pattern
+            };
+
+            // Prüfen, ob der persistente Identifikator bereits existiert
+            const exists = theme.persistentProcesses.some(
+              (p) =>
+                p.executableName === persistentId.executableName &&
+                p.titlePattern === persistentId.titlePattern
+            );
+
+            if (!exists) {
+              console.log(
+                `[DataStore] Adding persistent identifier for ${process.name} with title pattern "${window.title}"`
+              );
+              theme.persistentProcesses.push(persistentId);
+            } else {
+              console.log(
+                `[DataStore] Persistent identifier already exists for ${process.name} with title pattern "${window.title}"`
+              );
+            }
+          } else {
+            console.log(
+              `[DataStore] Process ${window.processId} not found in processes array`
+            );
+          }
+        } else {
+          console.log(
+            `[DataStore] No processes provided - cannot create persistent identifier`
           );
         }
       }
@@ -480,29 +617,35 @@ export class DataStore {
   }
 
   // Methode zum Hinzufügen eines persistenten Prozesses zu einem Thema
-  addPersistentProcessToTheme(themeId: string, persistentProcess: PersistentProcessIdentifier): void {
+  addPersistentProcessToTheme(
+    themeId: string,
+    persistentProcess: PersistentProcessIdentifier
+  ): void {
     const theme = this.themes.find((t) => t.id === themeId);
-    
+
     if (theme) {
       // Sicherstellen, dass persistentProcesses existiert
       if (!theme.persistentProcesses) {
         theme.persistentProcesses = [];
       }
-      
+
       // Prüfen, ob der persistente Prozess bereits existiert
       const exists = theme.persistentProcesses.some(
-        p => p.executableName === persistentProcess.executableName
+        (p) => p.executableName === persistentProcess.executableName
       );
-      
+
       if (!exists) {
         theme.persistentProcesses.push(persistentProcess);
         this.saveThemes();
       }
     }
   }
-  
+
   // Methode zum Entfernen eines persistenten Prozesses aus einem Thema
-  removePersistentProcessFromTheme(themeId: string, executableName: string): boolean {
+  removePersistentProcessFromTheme(
+    themeId: string,
+    executableName: string
+  ): boolean {
     const theme = this.getTheme(themeId);
     if (!theme || !theme.persistentProcesses) {
       return false;
@@ -513,20 +656,23 @@ export class DataStore {
 
     // Entferne den persistenten Prozess mit case-insensitive Vergleich
     theme.persistentProcesses = theme.persistentProcesses.filter(
-      (process) => process.executableName.toLowerCase() !== executableName.toLowerCase()
+      (process) =>
+        process.executableName.toLowerCase() !== executableName.toLowerCase()
     );
 
     // Prüfe, ob ein Element entfernt wurde
     const removed = theme.persistentProcesses.length < originalLength;
 
     if (removed) {
-      console.log(`[DataStore] Persistenter Prozess '${executableName}' aus Thema ${themeId} entfernt.`);
+      console.log(
+        `[DataStore] Persistenter Prozess '${executableName}' aus Thema ${themeId} entfernt.`
+      );
       this.saveThemes(); // Speichere die Änderungen sofort
     }
 
     return removed;
   }
-  
+
   /**
    * Entfernt einen Prozess und seinen persistenten Identifikator aus einem Thema in einem atomaren Schritt.
    * @param themeId Die ID des Themas
@@ -534,89 +680,125 @@ export class DataStore {
    * @param executableName Optional: Der Name der ausführbaren Datei des persistenten Prozesses
    * @returns Ein Objekt mit Informationen über die entfernten Elemente
    */
-  removeProcessAndPersistentFromTheme(themeId: string, processId: number, executableName?: string): { processRemoved: boolean, persistentRemoved: boolean } {
-    console.log(`[DataStore] Entferne Prozess ${processId} und persistenten Prozess ${executableName || 'N/A'} aus Thema ${themeId}`);
-    
+  removeProcessAndPersistentFromTheme(
+    themeId: string,
+    processId: number,
+    executableName?: string
+  ): { processRemoved: boolean; persistentRemoved: boolean } {
+    console.log(
+      `[DataStore] Entferne Prozess ${processId} und persistenten Prozess ${
+        executableName || "N/A"
+      } aus Thema ${themeId}`
+    );
+
     // Standardwerte für die Rückgabe
     const result = {
       processRemoved: false,
-      persistentRemoved: false
+      persistentRemoved: false,
     };
-    
+
     // Thema finden
     const theme = this.getTheme(themeId);
     if (!theme) {
       console.error(`[DataStore] Thema mit ID ${themeId} nicht gefunden.`);
       return result;
     }
-    
+
     // Prozess-ID entfernen, falls vorhanden und nicht -1
-    if (processId !== -1) { // -1 bedeutet, dass wir nur den persistenten Prozess entfernen wollen
+    if (processId !== -1) {
+      // -1 bedeutet, dass wir nur den persistenten Prozess entfernen wollen
       if (!theme.processes) {
         theme.processes = [];
       }
-      
+
       const processIndex = theme.processes.indexOf(processId);
       if (processIndex !== -1) {
         // Prozess aus dem Array entfernen
         theme.processes.splice(processIndex, 1);
         result.processRemoved = true;
-        console.log(`[DataStore] Prozess ${processId} erfolgreich aus Thema ${themeId} entfernt.`);
+        console.log(
+          `[DataStore] Prozess ${processId} erfolgreich aus Thema ${themeId} entfernt.`
+        );
       } else {
-        console.log(`[DataStore] Prozess ${processId} nicht im Thema ${themeId} gefunden.`);
+        console.log(
+          `[DataStore] Prozess ${processId} nicht im Thema ${themeId} gefunden.`
+        );
       }
     }
-    
+
     // Persistenten Prozess entfernen, falls ein Name angegeben wurde
     if (executableName) {
       if (!theme.persistentProcesses) {
         theme.persistentProcesses = [];
       }
-      
+
       // Normalisiere den executableName für den Vergleich
       const normalizedName = executableName.toLowerCase();
-      console.log(`[DataStore] Suche nach persistentem Prozess mit normalisiertem Namen: ${normalizedName}`);
-      
+      console.log(
+        `[DataStore] Suche nach persistentem Prozess mit normalisiertem Namen: ${normalizedName}`
+      );
+
       // Anzahl der persistenten Prozesse vor der Filterung
       const originalLength = theme.persistentProcesses.length;
-      
+
       // Logge alle persistenten Prozesse vor der Filterung
-      console.log(`[DataStore] Persistente Prozesse vor der Filterung:`, theme.persistentProcesses);
-      
+      console.log(
+        `[DataStore] Persistente Prozesse vor der Filterung:`,
+        theme.persistentProcesses
+      );
+
       // Filtere alle persistenten Prozesse heraus, deren executableName mit dem gesuchten übereinstimmt
       // Wichtig: Case-insensitive Vergleich, um Probleme mit Groß-/Kleinschreibung zu vermeiden
-      theme.persistentProcesses = theme.persistentProcesses.filter(process => {
-        // Normalisiere auch den Namen des persistenten Prozesses
-        const normalizedProcessName = process.executableName.toLowerCase();
-        // Behalte den Prozess nur, wenn sein Name NICHT mit dem zu entfernenden übereinstimmt
-        const shouldKeep = normalizedProcessName !== normalizedName;
-        console.log(`[DataStore] Vergleiche '${normalizedProcessName}' mit '${normalizedName}': ${shouldKeep ? 'behalten' : 'entfernen'}`);
-        return shouldKeep;
-      });
-      
+      theme.persistentProcesses = theme.persistentProcesses.filter(
+        (process) => {
+          // Normalisiere auch den Namen des persistenten Prozesses
+          const normalizedProcessName = process.executableName.toLowerCase();
+          // Behalte den Prozess nur, wenn sein Name NICHT mit dem zu entfernenden übereinstimmt
+          const shouldKeep = normalizedProcessName !== normalizedName;
+          console.log(
+            `[DataStore] Vergleiche '${normalizedProcessName}' mit '${normalizedName}': ${
+              shouldKeep ? "behalten" : "entfernen"
+            }`
+          );
+          return shouldKeep;
+        }
+      );
+
       // Prüfe, ob Prozesse entfernt wurden
       const newLength = theme.persistentProcesses.length;
       if (originalLength > newLength) {
         result.persistentRemoved = true;
-        console.log(`[DataStore] Persistenter Prozess ${executableName} erfolgreich aus Thema ${themeId} entfernt.`);
+        console.log(
+          `[DataStore] Persistenter Prozess ${executableName} erfolgreich aus Thema ${themeId} entfernt.`
+        );
       } else {
-        console.log(`[DataStore] Kein persistenter Prozess mit Namen ${executableName} im Thema ${themeId} gefunden.`);
-        console.log(`[DataStore] Persistente Prozesse nach der Filterung:`, theme.persistentProcesses);
+        console.log(
+          `[DataStore] Kein persistenter Prozess mit Namen ${executableName} im Thema ${themeId} gefunden.`
+        );
+        console.log(
+          `[DataStore] Persistente Prozesse nach der Filterung:`,
+          theme.persistentProcesses
+        );
       }
     }
-    
+
     // Nur speichern, wenn tatsächlich Änderungen vorgenommen wurden
     if (result.processRemoved || result.persistentRemoved) {
-      console.log(`[DataStore] Speichere Thema ${themeId} mit ${theme.persistentProcesses?.length || 0} persistenten Prozessen und ${theme.processes?.length || 0} Prozessen`);
+      console.log(
+        `[DataStore] Speichere Thema ${themeId} mit ${
+          theme.persistentProcesses?.length || 0
+        } persistenten Prozessen und ${theme.processes?.length || 0} Prozessen`
+      );
       this.saveThemes();
     }
-    
+
     return result;
   }
 
-  
   // Methode zum Abrufen aller persistenten Prozesse für ein Thema
-  getPersistentProcessesForTheme(themeId: string): PersistentProcessIdentifier[] {
+  getPersistentProcessesForTheme(
+    themeId: string
+  ): PersistentProcessIdentifier[] {
     const theme = this.themes.find((t) => t.id === themeId);
     return theme?.persistentProcesses || [];
   }
@@ -633,4 +815,68 @@ export class DataStore {
     return assignedWindows;
   }
 
+  /**
+   * Bereinigt doppelte Prozess-IDs aus themes.processes wenn Window-Handles verwendet werden
+   * Diese Funktion sollte nach dem Start aufgerufen werden, um Konflikte zu beheben
+   */
+  cleanupConflictingProcessIds(): void {
+    console.log("[DataStore] Bereinige konflikthafte Prozess-IDs...");
+
+    let hasChanges = false;
+    const processIdCounts = new Map<number, string[]>(); // processId -> theme IDs
+
+    // Sammle alle Prozess-IDs und prüfe, welche in mehreren Themes verwendet werden
+    this.themes.forEach((theme) => {
+      if (theme.processes && theme.processes.length > 0) {
+        theme.processes.forEach((processId) => {
+          if (!processIdCounts.has(processId)) {
+            processIdCounts.set(processId, []);
+          }
+          processIdCounts.get(processId)!.push(theme.id);
+        });
+      }
+    });
+
+    // Finde Prozess-IDs die in mehreren Themes verwendet werden
+    const conflictingProcessIds = new Map<number, string[]>();
+    processIdCounts.forEach((themeIds, processId) => {
+      if (themeIds.length > 1) {
+        conflictingProcessIds.set(processId, themeIds);
+      }
+    });
+
+    if (conflictingProcessIds.size > 0) {
+      console.log(
+        `[DataStore] Gefunden ${conflictingProcessIds.size} konflikthafte Prozess-IDs:`,
+        conflictingProcessIds
+      );
+
+      // Für jede konflikthafte Prozess-ID, entferne sie aus Themes die Window-Handles haben
+      conflictingProcessIds.forEach((themeIds, processId) => {
+        themeIds.forEach((themeId) => {
+          const theme = this.themes.find((t) => t.id === themeId);
+          if (theme && theme.windows && theme.windows.length > 0) {
+            // Dieses Theme hat Window-Handles, entferne die Prozess-ID
+            const index = theme.processes.indexOf(processId);
+            if (index > -1) {
+              theme.processes.splice(index, 1);
+              hasChanges = true;
+              console.log(
+                `[DataStore] Entfernt Prozess-ID ${processId} aus Theme "${theme.name}" da Window-Handles vorhanden sind`
+              );
+            }
+          }
+        });
+      });
+    }
+
+    if (hasChanges) {
+      console.log("[DataStore] Speichere bereinigte Theme-Daten...");
+      this.saveThemes();
+    } else {
+      console.log(
+        "[DataStore] Keine konflikthafte Prozess-IDs gefunden, keine Bereinigung nötig"
+      );
+    }
+  }
 }

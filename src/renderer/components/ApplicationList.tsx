@@ -112,6 +112,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   const [popupProcesses, setPopupProcesses] = useState<ProcessInfo[]>([]);
   // Dieser Counter wird erhöht, wenn ein Prozess entfernt wird, um eine Aktualisierung zu erzwingen
   const [processUpdateCounter, setProcessUpdateCounter] = useState<number>(0);
+  const [isClosingPopup, setIsClosingPopup] = useState(false);
 
   // Aktualisiere die Prozessinformationen, wenn das Popup geöffnet wird oder ein Prozess entfernt wurde
   useEffect(() => {
@@ -454,7 +455,12 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
         return; // Klick war im Popup-Inhalt, aber nicht auf dem X-Button - nicht schließen
       }
 
-      setShowProcessPopup(null);
+      // Schließ-Animation starten
+      setIsClosingPopup(true);
+      setTimeout(() => {
+        setShowProcessPopup(null);
+        setIsClosingPopup(false);
+      }, 200); // Match fadeOut animation duration
     }
   };
 
@@ -587,10 +593,15 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
     return (
       <div
-        className="process-popup-overlay"
+        className={`process-popup-overlay ${
+          isClosingPopup ? "popup-closing" : ""
+        }`}
         onClick={(e) => handleCloseProcessPopup(e)}
       >
-        <div className="process-popup" onClick={(e) => e.stopPropagation()}>
+        <div
+          className={`process-popup ${isClosingPopup ? "popup-closing" : ""}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="process-popup-header">
             <div className="process-popup-title">Prozesse in {theme.name}</div>
             <button
@@ -633,18 +644,24 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       {/* Groups-Sektion */}
       <section className="groups-section">
         {!showOnlyShortcuts && (
-          <h2 className="groups-title font-extrabold">
-            GROUPS
-            <button
-              className="add-group-button"
-              onClick={() => setShowNewGroupInput(true)}
-              title="Neue Gruppe hinzufügen"
-            >
-              +
-            </button>
-          </h2>
+          <h2 className="groups-title font-extrabold">GROUPS</h2>
         )}
         <div className="groups-container">
+          {/* Neue Gruppe erstellen - Empty State anstatt + Button */}
+          {!showNewGroupInput && !showOnlyShortcuts && (
+            <div
+              className="group-item group-item-empty"
+              onClick={() => setShowNewGroupInput(true)}
+            >
+              <div className="group-item-content">
+                <div className="group-item-name">Neue Gruppe</div>
+                <div className="group-item-actions">
+                  <div className="group-empty-icon">+</div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Display a new group input at the beginning of the container */}
           {showNewGroupInput && !showOnlyShortcuts && (
             <NewGroupInput
