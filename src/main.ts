@@ -68,6 +68,8 @@ const registeredShortcuts: Map<string, string> = new Map();
 let compactMode = false; // Zustand für den Kompaktmodus
 
 function createWindow() {
+  const windowCreateStart = Date.now();
+
   // Sicherstellen, dass der assets-Ordner existiert
   try {
     const fs = require("fs");
@@ -94,12 +96,15 @@ function createWindow() {
     title: "switchfast",
   });
 
+  // Mache mainWindow als globale Variable verfügbar für DataStore
+  (global as any).mainWindow = mainWindow;
+
   // Menüleiste komplett entfernen
   mainWindow.setMenu(null);
 
   // Load the app
   // Wir verwenden immer die gebauten Dateien, da wir keinen Webpack Dev Server laufen haben
-  console.log("[Main] Lade Anwendung aus lokalen Dateien");
+  // Lade Anwendung aus lokalen Dateien
 
   mainWindow.loadURL(
     url.format({
@@ -109,6 +114,12 @@ function createWindow() {
     })
   );
 
+  // Track when UI window is created (but don't track event here anymore)
+  mainWindow.webContents.once("did-finish-load", () => {
+    const windowLoadDuration = Date.now() - windowCreateStart;
+    // Fenster geladen
+  });
+
   // Öffne Developer Tools nur in der Entwicklung
   if (process.env.NODE_ENV === "development") {
     mainWindow.webContents.openDevTools();
@@ -117,6 +128,7 @@ function createWindow() {
   // Handle window closed
   mainWindow.on("closed", () => {
     mainWindow = null;
+    (global as any).mainWindow = null;
   });
 
   // Hide window to tray when minimized instead of taskbar
@@ -192,7 +204,7 @@ function registerShortcuts() {
     setTimeout(async () => {
       try {
         await registerSavedShortcuts();
-        console.log("[Shortcut] Alle Theme-Shortcuts wurden registriert");
+        // Alle Theme-Shortcuts wurden registriert
       } catch (error) {
         console.error(
           "[Shortcut] Fehler bei der Registrierung der Theme-Shortcuts:",
@@ -287,7 +299,7 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
       });
 
       // PERFORMANCE-OPTIMIERUNG: Sofort das Theme aktivieren, ohne auf PID-Aktualisierung zu warten
-      console.log(`[Shortcut] Aktiviere Theme ${themeId} sofort`);
+      // Aktiviere Theme sofort
       if (mainWindow)
         mainWindow.webContents.send(
           "activate-theme-and-minimize",
@@ -482,7 +494,7 @@ function unregisterThemeShortcut(themeId: string): boolean {
  */
 async function getRunningApplications(): Promise<ProcessInfo[]> {
   try {
-    console.log("[getRunningApplications] Starting process query...");
+    // Starting process query
 
     // PowerShell-Befehl zum Abrufen der Prozesse
     const command = `
@@ -556,13 +568,13 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
 
     // Parse semicolon-separated values
     const lines = stdout.split("\n").filter((line) => line.trim() !== "");
-    console.log("[getRunningApplications] Parsed", lines.length, "lines");
+    // Parsed process lines
 
     const processes: ProcessInfo[] = lines
       .map((line) => {
         const parts = line.trim().split(";");
         if (parts.length !== 5) {
-          console.log("[getRunningApplications] Skipping invalid line:", line);
+          // Skipping invalid line
           return null;
         }
 
@@ -957,7 +969,7 @@ async function showDesktopExceptApps(
 
     // Füge eigene Anwendung zu den geschützten Fenstern hinzu
     const ourProcessId = process.pid;
-    console.log("[showDesktopExceptApps] Our process ID:", ourProcessId);
+    // Show desktop except protected apps
     if (pidToWindowsMap.has(ourProcessId)) {
       pidToWindowsMap
         .get(ourProcessId)!
@@ -1162,7 +1174,7 @@ function runPowerShellCommand(script: string): Promise<string> {
 // Funktion zum Abrufen der Prozesse mit Fenstern
 async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
   try {
-    console.log("[getProcessesWithWindows] Starting...");
+    // Starting process query with windows
     const processes = await getRunningApplications();
     console.log(
       "[getProcessesWithWindows] Got",
@@ -1328,9 +1340,7 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("get-theme", (_, themeId) => {
-    console.log(`[IPC] get-theme für ID ${themeId} aufgerufen`);
     const theme = dataStore.getTheme(themeId);
-    console.log(`[IPC] Theme gefunden:`, theme);
     return theme;
   });
 
@@ -1350,7 +1360,7 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("delete-theme", async (event, themeId: string) => {
-    console.log(`[IPC] Received delete-theme request for themeId: ${themeId}`);
+    // Delete theme request received
     try {
       const themeToDelete = dataStore.getThemes().find((t) => t.id === themeId);
       let shortcutInfo = "N/A";
@@ -1601,7 +1611,8 @@ function setupIpcHandlers() {
           }
 
           // Prozess-ID zum processes-Array hinzufügen, falls noch nicht vorhanden
-          if (!theme.processes.includes(processId)) {
+          const wasNewlyAdded = !theme.processes.includes(processId);
+          if (wasNewlyAdded) {
             console.log(
               `[IPC] Füge Prozess-ID ${processId} zum Thema ${theme.id} hinzu.`
             );
@@ -1610,6 +1621,36 @@ function setupIpcHandlers() {
 
           // Thema aktualisieren
           dataStore.updateTheme(themeId, theme);
+
+          // Analytics: App zu Theme hinzugefügt (nur wenn wirklich neu hinzugefügt)
+          if (wasNewlyAdded) {
+            const finalTheme = dataStore.getTheme(themeId);
+            if (finalTheme) {
+              console.log(
+                `[Analytics] Tracking app_added_to_theme event for theme ${finalTheme.name}`
+              );
+              trackEvent("app_added_to_theme", {
+                theme_name: finalTheme.name,
+                apps_in_theme:
+                  finalTheme.processes.length > 0
+                    ? finalTheme.processes.length
+                    : finalTheme.applications?.length || 0,
+                apps_added: 1,
+              });
+              console.log(
+                `[Analytics] app_added_to_theme event tracked successfully`
+              );
+            } else {
+              console.log(
+                `[Analytics] Could not track app_added_to_theme - finalTheme is null`
+              );
+            }
+          } else {
+            console.log(
+              `[Analytics] Not tracking app_added_to_theme - wasNewlyAdded is false`
+            );
+          }
+
           console.log(
             `[IPC] Prozess ${processId} erfolgreich zum Thema ${themeId} hinzugefügt.`
           );
@@ -1802,6 +1843,12 @@ function setupIpcHandlers() {
       }
     }
   );
+
+  // Analytics Handler für App Startup Complete
+  ipcMain.handle("track-app-startup-complete", async (_, eventData) => {
+    trackEvent("app_startup_complete", eventData);
+    return true;
+  });
 }
 
 // Beim Beenden der App alle Shortcuts entfernen
@@ -2223,6 +2270,8 @@ function handleDeepLink(url: string | undefined) {
 
 // App bereit-Event
 app.whenReady().then(async () => {
+  const startupStartTime = Date.now();
+
   // Initialize analytics
   initAnalytics();
 
@@ -2261,6 +2310,9 @@ app.whenReady().then(async () => {
       mainWindow.webContents.openDevTools();
     }
   });
+
+  // Startup-Zeit wird jetzt im Frontend getrackt wenn Loading Screen verschwindet
+  console.log(`[App] Initialisierung abgeschlossen`);
 
   app.on("activate", () => {
     if (!mainWindow) {

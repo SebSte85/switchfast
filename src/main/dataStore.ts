@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import * as os from "os";
 import { PersistentProcessIdentifier } from "../types";
+import { trackEvent } from "./analytics";
 
 // Deklariere globale Variable für TypeScript
 declare global {
@@ -363,6 +364,14 @@ export class DataStore {
       `[DataStore] Neues Thema hinzugefügt: ${newTheme.name} (${newTheme.id})`
     );
 
+    // Analytics: Theme erstellt
+    trackEvent("theme_created", {
+      theme_name: newTheme.name,
+      total_themes: this.themes.length,
+      has_color: !!newTheme.color,
+      has_shortcut: !!newTheme.shortcut,
+    });
+
     // Für Debugging: Zeige den Zustand der Themes vor dem Speichern
     if (this.themes.length > 1) {
       const firstTheme = this.themes[0];
@@ -388,83 +397,92 @@ export class DataStore {
   }
 
   updateTheme(themeId: string, updatedTheme: Theme): void {
-    console.log(`[DataStore] Updating theme ${themeId}:`, updatedTheme);
+    console.log(`[DataStore] updateTheme für Theme-ID ${themeId} aufgerufen`);
 
-    const index = this.themes.findIndex((t) => t.id === themeId);
-    if (index !== -1) {
-      // Sichere den aktuellen Zustand aller Themes, bevor wir Änderungen vornehmen
-      const currentThemes = [...this.themes];
+    const index = this.themes.findIndex((theme) => theme.id === themeId);
+    if (index === -1) {
+      console.error(`[DataStore] Theme mit ID ${themeId} nicht gefunden`);
+      return;
+    }
 
-      const existingTheme = this.themes[index];
-      console.log(`[DataStore] Existing theme:`, existingTheme);
+    // Sichere die aktuellen Themes, bevor wir Änderungen vornehmen
+    const currentThemes = JSON.parse(JSON.stringify(this.themes)); // Tiefe Kopie erstellen
+    const oldTheme = this.themes[index];
 
-      // Behalte existierende Fenster-Handles
-      const existingWindowHandles = (existingTheme.applications || []).filter(
-        (id) => id >= 100000
+    // Debug: Was wird geupdatet?
+    console.log(`[DataStore] Old theme applications:`, oldTheme.applications);
+    console.log(
+      `[DataStore] New theme applications:`,
+      updatedTheme.applications
+    );
+
+    // Wenn es persistentProcesses im Original gibt, behalte sie bei
+    const persistentProcesses = Array.isArray(oldTheme.persistentProcesses)
+      ? oldTheme.persistentProcesses
+      : [];
+
+    // Wenn es processes im Original gibt, behalte sie bei
+    const processes = Array.isArray(oldTheme.processes)
+      ? oldTheme.processes
+      : [];
+
+    // Kombiniere die vorhandenen applications mit den neuen
+    const combinedApplications = [
+      ...new Set([
+        ...(Array.isArray(oldTheme.applications) ? oldTheme.applications : []),
+        ...(Array.isArray(updatedTheme.applications)
+          ? updatedTheme.applications
+          : []),
+      ]),
+    ];
+
+    console.log(`[DataStore] Combined applications:`, combinedApplications);
+
+    // Analytics: App zu Theme hinzugefügt
+    const oldAppCount = oldTheme.applications?.length || 0;
+    const newAppCount = combinedApplications.length;
+
+    if (newAppCount > oldAppCount) {
+      // Berechne die tatsächliche Theme-Größe wie im UI
+      const totalAppsInTheme =
+        processes.length > 0 ? processes.length : combinedApplications.length;
+
+      trackEvent("app_added_to_theme", {
+        theme_name: updatedTheme.name,
+        apps_in_theme: totalAppsInTheme,
+        apps_added: newAppCount - oldAppCount,
+      });
+    }
+
+    // Aktualisiertes Thema mit allen wichtigen Daten
+    this.themes[index] = {
+      ...updatedTheme,
+      applications: combinedApplications,
+      persistentProcesses: persistentProcesses,
+      processes: processes,
+    };
+
+    console.log(`[DataStore] Final updated theme:`, this.themes[index]);
+
+    try {
+      this.saveThemes();
+    } catch (error) {
+      // Bei einem Fehler stellen wir den vorherigen Zustand wieder her
+      console.error(
+        `[DataStore] Fehler beim Speichern nach Aktualisieren des Themes:`,
+        error
       );
-      console.log(
-        `[DataStore] Existing window handles:`,
-        existingWindowHandles
-      );
-
-      // Neue Anwendungs-IDs (keine Fenster-Handles)
-      const newApplications = (updatedTheme.applications || []).filter(
-        (id) => id < 100000
-      );
-      console.log(`[DataStore] New applications:`, newApplications);
-
-      // Kombiniere existierende Fenster mit neuen Anwendungen
-      const combinedApplications = [
-        ...newApplications,
-        ...existingWindowHandles,
-      ];
-      console.log(`[DataStore] Combined applications:`, combinedApplications);
-
-      // WICHTIG: Stelle sicher, dass persistente Prozesse korrekt beibehalten werden
-      // Wenn updatedTheme persistentProcesses enthält, verwende diese
-      // Andernfalls behalte die existierenden persistentProcesses bei
-      const persistentProcesses =
-        updatedTheme.persistentProcesses &&
-        updatedTheme.persistentProcesses.length > 0
-          ? updatedTheme.persistentProcesses
-          : existingTheme.persistentProcesses || [];
-
-      console.log(
-        `[DataStore] Persistent processes (${persistentProcesses.length}):`,
-        persistentProcesses
-      );
-
-      // Prozess-IDs beibehalten
-      const processes = updatedTheme.processes || existingTheme.processes || [];
-      console.log(`[DataStore] Processes:`, processes);
-
-      // Aktualisiertes Thema mit allen wichtigen Daten
-      this.themes[index] = {
-        ...updatedTheme,
-        applications: combinedApplications,
-        persistentProcesses: persistentProcesses,
-        processes: processes,
-      };
-
-      console.log(`[DataStore] Final updated theme:`, this.themes[index]);
-
-      try {
-        this.saveThemes();
-      } catch (error) {
-        // Bei einem Fehler stellen wir den vorherigen Zustand wieder her
-        console.error(
-          `[DataStore] Fehler beim Speichern nach Aktualisieren des Themes:`,
-          error
-        );
-        this.themes = currentThemes;
-        throw error;
-      }
+      this.themes = currentThemes;
+      throw error;
     }
   }
 
   // Methode zum Löschen eines Themes anhand seiner ID
   deleteTheme(themeId: string): boolean {
     console.log(`[DataStore] Lösche Theme mit ID ${themeId}`);
+
+    // Theme-Info für Analytics vor dem Löschen sammeln
+    const themeToDelete = this.themes.find((theme) => theme.id === themeId);
 
     // Anzahl der Themes vor dem Löschen
     const originalLength = this.themes.length;
@@ -480,6 +498,14 @@ export class DataStore {
       console.log(
         `[DataStore] Theme mit ID ${themeId} erfolgreich entfernt. Verbleibende Themes: ${newLength}`
       );
+
+      // Analytics: Theme gelöscht
+      trackEvent("theme_deleted", {
+        theme_name: themeToDelete?.name || "unknown",
+        app_count: themeToDelete?.applications?.length || 0,
+        had_shortcut: !!themeToDelete?.shortcut,
+        remaining_themes: newLength,
+      });
 
       // Speichere die Änderungen
       this.saveThemes();
@@ -520,6 +546,7 @@ export class DataStore {
     if (!theme.persistentProcesses) theme.persistentProcesses = [];
 
     // Add each window
+    let windowWasAdded = false;
     newWindows.forEach((window) => {
       // Check if window already exists
       const exists = theme.windows!.some((w) => w.hwnd === window.hwnd);
@@ -545,6 +572,9 @@ export class DataStore {
           console.log(
             `[DataStore] Added window handle ${window.hwnd} to applications`
           );
+
+          // Flag für Analytics - Window wurde hinzugefügt
+          windowWasAdded = true;
         }
 
         // WICHTIG: Erstelle auch persistente Identifikatoren für Window-Handles
@@ -597,6 +627,35 @@ export class DataStore {
 
     // Save changes
     this.saveThemes();
+
+    // Analytics: App zu Theme hinzugefügt (Window-Handle)
+    if (windowWasAdded) {
+      // Lade das finale gespeicherte Theme, um korrekte Werte zu erhalten
+      const finalTheme = this.getTheme(themeId);
+      if (finalTheme) {
+        // Für Window-Handles verwenden wir die Länge der persistentProcesses oder windows
+        // da diese die tatsächlichen hinzugefügten Subprozesse repräsentieren
+        const totalAppsInTheme = Math.max(
+          finalTheme.processes?.length || 0,
+          finalTheme.applications?.length || 0,
+          finalTheme.persistentProcesses?.length || 0,
+          finalTheme.windows?.length || 0
+        );
+
+        console.log(
+          `[DataStore] Analytics for subprocess - apps_in_theme: ${totalAppsInTheme}`
+        );
+        console.log(
+          `[DataStore] Theme state: processes=${finalTheme.processes?.length}, applications=${finalTheme.applications?.length}, persistentProcesses=${finalTheme.persistentProcesses?.length}, windows=${finalTheme.windows?.length}`
+        );
+
+        trackEvent("app_added_to_theme", {
+          theme_name: finalTheme.name,
+          apps_in_theme: totalAppsInTheme,
+          apps_added: 1,
+        });
+      }
+    }
   }
 
   removeWindowsFromTheme(themeId: string, windowIds: number[]): void {

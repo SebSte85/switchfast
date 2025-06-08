@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ipcRenderer } from "electron";
 import "./styles/index.css";
 import "./styles/trial.css";
@@ -24,6 +24,10 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
+  // Loading Screen Startzeitpunkt für Analytics
+  const [loadingStartTime] = useState(() => Date.now());
+  const startupEventTracked = useRef<boolean>(false);
+
   // Ladephasen mit angepassten Texten
   const loadingPhaseTexts = [
     initialLoadingText || "Searching for active licence...", // Phase 0: Lizenzprüfung
@@ -38,18 +42,8 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     // Loading-State setzen - nur für manuelle Aktualisierungen
     setIsRefreshing(true);
 
-    // Nur im Entwicklungsmodus detaillierte Logs ausgeben
-    if (process.env.NODE_ENV === "development") {
-      console.log("[REFRESH] --------------------------------");
-      console.log("[REFRESH] Starting refresh cycle");
-    }
-
     try {
       const apps = await ipcRenderer.invoke("get-running-applications");
-
-      if (process.env.NODE_ENV === "development") {
-        console.log("[REFRESH] Got applications:", apps);
-      }
 
       // Get all process IDs
       const runningAppIds = new Set(
@@ -64,85 +58,37 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         })
       );
 
-      if (process.env.NODE_ENV === "development") {
-        console.log("[REFRESH] Running app IDs:", Array.from(runningAppIds));
-      }
-
       // Get all window handles
       const runningWindowIds = new Set<number>();
       apps.forEach((app: ProcessInfo) => {
         if (app.windows) {
           app.windows.forEach((window: WindowInfo) => {
             runningWindowIds.add(window.hwnd);
-            if (process.env.NODE_ENV === "development") {
-              console.log(
-                `[REFRESH] Found window: hwnd=${window.hwnd}, title=${window.title}`
-              );
-            }
           });
         }
       });
 
-      if (process.env.NODE_ENV === "development") {
-        console.log(
-          "[REFRESH] Running window IDs:",
-          Array.from(runningWindowIds)
-        );
-      }
-
       // Cleanup themes by removing only closed applications
       setThemes((prevThemes) => {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[REFRESH] Previous themes:", prevThemes);
-        }
-
         const updatedThemes = prevThemes.map((theme) => {
           const filteredApps = theme.applications.filter((appId) => {
             const numericId =
               typeof appId === "string" ? parseInt(appId, 10) : appId;
 
-            if (process.env.NODE_ENV === "development") {
-              console.log(
-                `[REFRESH] Checking app ID ${appId} in theme "${theme.name}"`
-              );
-            }
-
             // Check if it's a window handle by checking if it exists in runningWindowIds
             const isWindowHandle = runningWindowIds.has(numericId);
-
-            if (process.env.NODE_ENV === "development") {
-              console.log(
-                `[REFRESH] Is window handle in runningWindowIds? ${isWindowHandle}`
-              );
-            }
-
             // Check if it's a process ID by checking if it exists in runningAppIds
             const isRunningApp = runningAppIds.has(numericId);
-
-            if (process.env.NODE_ENV === "development") {
-              console.log(`[REFRESH] Is in runningAppIds? ${isRunningApp}`);
-            }
 
             // Keep the ID if it's either a valid window handle or a running process
             return isWindowHandle || isRunningApp;
           });
-
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              `[REFRESH] Theme "${theme.name}" after filtering:`,
-              filteredApps
-            );
-          }
 
           return {
             ...theme,
             applications: filteredApps,
           };
         });
-
-        if (process.env.NODE_ENV === "development") {
-          console.log("[REFRESH] Updated themes:", updatedThemes);
-        }
 
         return updatedThemes;
       });
@@ -156,10 +102,6 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
       console.error("[REFRESH] Error:", error);
       // Bei Fehlern den Ladezustand beenden, um die Anwendung nicht zu blockieren
       setIsRefreshing(false);
-    }
-
-    if (process.env.NODE_ENV === "development") {
-      console.log("[REFRESH] --------------------------------");
     }
   }, []); // Keine Abhängigkeit von themes mehr
 
@@ -206,7 +148,18 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
           // Andernfalls wird der Ladezustand durch die IPC-Events gesteuert
           if (!hasPersistentApps) {
             // Kurze Verzögerung, damit der Benutzer die letzte Phase sehen kann
-            setTimeout(() => setLoading(false), 1000);
+            setTimeout(() => {
+              // Track app startup completion nur einmal
+              if (!startupEventTracked.current) {
+                startupEventTracked.current = true;
+                const loadingDuration = Date.now() - loadingStartTime;
+                ipcRenderer.invoke("track-app-startup-complete", {
+                  startup_duration_ms: loadingDuration,
+                  theme_count: savedThemes?.length || 0,
+                });
+              }
+              setLoading(false);
+            }, 1000);
           } else {
             // Ladezustand bleibt aktiv, bis apps-started Event empfangen wird
           }
@@ -264,6 +217,16 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     };
 
     const handleThemesSaved = () => {
+      // Track app startup completion nur einmal - exakt die Zeit die der Loading Screen zu sehen war
+      if (!startupEventTracked.current) {
+        startupEventTracked.current = true;
+        const loadingDuration = Date.now() - loadingStartTime;
+        ipcRenderer.invoke("track-app-startup-complete", {
+          startup_duration_ms: loadingDuration,
+          theme_count: themes.length,
+        });
+      }
+
       // Jetzt erst den Ladezustand beenden, nachdem die Themes gespeichert wurden
       setLoading(false);
     };
@@ -423,10 +386,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
       try {
         // Verwende das direkt mitgesendete Theme, wenn vorhanden
         if (freshTheme) {
-          console.log(
-            `[FOCUS] Verwende direkt mitgesendetes Theme für ${themeId}:`,
-            freshTheme
-          );
+          // Verwende direkt mitgesendetes Theme
           applyFocusMode(themeId, true, freshTheme);
         } else {
           applyFocusMode(themeId, true);
@@ -575,9 +535,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
           .invoke("remove-process-from-theme", themeId, numId)
           .then((success) => {
             if (success) {
-              console.log(
-                `[UI] Prozess ${numId} erfolgreich aus Thema ${themeId} entfernt mit persistentem Identifikator.`
-              );
+              // Prozess erfolgreich entfernt
             } else {
               console.error(
                 `[UI] Fehler beim Entfernen des Prozesses ${numId} aus Thema ${themeId} mit persistentem Identifikator.`

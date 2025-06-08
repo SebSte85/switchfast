@@ -312,10 +312,17 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
         if (windowInfo) {
           // Call the IPC directly to ensure window is properly saved
-          ipcRenderer.invoke("add-windows-to-theme", themeId, [windowInfo]);
-
-          // Also update the UI state
-          onAddToTheme(themeId, hwnd);
+          ipcRenderer
+            .invoke("add-windows-to-theme", themeId, [windowInfo])
+            .then((success) => {
+              if (success && onAddToTheme) {
+                // Update the UI state after successful IPC call
+                onAddToTheme(themeId, hwnd);
+              }
+            })
+            .catch((error) => {
+              console.error("Error adding window to theme:", error);
+            });
         }
       } else {
         // This is a process ID - handle it normally
