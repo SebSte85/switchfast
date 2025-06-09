@@ -278,14 +278,14 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
             <div className="flex gap-3 justify-end">
               <button
                 onClick={cancelDeleteAccount}
-                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm"
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDeleteAccount}
                 disabled={isDeleting}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm flex items-center gap-2 disabled:opacity-50"
               >
                 {isDeleting ? (
                   <>
@@ -493,7 +493,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
               <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
                 {isSubscription && !cancelsAtPeriodEnd && !cancelledAt && (
                   <button
-                    className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                    className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                     onClick={handleCancelSubscription}
                   >
                     Cancel Subscription
@@ -501,7 +501,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
                 )}
                 {(cancelsAtPeriodEnd || cancelledAt) && (
                   <button
-                    className={`px-3 py-2 bg-[#78d97c] text-white rounded hover:bg-[#6bc870] transition-colors text-sm font-medium flex items-center gap-2 ${
+                    className={`px-3 py-2 bg-[#78d97c] text-white rounded-lg hover:bg-[#6bc870] transition-colors text-sm font-medium flex items-center gap-2 ${
                       isReactivating ? "opacity-75 cursor-not-allowed" : ""
                     }`}
                     onClick={handleReactivateSubscription}
@@ -536,7 +536,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
                   </button>
                 )}
                 <button
-                  className="px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 transition-colors"
+                  className="px-3 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors"
                   onClick={handleDeleteAccount}
                   disabled={isDeleting}
                 >

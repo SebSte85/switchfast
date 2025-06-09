@@ -211,20 +211,13 @@ const TrialManager: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  // Wenn noch geladen wird, zeige Ladeindikator
-  if (isLoading) {
-    return <div className="loading">Lizenzstatus wird geprüft...</div>;
-  }
-
   return (
     <>
       {showPrivacyConsent && (
-        <div className="modal-overlay">
-          <PrivacyConsentModal
-            onAccept={handlePrivacyAccept}
-            onDecline={handlePrivacyDecline}
-          />
-        </div>
+        <PrivacyConsentModal
+          onAccept={handlePrivacyAccept}
+          onDecline={handlePrivacyDecline}
+        />
       )}
 
       {/* Zeige die Hauptanwendung, wenn kein Modal angezeigt wird */}

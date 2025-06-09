@@ -563,17 +563,17 @@
   }
 
   .process-list::-webkit-scrollbar-track {
-    background: rgba(120, 217, 124, 0.1);
+    background: #1a1a24;
     border-radius: 3px;
   }
 
   .process-list::-webkit-scrollbar-thumb {
-    background: rgba(120, 217, 124, 0.3);
+    background: #78d97c;
     border-radius: 3px;
   }
 
   .process-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(120, 217, 124, 0.5);
+    background: #6bc870;
   }
 
   .process-item {
