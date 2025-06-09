@@ -118,18 +118,18 @@ const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
 
         <div className="consent-actions">
           <button
-            onClick={handleDecline}
-            className="decline-button"
-            disabled={isProcessing}
-          >
-            Decline
-          </button>
-          <button
             onClick={handleAccept}
             className="accept-button"
             disabled={isProcessing}
           >
             {isProcessing ? "Saving..." : "Accept & Start Trial"}
+          </button>
+          <button
+            onClick={handleDecline}
+            className="decline-button"
+            disabled={isProcessing}
+          >
+            Decline
           </button>
         </div>
 

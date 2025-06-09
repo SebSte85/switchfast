@@ -875,30 +875,27 @@ export class DataStore {
   }
 
   /**
-   * Bereinigt doppelte Prozess-IDs aus themes.processes wenn Window-Handles verwendet werden
-   * Diese Funktion sollte nach dem Start aufgerufen werden, um Konflikte zu beheben
+   * Bereinigt konflikthafte Prozess-IDs
+   * Entfernt Prozess-IDs aus Themes, die bereits Window-Handles haben
    */
   cleanupConflictingProcessIds(): void {
-    console.log("[DataStore] Bereinige konflikthafte Prozess-IDs...");
-
     let hasChanges = false;
-    const processIdCounts = new Map<number, string[]>(); // processId -> theme IDs
 
-    // Sammle alle Prozess-IDs und prüfe, welche in mehreren Themes verwendet werden
+    // Erste Durchgang: Sammle alle Prozess-IDs und ihre Theme-Zugehörigkeiten
+    const processIdToThemeIds = new Map<number, string[]>();
+
     this.themes.forEach((theme) => {
-      if (theme.processes && theme.processes.length > 0) {
-        theme.processes.forEach((processId) => {
-          if (!processIdCounts.has(processId)) {
-            processIdCounts.set(processId, []);
-          }
-          processIdCounts.get(processId)!.push(theme.id);
-        });
-      }
+      theme.processes.forEach((processId) => {
+        if (!processIdToThemeIds.has(processId)) {
+          processIdToThemeIds.set(processId, []);
+        }
+        processIdToThemeIds.get(processId)!.push(theme.id);
+      });
     });
 
-    // Finde Prozess-IDs die in mehreren Themes verwendet werden
+    // Finde Prozess-IDs die in mehreren Themes vorkommen
     const conflictingProcessIds = new Map<number, string[]>();
-    processIdCounts.forEach((themeIds, processId) => {
+    processIdToThemeIds.forEach((themeIds, processId) => {
       if (themeIds.length > 1) {
         conflictingProcessIds.set(processId, themeIds);
       }
@@ -937,5 +934,15 @@ export class DataStore {
         "[DataStore] Keine konflikthafte Prozess-IDs gefunden, keine Bereinigung nötig"
       );
     }
+  }
+
+  /**
+   * Löscht alle lokalen Theme-Daten (für Account-Löschung)
+   */
+  clearAllData(): void {
+    console.log("[DataStore] Clearing all theme data...");
+    this.themes = [];
+    this.saveThemes();
+    console.log("[DataStore] All theme data cleared");
   }
 }

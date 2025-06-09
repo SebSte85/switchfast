@@ -13,6 +13,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   const [deviceId, setDeviceId] = useState<string>("");
   const [isClosing, setIsClosing] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const {
     subscriptionEndDate,
     isSubscription,
@@ -90,16 +92,59 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   };
 
   const handleDeleteAccount = async () => {
-    if (
-      window.confirm(
-        "Do you really want to delete your account? This cannot be undone!"
-      )
-    ) {
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteAccount = async () => {
+    setIsDeleting(true);
+    setShowDeleteModal(false);
+
+    try {
+      // 1. Account-Daten in Supabase/Stripe löschen
       const result = await deleteAccount();
+      if (result) {
+        setActionMessage(
+          "Account successfully deleted. All data has been permanently removed."
+        );
+
+        // 2. Lokale Device-Daten löschen (für Fresh Start)
+        console.log("🗑️ Clearing local device data for fresh start...");
+        await ipcRenderer.invoke("device:clear-local-data");
+
+        // 3. Success-Message 5 Sekunden anzeigen (wie gewünscht)
+        let countdown = 5;
+        setActionMessage(
+          `Account successfully deleted. Application will close in ${countdown} seconds...`
+        );
+
+        const countdownInterval = setInterval(() => {
+          countdown--;
+          if (countdown > 0) {
+            setActionMessage(
+              `Account successfully deleted. Application will close in ${countdown} seconds...`
+            );
+          } else {
+            clearInterval(countdownInterval);
+            setActionMessage("Closing application...");
+            // App schließen
+            ipcRenderer.invoke("app:quit");
+          }
+        }, 1000);
+      } else {
+        setActionMessage("Failed to delete account. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error deleting account:", error);
       setActionMessage(
-        result ? "Account deleted." : "Failed to delete account."
+        "An error occurred while deleting your account. Please try again."
       );
+    } finally {
+      setIsDeleting(false);
     }
+  };
+
+  const cancelDeleteAccount = () => {
+    setShowDeleteModal(false);
   };
 
   const handleReactivateSubscription = async () => {
@@ -169,6 +214,111 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
         isClosing ? "settings-slide-out" : "settings-slide-in"
       }`}
     >
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-[#2a2a3e] border border-red-500/30 rounded-lg p-6 max-w-md mx-4 shadow-2xl">
+            <div className="flex items-start mb-4">
+              <svg
+                className="w-6 h-6 text-red-500 mr-3 mt-0.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+                />
+              </svg>
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-2">
+                  Delete Account
+                </h3>
+                <p className="text-gray-300 text-sm mb-4">
+                  Are you sure you want to permanently delete your account? This
+                  action cannot be undone.
+                </p>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-md p-3 mb-4">
+                  <div className="flex items-start">
+                    <svg
+                      className="w-4 h-4 text-red-400 mr-2 mt-0.5 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <div className="text-xs text-red-300">
+                      <p className="font-medium mb-1">What will happen:</p>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>Your account will be permanently deleted</li>
+                        <li>
+                          All personal data will be removed from our servers
+                        </li>
+                        <li>
+                          Your subscription will be automatically cancelled if
+                          active
+                        </li>
+                        <li>You will lose access to SwitchFast immediately</li>
+                        <li>This action cannot be reversed</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={cancelDeleteAccount}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteAccount}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <svg
+                      className="animate-spin w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete Account"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="settings-header">
         <div className="settings-title">
@@ -388,8 +538,9 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
                 <button
                   className="px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 transition-colors"
                   onClick={handleDeleteAccount}
+                  disabled={isDeleting}
                 >
-                  Delete Account
+                  {isDeleting ? "Deleting..." : "Delete Account"}
                 </button>
               </div>
               {actionMessage && (

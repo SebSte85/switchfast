@@ -375,11 +375,7 @@ serve(async (req) => {
         enabled: true,
       },
       // Customer-Update-Konfiguration für automatische Steuerberechnung und Tax ID Collection
-      customer_update: {
-        address: "auto",
-        shipping: "auto",
-        name: "auto",
-      },
+      // Wird später nur gesetzt wenn wir einen customer haben, nicht bei customer_email
       // Steuerverhalten konfigurieren
       tax_id_collection: {
         enabled: true,
@@ -428,6 +424,12 @@ serve(async (req) => {
     // Customer oder customer_email setzen
     if (customerId) {
       sessionConfig.customer = customerId;
+      // customer_update nur setzen wenn wir einen customer haben
+      sessionConfig.customer_update = {
+        address: "auto",
+        shipping: "auto",
+        name: "auto",
+      };
     } else if (email && email.trim() && email.includes("@")) {
       sessionConfig.customer_email = email;
     }

@@ -1530,6 +1530,38 @@ function setupIpcHandlers() {
     }
   });
 
+  // Lokale Device-Daten löschen (für Account-Löschung)
+  ipcMain.handle("device:clear-local-data", async () => {
+    try {
+      console.log("[IPC] Clearing local device data for account deletion...");
+
+      // Alle Electron Stores löschen
+      const Store = require("electron-store");
+
+      // Lizenz Store löschen
+      const licenseStore = new Store({
+        name: "workfocus-license",
+        encryptionKey:
+          process.env.LICENSE_ENCRYPTION_KEY ||
+          "6d24f9b2d334e2095f93b7de9b63df751650956b9e74378d727d163216b673fd",
+      });
+      licenseStore.clear();
+
+      // Config Store löschen
+      const configStore = new Store({ name: "workfocus-config" });
+      configStore.clear();
+
+      // Theme Store löschen (DataStore)
+      dataStore.clearAllData();
+
+      console.log("✅ [IPC] Local device data cleared successfully");
+      return true;
+    } catch (error) {
+      console.error("❌ [IPC] Error clearing local device data:", error);
+      return false;
+    }
+  });
+
   // Compact mode handler
   // Handler für das direkte Hinzufügen eines Prozesses zu einem Thema
   ipcMain.handle(

@@ -414,11 +414,22 @@ serve(async (req) => {
               "Lizenz für Rückerstattung nicht gefunden:",
               paymentIntentId
             );
+
+            // GDPR/Account-Löschung: Wenn Lizenz bereits anonymisiert wurde, ist das OK
+            console.log(
+              `ℹ️ [WEBHOOK] License for payment ${paymentIntentId} not found - possibly already deleted due to account deletion (GDPR). This is expected behavior.`
+            );
+
+            // Webhook als erfolgreich behandeln - kein Fehler
             return new Response(
-              JSON.stringify({ error: "Lizenz nicht gefunden" }),
+              JSON.stringify({
+                success: true,
+                message: "License already processed or deleted",
+                payment_intent_id: paymentIntentId,
+              }),
               {
                 headers: { ...corsHeaders, "Content-Type": "application/json" },
-                status: 404,
+                status: 200,
               }
             );
           }
@@ -541,11 +552,23 @@ serve(async (req) => {
             "Lizenz für Abonnement-Löschung nicht gefunden:",
             subscriptionId
           );
+
+          // GDPR/Account-Löschung: Wenn Lizenz bereits anonymisiert wurde, ist das OK
+          // Der User hat möglicherweise seinen Account gelöscht BEVOR der Webhook ankam
+          console.log(
+            `ℹ️ [WEBHOOK] License for subscription ${subscriptionId} not found - possibly already deleted due to account deletion (GDPR). This is expected behavior.`
+          );
+
+          // Webhook als erfolgreich behandeln - kein Fehler
           return new Response(
-            JSON.stringify({ error: "Lizenz nicht gefunden" }),
+            JSON.stringify({
+              success: true,
+              message: "License already processed or deleted",
+              subscription_id: subscriptionId,
+            }),
             {
               headers: { ...corsHeaders, "Content-Type": "application/json" },
-              status: 404,
+              status: 200,
             }
           );
         }
