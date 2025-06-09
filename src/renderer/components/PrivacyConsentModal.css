@@ -5,7 +5,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
+  background-color: #2d2d3f;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -20,7 +20,6 @@
   width: 100%;
   max-width: 700px;
   max-height: 90vh;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -149,7 +148,7 @@
 }
 
 .accept-button {
-  background: linear-gradient(135deg, #78d97c 0%, #59a85c 100%);
+  background: #78d97c;
   color: white;
   border: none;
   border-radius: 8px;
@@ -160,12 +159,12 @@
   font-weight: 600;
   flex: 2;
   min-height: 48px;
+  box-shadow: 0 4px 8px rgba(120, 217, 124, 0.3);
 }
 
 .accept-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #59a85c 0%, #4a8a4d 100%);
+  background: #78d97c;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(120, 217, 124, 0.3);
 }
 
 .accept-button:disabled {
@@ -234,10 +233,10 @@
 }
 
 .consent-body::-webkit-scrollbar-thumb {
-  background: #78d97c;
+  background: #555;
   border-radius: 4px;
 }
 
 .consent-body::-webkit-scrollbar-thumb:hover {
-  background: #59a85c;
+  background: #666;
 }

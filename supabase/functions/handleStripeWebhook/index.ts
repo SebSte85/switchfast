@@ -300,6 +300,32 @@ serve(async (req) => {
 
           console.log("Erstelle Lizenz mit Key:", licenseKey);
 
+          // Für Subscriptions: Subscription ID aus der Session extrahieren
+          const subscriptionId = session.subscription;
+
+          // Subscription Details abrufen für Ablaufdatum
+          let subscriptionEndDate = null;
+          if (subscriptionId) {
+            try {
+              const subscription = await stripe.subscriptions.retrieve(
+                subscriptionId
+              );
+              console.log("Subscription Details:", {
+                id: subscription.id,
+                status: subscription.status,
+                current_period_end: subscription.current_period_end,
+              });
+
+              // Unix timestamp zu ISO string
+              subscriptionEndDate = new Date(
+                subscription.current_period_end * 1000
+              ).toISOString();
+              console.log("Subscription endet am:", subscriptionEndDate);
+            } catch (error) {
+              console.error("Fehler beim Abrufen der Subscription:", error);
+            }
+          }
+
           // Neue Lizenz in der Datenbank erstellen
           const { data: licenseData, error: licenseError } =
             await supabaseClient
@@ -308,7 +334,9 @@ serve(async (req) => {
                 license_key: licenseKey,
                 email: email,
                 stripe_customer_id: customerId,
-                stripe_payment_id: paymentId,
+                stripe_payment_id: paymentId, // Kann bei Subscriptions null sein
+                stripe_subscription_id: subscriptionId,
+                subscription_end_date: subscriptionEndDate, // Neues Feld
                 is_active: true,
               })
               .select()
@@ -433,6 +461,189 @@ serve(async (req) => {
             `Lizenz deaktiviert aufgrund von Rückerstattung für Payment Intent ${paymentIntentId}`
           );
         }
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        // Subscription wurde geändert (z.B. gecancelt mit cancel_at_period_end)
+        const subscription = event.data.object;
+        const subscriptionId = subscription.id;
+
+        console.log(`Verarbeite Subscription Update: ${subscriptionId}`);
+
+        // Prüfen ob Cancellation geplant ist
+        if (subscription.cancel_at_period_end) {
+          console.log(
+            `Subscription wurde gekündigt (cancel_at_period_end): ${subscriptionId}`
+          );
+
+          // Lizenz finden und Cancellation-Datum setzen
+          const { error: updateError } = await supabaseClient
+            .from("licenses")
+            .update({
+              cancelled_at: new Date().toISOString(),
+              cancels_at_period_end: true,
+            })
+            .eq("stripe_subscription_id", subscriptionId);
+
+          if (updateError) {
+            console.error("Fehler beim Setzen der Cancellation:", updateError);
+          } else {
+            console.log(
+              `✅ Subscription Cancellation markiert: ${subscriptionId}`
+            );
+          }
+        } else if (subscription.cancel_at_period_end === false) {
+          // Cancellation wurde rückgängig gemacht
+          const { error: updateError } = await supabaseClient
+            .from("licenses")
+            .update({
+              cancelled_at: null,
+              cancels_at_period_end: false,
+            })
+            .eq("stripe_subscription_id", subscriptionId);
+
+          if (updateError) {
+            console.error(
+              "Fehler beim Entfernen der Cancellation:",
+              updateError
+            );
+          } else {
+            console.log(
+              `✅ Subscription Cancellation entfernt: ${subscriptionId}`
+            );
+          }
+        }
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        // Abonnement wurde gekündigt oder abgelaufen
+        const subscription = event.data.object;
+        const subscriptionId = subscription.id;
+
+        console.log(`Verarbeite Subscription Deletion: ${subscriptionId}`);
+
+        // Cancellation-Daten aus dem Stripe Event extrahieren
+        const cancelledAt = subscription.canceled_at
+          ? new Date(subscription.canceled_at * 1000).toISOString()
+          : new Date().toISOString();
+
+        // Lizenz finden und deaktivieren
+        const { data: licenseData, error: licenseError } = await supabaseClient
+          .from("licenses")
+          .select("id")
+          .eq("stripe_subscription_id", subscriptionId)
+          .single();
+
+        if (licenseError || !licenseData) {
+          console.error(
+            "Lizenz für Abonnement-Löschung nicht gefunden:",
+            subscriptionId
+          );
+          return new Response(
+            JSON.stringify({ error: "Lizenz nicht gefunden" }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 404,
+            }
+          );
+        }
+
+        // Lizenz deaktivieren und Cancellation-Daten setzen
+        const { error: updateError } = await supabaseClient
+          .from("licenses")
+          .update({
+            is_active: false,
+            cancelled_at: cancelledAt,
+            cancels_at_period_end: true, // War gekündigt und ist jetzt abgelaufen
+          })
+          .eq("id", licenseData.id);
+
+        if (updateError) {
+          console.error("Fehler beim Deaktivieren der Lizenz:", updateError);
+          return new Response(
+            JSON.stringify({ error: "Fehler beim Deaktivieren der Lizenz" }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 500,
+            }
+          );
+        }
+
+        // Alle Geräte für diese Lizenz deaktivieren
+        const { error: devicesError } = await supabaseClient
+          .from("device_activations")
+          .update({ is_active: false })
+          .eq("license_id", licenseData.id);
+
+        if (devicesError) {
+          console.error("Fehler beim Deaktivieren der Geräte:", devicesError);
+          return new Response(
+            JSON.stringify({ error: "Fehler beim Deaktivieren der Geräte" }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 500,
+            }
+          );
+        }
+
+        console.log(
+          `✅ Lizenz deaktiviert aufgrund von Subscription Deletion: ${subscriptionId}, gekündigt am: ${cancelledAt}`
+        );
+        break;
+      }
+
+      case "invoice.payment_succeeded": {
+        // Erfolgreiche Zahlung - Subscription verlängert
+        const invoice = event.data.object;
+        const subscriptionId = invoice.subscription;
+
+        if (subscriptionId) {
+          console.log(`✅ Subscription-Zahlung erfolgreich: ${subscriptionId}`);
+
+          // Subscription Details abrufen für neues Ablaufdatum
+          try {
+            const subscription = await stripe.subscriptions.retrieve(
+              subscriptionId
+            );
+            const newEndDate = new Date(
+              subscription.current_period_end * 1000
+            ).toISOString();
+
+            // Lizenz-Ablaufdatum aktualisieren
+            const { error: updateError } = await supabaseClient
+              .from("licenses")
+              .update({
+                subscription_end_date: newEndDate,
+                is_active: true, // Sicherstellen dass die Lizenz aktiv ist
+              })
+              .eq("stripe_subscription_id", subscriptionId);
+
+            if (updateError) {
+              console.error(
+                "Fehler beim Aktualisieren des Ablaufdatums:",
+                updateError
+              );
+            } else {
+              console.log(`✅ Subscription verlängert bis: ${newEndDate}`);
+            }
+          } catch (error) {
+            console.error("Fehler beim Abrufen der Subscription:", error);
+          }
+        }
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        // Zahlung fehlgeschlagen - Optional: Warnung senden, aber Lizenz noch nicht deaktivieren
+        const invoice = event.data.object;
+        const subscriptionId = invoice.subscription;
+
+        console.log(
+          `⚠️ Zahlung fehlgeschlagen für Subscription: ${subscriptionId}`
+        );
+        // Hier könnte eine E-Mail-Benachrichtigung gesendet werden
         break;
       }
 

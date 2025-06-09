@@ -23,6 +23,10 @@ export function setupLicenseIPC(licenseManager: LicenseManager) {
       licenseKey: licenseInfo?.licenseKey || null,
       email: licenseInfo?.email || null,
       purchaseDate: licenseInfo?.purchaseDate || null,
+      subscriptionEndDate: licenseInfo?.subscriptionEndDate || null,
+      isSubscription: licenseInfo?.isSubscription || false,
+      cancelledAt: licenseInfo?.cancelledAt || null,
+      cancelsAtPeriodEnd: licenseInfo?.cancelsAtPeriodEnd || false,
     };
   });
 
@@ -169,7 +173,12 @@ export function setupLicenseIPC(licenseManager: LicenseManager) {
 
   // Privacy Consent Status abrufen
   ipcMain.handle("privacy:getConsentStatus", async () => {
-    return licenseManager.getPrivacyConsentStatus();
+    console.log("🔍 [IPC PRIVACY] ==> privacy:getConsentStatus aufgerufen");
+    await licenseManager.waitUntilReady();
+    console.log("🔍 [IPC PRIVACY] ==> LicenseManager ist ready");
+    const result = licenseManager.getPrivacyConsentStatus();
+    console.log("🔍 [IPC PRIVACY] ==> Ergebnis:", result);
+    return result;
   });
 
   // Privacy Consent setzen
@@ -180,5 +189,20 @@ export function setupLicenseIPC(licenseManager: LicenseManager) {
   // Trial-Informationen abrufen
   ipcMain.handle("license:getTrialInfo", async () => {
     return licenseManager.getTrialInfo();
+  });
+
+  // Subscription kündigen
+  ipcMain.handle("license:cancelSubscription", async () => {
+    return await licenseManager.cancelSubscription();
+  });
+
+  // Subscription reaktivieren (DIREKT ohne Checkout)
+  ipcMain.handle("license:reactivateSubscription", async () => {
+    return await licenseManager.reactivateSubscription();
+  });
+
+  // Account löschen
+  ipcMain.handle("license:deleteAccount", async () => {
+    return await licenseManager.deleteAccount();
   });
 }

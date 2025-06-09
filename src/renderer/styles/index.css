@@ -241,6 +241,7 @@
   body {
     @apply overflow-hidden;
     height: 100%;
+    font-family: "Inter", "Segoe UI", Arial, sans-serif;
   }
 
   .application-list-header {
@@ -1020,6 +1021,27 @@
 
   .settings-content {
     @apply flex-1 p-6 overflow-y-auto;
+    max-height: calc(100vh - 80px); /* Abzug für Header */
+  }
+
+  /* Moderne grüne Scrollbar für Settings */
+  .settings-content::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .settings-content::-webkit-scrollbar-track {
+    background: rgba(65, 65, 89, 0.2);
+    border-radius: 3px;
+  }
+
+  .settings-content::-webkit-scrollbar-thumb {
+    background: rgba(120, 217, 124, 0.3);
+    border-radius: 3px;
+    transition: background 0.3s ease;
+  }
+
+  .settings-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 217, 124, 0.5);
   }
 
   .settings-section {

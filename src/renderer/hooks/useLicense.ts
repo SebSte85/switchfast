@@ -1,20 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 
 // Typdefinitionen
 interface LicenseStatus {
   isLicensed: boolean;
   isInTrial: boolean;
   remainingTrialDays: number;
+  subscriptionEndDate?: string | null;
+  isSubscription?: boolean;
+  cancelledAt?: string | null;
+  cancelsAtPeriodEnd?: boolean;
 }
 
 // Electron IPC-Renderer
-const { ipcRenderer } = window.require('electron');
+const { ipcRenderer } = window.require("electron");
 
 export function useLicense() {
   const [status, setStatus] = useState<LicenseStatus>({
     isLicensed: false,
     isInTrial: false,
-    remainingTrialDays: 0
+    remainingTrialDays: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -22,39 +26,45 @@ export function useLicense() {
   const fetchLicenseStatus = useCallback(async () => {
     setIsLoading(true);
     try {
-      const result = await ipcRenderer.invoke('license:getStatus');
+      const result = await ipcRenderer.invoke("license:getStatus");
       setStatus(result);
     } catch (error) {
-      console.error('Fehler beim Abrufen des Lizenzstatus:', error);
+      console.error("Fehler beim Abrufen des Lizenzstatus:", error);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   // Lizenz aktivieren
-  const activateLicense = useCallback(async (licenseKey: string) => {
-    try {
-      const success = await ipcRenderer.invoke('license:activate', licenseKey);
-      if (success) {
-        await fetchLicenseStatus();
+  const activateLicense = useCallback(
+    async (licenseKey: string) => {
+      try {
+        const success = await ipcRenderer.invoke(
+          "license:activate",
+          licenseKey
+        );
+        if (success) {
+          await fetchLicenseStatus();
+        }
+        return success;
+      } catch (error) {
+        console.error("Fehler bei der Lizenzaktivierung:", error);
+        return false;
       }
-      return success;
-    } catch (error) {
-      console.error('Fehler bei der Lizenzaktivierung:', error);
-      return false;
-    }
-  }, [fetchLicenseStatus]);
+    },
+    [fetchLicenseStatus]
+  );
 
   // Lizenz deaktivieren
   const deactivateLicense = useCallback(async () => {
     try {
-      const success = await ipcRenderer.invoke('license:deactivate');
+      const success = await ipcRenderer.invoke("license:deactivate");
       if (success) {
         await fetchLicenseStatus();
       }
       return success;
     } catch (error) {
-      console.error('Fehler bei der Lizenzdeaktivierung:', error);
+      console.error("Fehler bei der Lizenzdeaktivierung:", error);
       return false;
     }
   }, [fetchLicenseStatus]);
@@ -62,36 +72,71 @@ export function useLicense() {
   // Stripe Checkout öffnen
   const openStripeCheckout = useCallback(async (email?: string) => {
     try {
-      return await ipcRenderer.invoke('license:openCheckout', email);
+      return await ipcRenderer.invoke("license:openCheckout", email);
     } catch (error) {
-      console.error('Fehler beim Öffnen des Stripe Checkouts:', error);
+      console.error("Fehler beim Öffnen des Stripe Checkouts:", error);
       return false;
     }
   }, []);
-  
+
   // Lizenz mit Stripe Session aktivieren
-  const activateLicenseFromSession = useCallback(async (sessionId: string, environment: string = 'test') => {
-    try {
-      console.log(`[License] Aktiviere Lizenz aus Stripe Session: ${sessionId}, Umgebung: ${environment}`);
-      const success = await ipcRenderer.invoke('license:activateFromSession', { sessionId, environment });
-      if (success) {
-        await fetchLicenseStatus();
+  const activateLicenseFromSession = useCallback(
+    async (sessionId: string, environment: string = "test") => {
+      try {
+        console.log(
+          `[License] Aktiviere Lizenz aus Stripe Session: ${sessionId}, Umgebung: ${environment}`
+        );
+        const success = await ipcRenderer.invoke(
+          "license:activateFromSession",
+          { sessionId, environment }
+        );
+        if (success) {
+          await fetchLicenseStatus();
+        }
+        return success;
+      } catch (error) {
+        console.error(
+          "Fehler bei der Lizenzaktivierung aus Stripe Session:",
+          error
+        );
+        return false;
       }
-      return success;
-    } catch (error) {
-      console.error('Fehler bei der Lizenzaktivierung aus Stripe Session:', error);
-      return false;
-    }
-  }, [fetchLicenseStatus]);
+    },
+    [fetchLicenseStatus]
+  );
 
   // Lizenzstatus prüfen
   const checkLicenseStatus = useCallback(async () => {
     try {
-      const isValid = await ipcRenderer.invoke('license:checkStatus');
+      const isValid = await ipcRenderer.invoke("license:checkStatus");
       await fetchLicenseStatus();
       return isValid;
     } catch (error) {
-      console.error('Fehler bei der Lizenzprüfung:', error);
+      console.error("Fehler bei der Lizenzprüfung:", error);
+      return false;
+    }
+  }, [fetchLicenseStatus]);
+
+  // Subscription kündigen
+  const cancelSubscription = useCallback(async () => {
+    try {
+      const result = await ipcRenderer.invoke("license:cancelSubscription");
+      await fetchLicenseStatus();
+      return result;
+    } catch (error) {
+      console.error("Fehler beim Kündigen der Subscription:", error);
+      return false;
+    }
+  }, [fetchLicenseStatus]);
+
+  // Account löschen
+  const deleteAccount = useCallback(async () => {
+    try {
+      const result = await ipcRenderer.invoke("license:deleteAccount");
+      await fetchLicenseStatus();
+      return result;
+    } catch (error) {
+      console.error("Fehler beim Löschen des Accounts:", error);
       return false;
     }
   }, [fetchLicenseStatus]);
@@ -109,6 +154,8 @@ export function useLicense() {
     openStripeCheckout,
     activateLicenseFromSession,
     checkLicenseStatus,
-    refreshStatus: fetchLicenseStatus
+    refreshStatus: fetchLicenseStatus,
+    cancelSubscription,
+    deleteAccount,
   };
 }

@@ -32,6 +32,7 @@ import { autoUpdater } from "electron-updater";
 import * as electronLog from "electron-log";
 import { initAnalytics, trackEvent, shutdownAnalytics } from "./main/analytics";
 import { initializeLicenseSystem } from "./main/licenseIntegration";
+import { getLicenseManager } from "./main/licensing";
 import AutoLaunch from "auto-launch";
 
 // Keep a global reference of objects to prevent garbage collection
@@ -1514,8 +1515,15 @@ function setupIpcHandlers() {
   // Device ID Handler
   ipcMain.handle("get-device-id", async () => {
     try {
-      const { machineId } = require("node-machine-id");
-      return await machineId();
+      // Verwende dieselbe Logik wie im LicenseManager
+      const licenseManager = getLicenseManager();
+      if (licenseManager) {
+        return licenseManager.getDeviceId();
+      } else {
+        // Fallback wenn LicenseManager noch nicht initialisiert ist
+        const { machineId } = require("node-machine-id");
+        return await machineId();
+      }
     } catch (error) {
       console.error("Fehler beim Abrufen der Device-ID:", error);
       return "Unknown";
@@ -1848,6 +1856,27 @@ function setupIpcHandlers() {
   ipcMain.handle("track-app-startup-complete", async (_, eventData) => {
     trackEvent("app_startup_complete", eventData);
     return true;
+  });
+
+  // Allgemeiner Analytics Handler für alle Events
+  ipcMain.handle(
+    "track-event",
+    async (_, eventName: string, eventData: Record<string, any>) => {
+      trackEvent(eventName, eventData);
+      return true;
+    }
+  );
+
+  // Handler für das Abrufen von Usage-Statistiken
+  ipcMain.handle("analytics:getUsageStats", async () => {
+    const { fetchUsageStats } = require("./main/analytics");
+    try {
+      const stats = await fetchUsageStats();
+      return stats;
+    } catch (error) {
+      console.error("[IPC] Fehler beim Abrufen der Usage-Statistiken:", error);
+      return null;
+    }
   });
 }
 

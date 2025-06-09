@@ -70,7 +70,36 @@ serve(async (req) => {
       }
     );
 
-    // **NEU: Prüfung ob bereits eine aktive Lizenz für diese Device-ID existiert**
+    // Stripe-Konfiguration basierend auf der Umgebung FRÜH initialisieren
+    const stripeSecretKey =
+      environment === "prod"
+        ? Deno.env.get("PROD_STRIPE_SECRET_KEY")
+        : Deno.env.get("TEST_STRIPE_SECRET_KEY");
+
+    const priceId =
+      environment === "prod"
+        ? Deno.env.get("PROD_STRIPE_PRICE_ID")
+        : Deno.env.get("TEST_STRIPE_PRICE_ID");
+
+    if (!stripeSecretKey || !priceId) {
+      return new Response(
+        JSON.stringify({
+          error: "Stripe-Konfiguration fehlt",
+          userMessage:
+            "Der Zahlungsservice ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.",
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        }
+      );
+    }
+
+    // **NEU: Prüfung der Lizenz-Situation für diese Device-ID**
+    console.log(
+      `🔍 Suche nach Device-Aktivierungen für Device-ID: ${deviceId}`
+    );
+
     const { data: existingActivations, error: activationError } =
       await supabaseClient
         .from("device_activations")
@@ -82,13 +111,19 @@ serve(async (req) => {
         licenses!inner(
           id,
           is_active,
-          email
+          email,
+          subscription_end_date,
+          cancelled_at,
+          cancels_at_period_end,
+          stripe_subscription_id
         )
       `
         )
         .eq("device_id", deviceId)
-        .eq("is_active", true)
-        .eq("licenses.is_active", true);
+        .eq("is_active", true);
+
+    console.log("🔍 Gefundene Aktivierungen:", existingActivations);
+    console.log("🔍 Aktivierungsfehler:", activationError);
 
     const existingActivation = existingActivations?.[0] || null;
 
@@ -111,51 +146,167 @@ serve(async (req) => {
     }
 
     if (existingActivation) {
-      // Bereits eine aktive Lizenz für dieses Gerät gefunden
-      const existingEmail = existingActivation.licenses.email;
+      const license = existingActivation.licenses;
+      const now = new Date();
+      const subscriptionEndDate = license.subscription_end_date
+        ? new Date(license.subscription_end_date)
+        : null;
 
-      return new Response(
-        JSON.stringify({
-          error: "DEVICE_ALREADY_LICENSED",
-          userMessage: `Für dieses Gerät ist bereits eine aktive Lizenz registriert${
-            existingEmail ? ` (${existingEmail})` : ""
-          }. Jedes Gerät kann nur eine Lizenz haben. Falls Sie Probleme mit Ihrer bestehenden Lizenz haben, kontaktieren Sie bitte unseren Support.`,
-          existingLicenseEmail: existingEmail,
-          suggestions: [
-            "Prüfen Sie, ob Sie bereits eine Lizenz gekauft haben",
-            "Kontaktieren Sie unseren Support für Lizenz-Transfer",
-            "Verwenden Sie ein anderes Gerät für eine neue Lizenz",
-          ],
-        }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 409,
+      // Prüfe, ob die Lizenz noch aktiv und nicht gecancelt ist
+      const isActiveLicense =
+        license.is_active &&
+        subscriptionEndDate &&
+        subscriptionEndDate > now &&
+        !license.cancelled_at;
+
+      if (isActiveLicense) {
+        // Aktive, nicht-gecancelte Lizenz gefunden - Checkout verhindern
+        return new Response(
+          JSON.stringify({
+            error: "DEVICE_ALREADY_LICENSED",
+            userMessage: `Für dieses Gerät ist bereits eine aktive Lizenz registriert${
+              license.email ? ` (${license.email})` : ""
+            }. Jedes Gerät kann nur eine Lizenz haben. Falls Sie Probleme mit Ihrer bestehenden Lizenz haben, kontaktieren Sie bitte unseren Support.`,
+            existingLicenseEmail: license.email,
+            suggestions: [
+              "Prüfen Sie, ob Sie bereits eine Lizenz gekauft haben",
+              "Kontaktieren Sie unseren Support für Lizenz-Transfer",
+              "Verwenden Sie ein anderes Gerät für eine neue Lizenz",
+            ],
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          }
+        );
+      }
+
+      // Prüfe, ob es sich um eine zur Kündigung geplante aber noch aktive Subscription handelt
+      const isReactivatableSubscription =
+        license.stripe_subscription_id &&
+        license.cancels_at_period_end &&
+        subscriptionEndDate &&
+        subscriptionEndDate > now;
+
+      console.log("🔍 Reactivation Check:", {
+        stripe_subscription_id: license.stripe_subscription_id,
+        cancels_at_period_end: license.cancels_at_period_end,
+        subscription_end_date: subscriptionEndDate,
+        now: now.toISOString(),
+        isEndDateValid: subscriptionEndDate && subscriptionEndDate > now,
+        isReactivatableSubscription,
+      });
+
+      if (isReactivatableSubscription) {
+        console.log(
+          `Zur Kündigung geplante aber noch aktive Subscription gefunden - versuche Reaktivierung durch Rücknahme von cancel_at_period_end`
+        );
+        console.log(`Ursprüngliche E-Mail: ${license.email}`);
+
+        // Versuche Subscription zu reaktivieren anstatt neue zu erstellen
+        try {
+          const stripe = new Stripe(stripeSecretKey, {
+            apiVersion: "2023-10-16",
+          });
+
+          // Hole die aktuelle Subscription von Stripe
+          const currentSubscription = await stripe.subscriptions.retrieve(
+            license.stripe_subscription_id
+          );
+
+          let reactivatedSubscription;
+
+          if (
+            currentSubscription.status === "active" &&
+            currentSubscription.cancel_at_period_end
+          ) {
+            // Subscription ist für Ende der Periode geplant zu kündigen - das können wir rückgängig machen
+            // Laut Stripe Docs: "You can reactivate subscriptions scheduled for cancellation by updating cancel_at_period_end to false"
+            console.log(
+              "Reaktiviere Subscription durch Rücknahme von cancel_at_period_end"
+            );
+            reactivatedSubscription = await stripe.subscriptions.update(
+              license.stripe_subscription_id,
+              {
+                cancel_at_period_end: false,
+              }
+            );
+          } else {
+            // Subscription ist permanent gekündigt oder hat einen anderen Status
+            // Laut Stripe Docs: "canceled" ist ein "terminal state that can't be updated"
+            console.log(
+              `Subscription-Status: ${currentSubscription.status}, cancel_at_period_end: ${currentSubscription.cancel_at_period_end} - kann nicht reaktiviert werden`
+            );
+            console.log("Erstelle neue Subscription mit bestehendem Kunden");
+            throw new Error(
+              "Subscription cannot be reactivated - create new one"
+            );
+          }
+
+          console.log(
+            `Subscription erfolgreich reaktiviert: ${reactivatedSubscription.id}`
+          );
+
+          // Update Supabase Datenbank - Kündigung rückgängig machen
+          const { error: updateError } = await supabaseClient
+            .from("licenses")
+            .update({
+              cancelled_at: null,
+              cancels_at_period_end: false,
+              is_active: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", license.id);
+
+          if (updateError) {
+            console.error(
+              "Fehler beim Update der Lizenz in Supabase:",
+              updateError
+            );
+          }
+
+          // Reaktiviere auch die Device-Aktivierung
+          const { error: deviceUpdateError } = await supabaseClient
+            .from("device_activations")
+            .update({
+              is_active: true,
+              last_check_in: new Date().toISOString(),
+            })
+            .eq("device_id", deviceId)
+            .eq("license_id", license.id);
+
+          if (deviceUpdateError) {
+            console.error(
+              "Fehler beim Update der Device-Aktivierung:",
+              deviceUpdateError
+            );
+          }
+
+          // Erfolgreiche Reaktivierung - DIREKTE REAKTIVIERUNG ohne Checkout
+          return new Response(
+            JSON.stringify({
+              success: true,
+              reactivated: true,
+              message: "Subscription successfully reactivated! Welcome back!",
+              subscription_id: reactivatedSubscription.id,
+              subscription_end_date: license.subscription_end_date,
+              customer_email: license.email,
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 200,
+            }
+          );
+        } catch (stripeError) {
+          console.error("Fehler bei Subscription-Reaktivierung:", stripeError);
+          // Falls Reaktivierung fehlschlägt, erstelle neue Subscription (Fallback)
         }
-      );
-    }
+      }
 
-    // Stripe-Konfiguration basierend auf der Umgebung
-    const stripeSecretKey =
-      environment === "prod"
-        ? Deno.env.get("PROD_STRIPE_SECRET_KEY")
-        : Deno.env.get("TEST_STRIPE_SECRET_KEY");
-
-    const priceId =
-      environment === "prod"
-        ? Deno.env.get("PROD_STRIPE_PRICE_ID")
-        : Deno.env.get("TEST_STRIPE_PRICE_ID");
-
-    if (!stripeSecretKey || !priceId) {
-      return new Response(
-        JSON.stringify({
-          error: "Stripe-Konfiguration fehlt",
-          userMessage:
-            "Der Zahlungsservice ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.",
-        }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 500,
-        }
+      // Gefundene Lizenz ist permanent gecancelt oder Reaktivierung fehlgeschlagen
+      // Für wirklich gekündigte Subscriptions (nicht nur cancel_at_period_end) erstelle neue Subscription
+      console.log(
+        `Permanent gekündigte Lizenz für Device ${deviceId} gefunden - erstelle neue Subscription`
       );
     }
 
@@ -186,7 +337,7 @@ serve(async (req) => {
           quantity: 1,
         },
       ],
-      mode: "payment",
+      mode: "subscription",
       success_url: `${successUrl}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancelUrl,
       // Wichtig: Device-ID als client_reference_id übergeben
@@ -194,8 +345,8 @@ serve(async (req) => {
       client_reference_id: deviceId,
       metadata: {
         deviceName: deviceName || "Unbenanntes Gerät",
-        productType: "software_license",
-        licenseType: "single_device",
+        productType: "software_subscription",
+        licenseType: "annual_subscription",
       },
       // Zusätzliche Checkout-Konfiguration für bessere UX
       billing_address_collection: "auto",
@@ -219,33 +370,15 @@ serve(async (req) => {
       consent_collection: {
         terms_of_service: "required",
       },
-      invoice_creation: {
-        enabled: true,
-        invoice_data: {
-          description: "switchfast Pro Lizenz - Lebenslange Desktop-Software",
-          metadata: {
-            deviceId: deviceId,
-            deviceName: deviceName || "Unbenanntes Gerät",
-            licenseType: "lifetime",
-            platform: "desktop",
-          },
-          footer:
-            "Vielen Dank für Ihren Kauf von switchfast! Ihre Lizenz wurde automatisch aktiviert.",
-          custom_fields: [
-            {
-              name: "Geräte-ID",
-              value: deviceId,
-            },
-            {
-              name: "Gerätename",
-              value: deviceName || "Unbenanntes Gerät",
-            },
-          ],
-        },
-      },
       // Automatische Steuerberechnung aktivieren
       automatic_tax: {
         enabled: true,
+      },
+      // Customer-Update-Konfiguration für automatische Steuerberechnung und Tax ID Collection
+      customer_update: {
+        address: "auto",
+        shipping: "auto",
+        name: "auto",
       },
       // Steuerverhalten konfigurieren
       tax_id_collection: {
@@ -255,8 +388,47 @@ serve(async (req) => {
       payment_method_types: ["card", "link"],
     };
 
-    // E-Mail nur hinzufügen, wenn sie vorhanden und gültig ist
+    // **NEU: Prüfe, ob bereits ein Customer mit dieser E-Mail existiert**
+    let customerId = null;
+
     if (email && email.trim() && email.includes("@")) {
+      try {
+        // Suche nach existierendem Customer mit dieser E-Mail
+        const existingCustomers = await stripe.customers.list({
+          email: email,
+          limit: 1,
+        });
+
+        if (existingCustomers.data.length > 0) {
+          // Existierenden Customer wiederverwenden
+          customerId = existingCustomers.data[0].id;
+          console.log(
+            `Existierender Customer gefunden und wiederverwendet: ${customerId} für ${email}`
+          );
+        } else {
+          // Neuen Customer erstellen
+          const customer = await stripe.customers.create({
+            email: email,
+            metadata: {
+              deviceId: deviceId,
+              deviceName: deviceName || "Unbenanntes Gerät",
+              created_via: "switchfast_checkout",
+            },
+          });
+          customerId = customer.id;
+          console.log(`Neuer Customer erstellt: ${customerId} für ${email}`);
+        }
+      } catch (error) {
+        console.error("Fehler beim Customer-Management:", error);
+        // Fallback: Verwende customer_email anstatt customer
+        sessionConfig.customer_email = email;
+      }
+    }
+
+    // Customer oder customer_email setzen
+    if (customerId) {
+      sessionConfig.customer = customerId;
+    } else if (email && email.trim() && email.includes("@")) {
       sessionConfig.customer_email = email;
     }
 

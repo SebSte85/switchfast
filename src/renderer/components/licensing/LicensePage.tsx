@@ -1,11 +1,35 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useLicense } from "../../hooks/useLicense";
+
+interface UsageStats {
+  themeCreated: number;
+  shortcutUsed: number;
+  totalEvents: number;
+}
 
 const LicensePage: React.FC = () => {
   const { openStripeCheckout, isLoading } = useLicense();
   const [email, setEmail] = useState("");
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   const { ipcRenderer } = window.require("electron");
+
+  // Fetch usage statistics from PostHog
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const stats = await ipcRenderer.invoke("analytics:getUsageStats");
+        setUsageStats(stats);
+      } catch (error) {
+        console.error("Error fetching usage stats:", error);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
 
   const handlePurchaseClick = async () => {
     await openStripeCheckout(email);
@@ -13,6 +37,12 @@ const LicensePage: React.FC = () => {
 
   const handleCloseApp = () => {
     ipcRenderer.invoke("app:quit");
+  };
+
+  const handleWebsiteClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const { shell } = window.require("electron");
+    shell.openExternal("https://www.switchfast.io");
   };
 
   if (isLoading) {
@@ -24,50 +54,115 @@ const LicensePage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#414159] flex items-center justify-center p-6">
-      <div className="max-w-md w-full bg-[#2D2D3F] rounded-lg shadow-xl p-8 border border-gray-700">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg
-              className="w-8 h-8 text-accent"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
+    <div className="min-h-screen bg-[#2D2D3F] flex items-center justify-center p-4">
+      <div className="max-w-lg w-full bg-[#2D2D3F] rounded-lg shadow-xl p-6 border border-gray-700">
+        {/* Header with Logo */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center justify-center">
+            <div className="w-12 h-12 flex items-center justify-center mr-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                className="w-10 h-10"
+              >
+                <rect
+                  width="20"
+                  height="12"
+                  x="2"
+                  y="6"
+                  fill="#78d97c"
+                  rx="6"
+                  ry="6"
+                ></rect>
+                <path
+                  fill="#2d2d3f"
+                  d="M15.58,14.33c-.2,0-.39-.08-.53-.22l-1.58-1.58c-.29-.29-.29-.77,0-1.06s.77-.29,1.06,0l.98,.98,1.9-2.5c.25-.33,.72-.4,1.05-.14,.33,.25,.39,.72,.14,1.05l-2.42,3.18c-.13,.17-.33,.28-.55,.29-.02,0-.03,0-.05,0Z"
+                ></path>
+                <circle cx="8" cy="12" r="3" fill="#2d2d3f"></circle>
+              </svg>
+            </div>
+            <h1 className="text-xl font-bold text-[#78d97c]">switchfast</h1>
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">switchfast</h1>
-          <p className="text-gray-400">Trial Period Expired</p>
-        </div>
-
-        {/* Content */}
-        <div className="text-center mb-8">
-          <p className="text-gray-300 leading-relaxed mb-6">
-            Your free trial has ended. To continue using switchfast, please
-            purchase a license.
-          </p>
-          <p className="text-sm text-gray-400 mb-4">
-            Thank you for trying switchfast! We hope you enjoyed the experience.
+          <p className="text-gray-400 text-xl font-bold">
+            Trial Period Expired
           </p>
         </div>
 
-        {/* Purchase Button */}
-        <button
-          onClick={handlePurchaseClick}
-          className="w-full bg-accent hover:bg-accent-dark text-white font-semibold py-3 px-6 rounded-lg transition-colors shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
-        >
-          Purchase License
-        </button>
+        {/* Founder Section */}
+        <div className="flex items-center mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
+          <img
+            src={require("../../../assets/founder.jpg")}
+            alt="Sebastian, Creator of switchfast"
+            className="w-20 h-20 rounded-full object-cover mr-4 border-2 border-[#78d97c]"
+          />
+          <div className="flex-1">
+            <p className="text-gray-300 text-sm leading-relaxed">
+              Hi, I'm Sebastian, the creator of switchfast. Take a look below at
+              your usage statistics during your trial.
+            </p>
+            <p className="text-gray-300 text-sm leading-relaxed">
+              If you feel like switchfast is worth it for you, please consider
+              subscribing to a yearly license for only €5.
+            </p>
+          </div>
+        </div>
+
+        {/* Usage Statistics */}
+        {!statsLoading && usageStats && (
+          <div className="mb-6 p-4 bg-gray-800/30 rounded-lg border border-gray-600">
+            <h3 className="text-lg font-semibold text-[#78d97c] mb-3">
+              Your Trial Activity
+            </h3>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-300 text-sm">Themes created</span>
+                <span className="text-[#78d97c] font-semibold text-lg">
+                  {usageStats.themeCreated}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-300 text-sm">Shortcuts used</span>
+                <span className="text-[#78d97c] font-semibold text-lg">
+                  {usageStats.shortcutUsed}
+                </span>
+              </div>
+              <div className="border-t border-gray-600 pt-3 mt-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-300 font-medium">
+                    Total interactions
+                  </span>
+                  <span className="text-[#78d97c] font-bold text-xl">
+                    {usageStats.totalEvents}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <p className="text-gray-400 text-xs mt-3 text-center">
+              These stats show you've been actively using switchfast's key
+              features!
+            </p>
+          </div>
+        )}
+
+        {/* Purchase & Close Buttons */}
+        <div className="flex gap-3 mb-4">
+          <button
+            onClick={handlePurchaseClick}
+            className="flex-1 bg-[#78d97c] hover:bg-[#6bc870] text-white font-semibold py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-0 transform hover:scale-[1.02] transition-transform"
+            style={{ boxShadow: "0 4px 8px rgba(120, 217, 124, 0.3)" }}
+          >
+            Buy Subscription
+          </button>
+          <button
+            onClick={handleCloseApp}
+            className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-200 font-semibold py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-0 border border-gray-500"
+          >
+            Close
+          </button>
+        </div>
 
         {/* Restart Notice */}
-        <div className="mt-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+        <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
           <div className="flex items-start">
             <svg
               className="w-5 h-5 text-amber-400 mt-0.5 mr-3 flex-shrink-0"
@@ -94,14 +189,18 @@ const LicensePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="mt-8 pt-6 border-t border-gray-600">
-          <button
-            onClick={handleCloseApp}
-            className="w-full text-gray-400 hover:text-gray-300 text-sm py-2 transition-colors"
+        {/* Company Information */}
+        <div className="mt-3 pt-3 border-t border-gray-700">
+          <p className="text-xs text-gray-500 text-center leading-relaxed">
+            DigITup GmbH - Königsallee 27 - 40212 Düsseldorf - Germany
+          </p>
+          <a
+            href="https://www.switchfast.io"
+            onClick={handleWebsiteClick}
+            className="text-xs text-gray-500 text-center leading-relaxed block mt-1 cursor-pointer hover:text-gray-400 transition-colors"
           >
-            Close Application
-          </button>
+            www.switchfast.io
+          </a>
         </div>
       </div>
     </div>

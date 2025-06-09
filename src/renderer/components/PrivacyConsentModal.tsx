@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import "./PrivacyConsentModal.css";
 
+const { ipcRenderer } = window.require("electron");
+
 interface PrivacyConsentModalProps {
   onAccept: () => void;
   onDecline: () => void;
@@ -14,12 +16,33 @@ const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
 
   const handleAccept = async () => {
     setIsProcessing(true);
+
+    // Track consent_clicked event with accept action
+    try {
+      await ipcRenderer.invoke("track-event", "consent_clicked", {
+        action: "accept",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Fehler beim Tracking des Consent Events:", error);
+    }
+
     // Small delay for better UX
     await new Promise((resolve) => setTimeout(resolve, 300));
     onAccept();
   };
 
-  const handleDecline = () => {
+  const handleDecline = async () => {
+    // Track consent_clicked event with decline action
+    try {
+      await ipcRenderer.invoke("track-event", "consent_clicked", {
+        action: "decline",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Fehler beim Tracking des Consent Events:", error);
+    }
+
     onDecline();
   };
 

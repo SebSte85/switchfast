@@ -124,6 +124,7 @@ serve(async (req) => {
           trial_start_date: newTrialData.trial_start_date,
           trial_end_date: newTrialData.trial_end_date,
           remaining_days: 7,
+          privacy_consent_given: newTrialData.privacy_consent_given,
           message: "Trial gestartet",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -139,6 +140,7 @@ serve(async (req) => {
           trial_start_date: trialData.trial_start_date,
           trial_end_date: trialData.trial_end_date,
           remaining_days: 0,
+          privacy_consent_given: trialData.privacy_consent_given,
           message: "Trial wurde bereits verwendet",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -170,6 +172,7 @@ serve(async (req) => {
           trial_start_date: trialData.trial_start_date,
           trial_end_date: trialData.trial_end_date,
           remaining_days: 0,
+          privacy_consent_given: trialData.privacy_consent_given,
           message: "Trial ist abgelaufen",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -188,6 +191,7 @@ serve(async (req) => {
         trial_start_date: trialData.trial_start_date,
         trial_end_date: trialData.trial_end_date,
         remaining_days: remainingDays,
+        privacy_consent_given: trialData.privacy_consent_given,
         message: "Trial ist aktiv",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

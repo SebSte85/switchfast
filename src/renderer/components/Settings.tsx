@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ipcRenderer } from "electron";
+import { useLicense } from "../hooks/useLicense";
 
 interface SettingsProps {
   onClose: () => void;
@@ -11,6 +12,28 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [deviceId, setDeviceId] = useState<string>("");
   const [isClosing, setIsClosing] = useState(false);
+  const [isReactivating, setIsReactivating] = useState(false);
+  const {
+    subscriptionEndDate,
+    isSubscription,
+    cancelSubscription,
+    deleteAccount,
+    cancelledAt,
+    cancelsAtPeriodEnd,
+    checkLicenseStatus,
+    openStripeCheckout,
+  } = useLicense();
+
+  // Debug: Log subscription data whenever it changes
+  useEffect(() => {
+    console.log("🔍 [Settings DEBUG] Subscription Data:", {
+      subscriptionEndDate,
+      isSubscription,
+      cancelledAt,
+      cancelsAtPeriodEnd,
+    });
+  }, [subscriptionEndDate, isSubscription, cancelledAt, cancelsAtPeriodEnd]);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   // Load initial data
   useEffect(() => {
@@ -23,6 +46,14 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
         // Get device ID
         const id = await ipcRenderer.invoke("get-device-id");
         setDeviceId(id);
+
+        // Always refresh license status from database when Settings open
+        console.log("🔄 Settings: Refreshing license status from database...");
+        const licenseValid = await checkLicenseStatus();
+        console.log(
+          "✅ Settings: License status refreshed, valid:",
+          licenseValid
+        );
 
         // Enable autostart by default if not already configured
         if (!isEnabled) {
@@ -43,7 +74,62 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     };
 
     loadInitialData();
-  }, []);
+  }, [checkLicenseStatus]);
+
+  const handleCancelSubscription = async () => {
+    if (window.confirm("Do you really want to cancel your subscription?")) {
+      const result = await cancelSubscription();
+      if (result) {
+        setActionMessage(
+          "Subscription cancelled successfully. You will retain access until the end of your billing period."
+        );
+      } else {
+        setActionMessage("Failed to cancel subscription.");
+      }
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (
+      window.confirm(
+        "Do you really want to delete your account? This cannot be undone!"
+      )
+    ) {
+      const result = await deleteAccount();
+      setActionMessage(
+        result ? "Account deleted." : "Failed to delete account."
+      );
+    }
+  };
+
+  const handleReactivateSubscription = async () => {
+    setIsReactivating(true);
+    setActionMessage(null);
+
+    try {
+      const result = await ipcRenderer.invoke("license:reactivateSubscription");
+
+      if (result.success) {
+        setActionMessage(
+          "Subscription successfully reactivated! Welcome back! 🎉"
+        );
+        // Refresh license status to update UI
+        await checkLicenseStatus();
+      } else {
+        setActionMessage(
+          result.message ||
+            "Failed to reactivate subscription. Please try again."
+        );
+      }
+    } catch (error) {
+      console.error("Error reactivating subscription:", error);
+      setActionMessage(
+        "Network error. Please check your connection and try again."
+      );
+    } finally {
+      setIsReactivating(false);
+    }
+  };
 
   // Toggle autostart setting
   const handleAutoStartToggle = async () => {
@@ -215,8 +301,150 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
           <h3 className="settings-section-title">About</h3>
           <div className="settings-item">
             <div className="settings-item-info">
-              <div className="settings-item-label">Version</div>
-              <div className="settings-item-description">SwitchFast v0.1.1</div>
+              <div className="settings-item-label">Subscription</div>
+              <div className="settings-item-description">
+                {isSubscription && subscriptionEndDate ? (
+                  <>
+                    <div>
+                      Subscription valid until:{" "}
+                      {new Date(subscriptionEndDate).toLocaleDateString()}
+                    </div>
+                    {(cancelsAtPeriodEnd || cancelledAt) && (
+                      <div className="text-amber-400 text-sm mt-2">
+                        ⚠️ Subscription cancelled on{" "}
+                        {cancelledAt
+                          ? new Date(cancelledAt).toLocaleDateString()
+                          : "unknown date"}{" "}
+                        - Access until end of billing period
+                      </div>
+                    )}
+                  </>
+                ) : cancelledAt || cancelsAtPeriodEnd ? (
+                  <>
+                    <div className="text-red-400">Subscription cancelled</div>
+                    <div className="text-amber-400 text-sm mt-2">
+                      ⚠️ Cancelled on{" "}
+                      {cancelledAt
+                        ? new Date(cancelledAt).toLocaleDateString()
+                        : "unknown date"}
+                      {subscriptionEndDate && (
+                        <>
+                          {" "}
+                          - Was valid until{" "}
+                          {new Date(subscriptionEndDate).toLocaleDateString()}
+                        </>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  "No active subscription"
+                )}
+              </div>
+              <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
+                {isSubscription && !cancelsAtPeriodEnd && !cancelledAt && (
+                  <button
+                    className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                    onClick={handleCancelSubscription}
+                  >
+                    Cancel Subscription
+                  </button>
+                )}
+                {(cancelsAtPeriodEnd || cancelledAt) && (
+                  <button
+                    className={`px-3 py-2 bg-[#78d97c] text-white rounded hover:bg-[#6bc870] transition-colors text-sm font-medium flex items-center gap-2 ${
+                      isReactivating ? "opacity-75 cursor-not-allowed" : ""
+                    }`}
+                    onClick={handleReactivateSubscription}
+                    disabled={isReactivating}
+                  >
+                    {isReactivating ? (
+                      <>
+                        <svg
+                          className="animate-spin w-4 h-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
+                        </svg>
+                        Reactivating...
+                      </>
+                    ) : (
+                      "Renew Subscription"
+                    )}
+                  </button>
+                )}
+                <button
+                  className="px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 transition-colors"
+                  onClick={handleDeleteAccount}
+                >
+                  Delete Account
+                </button>
+              </div>
+              {actionMessage && (
+                <div
+                  className={`mt-4 p-3 border rounded-lg ${
+                    actionMessage.includes("successfully") ||
+                    actionMessage.includes("🎉")
+                      ? "bg-green-500/10 border-green-500/30"
+                      : "bg-amber-500/10 border-amber-500/30"
+                  }`}
+                >
+                  <div className="flex items-start">
+                    <svg
+                      className={`w-5 h-5 mt-0.5 mr-3 flex-shrink-0 ${
+                        actionMessage.includes("successfully") ||
+                        actionMessage.includes("🎉")
+                          ? "text-green-400"
+                          : "text-amber-400"
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <div>
+                      <p
+                        className={`text-sm font-medium ${
+                          actionMessage.includes("successfully") ||
+                          actionMessage.includes("🎉")
+                            ? "text-green-300"
+                            : "text-amber-300"
+                        }`}
+                      >
+                        Status Update
+                      </p>
+                      <p
+                        className={`text-xs mt-1 ${
+                          actionMessage.includes("successfully") ||
+                          actionMessage.includes("🎉")
+                            ? "text-green-200"
+                            : "text-amber-200"
+                        }`}
+                      >
+                        {actionMessage}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

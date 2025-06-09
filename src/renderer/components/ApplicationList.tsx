@@ -654,21 +654,6 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           <h2 className="groups-title font-extrabold">GROUPS</h2>
         )}
         <div className="groups-container">
-          {/* Neue Gruppe erstellen - Empty State anstatt + Button */}
-          {!showNewGroupInput && !showOnlyShortcuts && (
-            <div
-              className="group-item group-item-empty"
-              onClick={() => setShowNewGroupInput(true)}
-            >
-              <div className="group-item-content">
-                <div className="group-item-name">Neue Gruppe</div>
-                <div className="group-item-actions">
-                  <div className="group-empty-icon">+</div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Display a new group input at the beginning of the container */}
           {showNewGroupInput && !showOnlyShortcuts && (
             <NewGroupInput
@@ -832,6 +817,21 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                 </div>
               );
             })
+          )}
+
+          {/* Neue Gruppe erstellen - Empty State nach den vorhandenen Gruppen */}
+          {!showNewGroupInput && !showOnlyShortcuts && (
+            <div
+              className="group-item group-item-empty"
+              onClick={() => setShowNewGroupInput(true)}
+            >
+              <div className="group-item-content">
+                <div className="group-item-name">Neue Gruppe</div>
+                <div className="group-item-actions">
+                  <div className="group-empty-icon">+</div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </section>

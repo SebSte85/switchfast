@@ -28,26 +28,38 @@ const TrialManager: React.FC<{ children: React.ReactNode }> = ({
 
   const { activateLicenseFromSession } = useLicense();
 
-  // Beim Laden des Komponenten: Lizenzstatus und Privacy Consent prüfen
+  // Beim Laden des Komponenten: Privacy Consent und Lizenzstatus prüfen
   useEffect(() => {
     const checkLicenseStatus = async () => {
       try {
-        // Zuerst Lizenzstatus prüfen
-        const status = await ipcRenderer.invoke("license:getStatus");
-        setLicenseStatus(status);
-
-        // Wenn bereits lizenziert oder im Trial → kein Modal anzeigen
-        if (status.isLicensed || status.isInTrial) {
-          return;
-        }
-
-        // Privacy Consent prüfen
+        // ZUERST Privacy Consent prüfen - ohne Consent darf die App nicht verwendet werden
+        console.log("🔍 [TRIAL MANAGER] Prüfe Privacy Consent...");
         const consentGiven = await ipcRenderer.invoke(
           "privacy:getConsentStatus"
         );
+        console.log(
+          "🔍 [TRIAL MANAGER] Privacy Consent Ergebnis:",
+          consentGiven
+        );
 
         if (!consentGiven) {
+          console.log(
+            "❌ [TRIAL MANAGER] Kein Consent gefunden - zeige Privacy Screen"
+          );
           setShowPrivacyConsent(true);
+          return;
+        } else {
+          console.log(
+            "✅ [TRIAL MANAGER] Consent vorhanden - überspringe Privacy Screen"
+          );
+        }
+
+        // NUR wenn Consent vorliegt, prüfen wir den Lizenzstatus
+        const status = await ipcRenderer.invoke("license:getStatus");
+        setLicenseStatus(status);
+
+        // Wenn bereits lizenziert oder im Trial → App kann genutzt werden
+        if (status.isLicensed || status.isInTrial) {
           return;
         }
 

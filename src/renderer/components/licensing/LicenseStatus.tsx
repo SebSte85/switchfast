@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from "react";
 
 interface LicenseStatusProps {
   isLicensed: boolean;
@@ -13,12 +13,12 @@ const LicenseStatus: React.FC<LicenseStatusProps> = ({
   isInTrial,
   remainingTrialDays,
   onPurchaseClick,
-  onActivateClick
+  onActivateClick,
 }) => {
   return (
     <div className="p-4 bg-gray-800 rounded-lg shadow text-gray-200 border border-gray-700">
       <h2 className="text-lg font-semibold mb-4 text-accent">Lizenzstatus</h2>
-      
+
       {isLicensed ? (
         <div className="flex items-center mb-4">
           <div className="w-3 h-3 bg-accent rounded-full mr-2"></div>
@@ -31,13 +31,16 @@ const LicenseStatus: React.FC<LicenseStatusProps> = ({
             <span>Trial-Version</span>
           </div>
           <div className="mb-4 text-sm">
-            <span className="font-medium">{remainingTrialDays}</span> Tage verbleibend
+            <span className="font-medium">{remainingTrialDays}</span> Tage
+            verbleibend
           </div>
           <div className="mb-4">
             <div className="w-full bg-gray-600 rounded-full h-2">
-              <div 
-                className="bg-accent h-2 rounded-full" 
-                style={{ width: `${Math.min(100, (remainingTrialDays / 7) * 100)}%` }}
+              <div
+                className="bg-accent h-2 rounded-full"
+                style={{
+                  width: `${Math.min(100, (remainingTrialDays / 7) * 100)}%`,
+                }}
               ></div>
             </div>
           </div>
@@ -48,14 +51,14 @@ const LicenseStatus: React.FC<LicenseStatusProps> = ({
           <span>Nicht lizenziert</span>
         </div>
       )}
-      
+
       {!isLicensed && (
         <div className="flex flex-col space-y-2">
           <button
             onClick={onPurchaseClick}
             className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-dark transition-colors"
           >
-            Lizenz kaufen
+            Buy Annual Subscription
           </button>
           <button
             onClick={onActivateClick}
