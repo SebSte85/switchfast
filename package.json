@@ -14,7 +14,7 @@
     "watch:react": "webpack --config webpack.config.js --watch",
     "package": "npx electron-builder build --win",
     "build:prod": "cross-env ACTIVE_ENVIRONMENT=prod npm run build:full",
-    "package:prod": "cross-env ACTIVE_ENVIRONMENT=prod npm run package",
+    "package:prod": "npx electron-builder build --win -c.extraMetadata.environment=prod -c.extraMetadata.prodStripeSecretKey=$PROD_STRIPE_SECRET_KEY -c.extraMetadata.prodStripePriceId=$PROD_STRIPE_PRICE_ID",
     "release": "npm run build:prod && npm run package:prod",
     "test": "jest"
   },

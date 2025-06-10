@@ -2277,7 +2277,7 @@ if (!gotTheLock) {
 }
 
 /**
- * Verarbeitet Deep-Links wie switchfast://payment-success?session_id=cs_test_xxx&env=test
+ * Verarbeitet Deep-Links wie switchfast://success?session_id=cs_test_xxx&env=test
  */
 function handleDeepLink(url: string | undefined) {
   if (!url) return;
@@ -2291,7 +2291,7 @@ function handleDeepLink(url: string | undefined) {
       console.log(`[Deep-Link] Verarbeite URL: ${url}`);
 
       // Payment Success Handler
-      if (urlObj.pathname === "//payment-success") {
+      if (urlObj.pathname === "//success") {
         const sessionId = urlObj.searchParams.get("session_id");
         const environment = urlObj.searchParams.get("env") || "test";
 

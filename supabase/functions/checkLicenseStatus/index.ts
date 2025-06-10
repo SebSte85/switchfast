@@ -104,7 +104,6 @@ serve(async (req) => {
           .select("id, license_id")
           .eq("device_id", deviceId)
           .eq("is_active", false)
-          .order("created_at", { ascending: false })
           .limit(1);
 
       console.log(

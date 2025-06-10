@@ -37,20 +37,29 @@ serve(async (req) => {
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
-    console.log(`Verwende Umgebung: ${environment}`);
+    console.log(`🟢 Verwende Umgebung: ${environment}`);
 
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Verwende Schema: ${schema}`);
 
     const { deviceId, deviceName, email } = await req.json();
+    console.log(`🟢 Request Data:`, {
+      deviceId: deviceId || "MISSING",
+      deviceName: deviceName || "NOT_PROVIDED",
+      email: email || "NOT_PROVIDED",
+      hasDeviceId: !!deviceId,
+      hasEmail: !!email,
+    });
 
     // Validierung der Eingaben
     if (!deviceId) {
+      console.log(`🔴 FEHLER: Device ID fehlt`);
       return new Response(
         JSON.stringify({
-          error: "Geräte-ID ist erforderlich",
+          error: "Device ID is required",
           userMessage:
-            "Ein technischer Fehler ist aufgetreten. Bitte starten Sie die Anwendung neu und versuchen Sie es erneut.",
+            "A technical error occurred. Please restart the application and try again.",
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -60,9 +69,19 @@ serve(async (req) => {
     }
 
     // Supabase-Client für Validierung initialisieren
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    console.log(`🟢 Supabase Config:`, {
+      hasUrl: !!supabaseUrl,
+      urlLength: supabaseUrl?.length || 0,
+      hasServiceKey: !!supabaseServiceKey,
+      serviceKeyLength: supabaseServiceKey?.length || 0,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       {
         db: {
           schema: schema,
@@ -81,12 +100,26 @@ serve(async (req) => {
         ? Deno.env.get("PROD_STRIPE_PRICE_ID")
         : Deno.env.get("TEST_STRIPE_PRICE_ID");
 
+    console.log(`🟢 Stripe Config für ${environment}:`, {
+      hasSecretKey: !!stripeSecretKey,
+      secretKeyLength: stripeSecretKey?.length || 0,
+      secretKeyPrefix: stripeSecretKey?.substring(0, 10) || "MISSING",
+      hasPriceId: !!priceId,
+      priceId: priceId || "MISSING",
+      priceIdPrefix: priceId?.substring(0, 10) || "MISSING",
+    });
+
     if (!stripeSecretKey || !priceId) {
+      console.log(`🔴 FEHLER: Stripe Konfiguration fehlt`, {
+        environment,
+        hasSecretKey: !!stripeSecretKey,
+        hasPriceId: !!priceId,
+      });
       return new Response(
         JSON.stringify({
-          error: "Stripe-Konfiguration fehlt",
+          error: "Stripe configuration missing",
           userMessage:
-            "Der Zahlungsservice ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.",
+            "The payment service is currently unavailable. Please try again later.",
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -134,9 +167,8 @@ serve(async (req) => {
       );
       return new Response(
         JSON.stringify({
-          error: "Validierungsfehler",
-          userMessage:
-            "Ein technischer Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.",
+          error: "Validation error",
+          userMessage: "A technical error occurred. Please try again later.",
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -164,14 +196,14 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({
             error: "DEVICE_ALREADY_LICENSED",
-            userMessage: `Für dieses Gerät ist bereits eine aktive Lizenz registriert${
+            userMessage: `This device already has an active license registered${
               license.email ? ` (${license.email})` : ""
-            }. Jedes Gerät kann nur eine Lizenz haben. Falls Sie Probleme mit Ihrer bestehenden Lizenz haben, kontaktieren Sie bitte unseren Support.`,
+            }. Each device can only have one license. If you have issues with your existing license, please contact our support.`,
             existingLicenseEmail: license.email,
             suggestions: [
-              "Prüfen Sie, ob Sie bereits eine Lizenz gekauft haben",
-              "Kontaktieren Sie unseren Support für Lizenz-Transfer",
-              "Verwenden Sie ein anderes Gerät für eine neue Lizenz",
+              "Check if you already purchased a license",
+              "Contact our support for license transfer",
+              "Use a different device for a new license",
             ],
           }),
           {
@@ -311,15 +343,23 @@ serve(async (req) => {
     }
 
     // Stripe-Client initialisieren
+    console.log(`🟢 Initialisiere Stripe Client...`);
     const stripe = new Stripe(stripeSecretKey, {
       apiVersion: "2023-10-16",
     });
+    console.log(`🟢 Stripe Client erfolgreich initialisiert`);
 
     // URLs für Erfolg und Abbruch
     const baseSuccessUrl =
-      Deno.env.get("STRIPE_SUCCESS_URL") || "switchfast://payment-success";
+      Deno.env.get("STRIPE_SUCCESS_URL") || "https://www.switchfast.io/success";
     const baseCancelUrl =
-      Deno.env.get("STRIPE_CANCEL_URL") || "switchfast://payment-cancel";
+      Deno.env.get("STRIPE_CANCEL_URL") || "https://www.switchfast.io/cancel";
+
+    console.log(`🟢 URL Config:`, {
+      baseSuccessUrl,
+      baseCancelUrl,
+      environment,
+    });
 
     // Füge Umgebungsparameter zu den URLs hinzu
     const successUrl = `${baseSuccessUrl}${
@@ -328,6 +368,11 @@ serve(async (req) => {
     const cancelUrl = `${baseCancelUrl}${
       baseCancelUrl.includes("?") ? "&" : "?"
     }env=${environment}`;
+
+    console.log(`🟢 Final URLs:`, {
+      successUrl,
+      cancelUrl,
+    });
 
     // Checkout-Session erstellen
     const sessionConfig: any = {
@@ -344,7 +389,7 @@ serve(async (req) => {
       // Dies wird vom Webhook verwendet, um die Lizenz zu aktivieren
       client_reference_id: deviceId,
       metadata: {
-        deviceName: deviceName || "Unbenanntes Gerät",
+        deviceName: deviceName || "Unnamed Device",
         productType: "software_subscription",
         licenseType: "annual_subscription",
       },
@@ -358,13 +403,14 @@ serve(async (req) => {
       },
       custom_text: {
         submit: {
-          message: "Ihre Lizenz wird automatisch nach der Zahlung aktiviert.",
+          message:
+            "Your license will be automatically activated after payment.",
         },
         shipping_address: {
-          message: "Rechnungsadresse für Ihre Lizenz-Dokumentation",
+          message: "Billing address for your license documentation",
         },
         terms_of_service_acceptance: {
-          message: "Mit dem Kauf stimmen Sie unseren Geschäftsbedingungen zu.",
+          message: "By purchasing, you agree to our Terms of Service.",
         },
       },
       consent_collection: {
@@ -388,40 +434,64 @@ serve(async (req) => {
     let customerId = null;
 
     if (email && email.trim() && email.includes("@")) {
+      console.log(`🟢 Prüfe Customer für Email: ${email}`);
       try {
         // Suche nach existierendem Customer mit dieser E-Mail
+        console.log(`🟢 Suche existierende Customers...`);
         const existingCustomers = await stripe.customers.list({
           email: email,
           limit: 1,
+        });
+        console.log(`🟢 Customer-Suche Resultat:`, {
+          count: existingCustomers.data.length,
+          hasResults: existingCustomers.data.length > 0,
         });
 
         if (existingCustomers.data.length > 0) {
           // Existierenden Customer wiederverwenden
           customerId = existingCustomers.data[0].id;
           console.log(
-            `Existierender Customer gefunden und wiederverwendet: ${customerId} für ${email}`
+            `🟢 Existierender Customer gefunden und wiederverwendet: ${customerId} für ${email}`
           );
         } else {
           // Neuen Customer erstellen
+          console.log(`🟢 Erstelle neuen Customer für ${email}...`);
           const customer = await stripe.customers.create({
             email: email,
             metadata: {
               deviceId: deviceId,
-              deviceName: deviceName || "Unbenanntes Gerät",
+              deviceName: deviceName || "Unnamed Device",
               created_via: "switchfast_checkout",
             },
           });
           customerId = customer.id;
-          console.log(`Neuer Customer erstellt: ${customerId} für ${email}`);
+          console.log(`🟢 Neuer Customer erstellt: ${customerId} für ${email}`);
         }
       } catch (error) {
-        console.error("Fehler beim Customer-Management:", error);
+        console.error("🔴 Fehler beim Customer-Management:", error);
+        console.error("🔴 Error Details:", {
+          message: error.message,
+          stack: error.stack,
+          type: error.constructor?.name,
+        });
         // Fallback: Verwende customer_email anstatt customer
         sessionConfig.customer_email = email;
+        console.log(
+          `🟡 Fallback: Verwende customer_email statt customer für ${email}`
+        );
       }
+    } else {
+      console.log(`🟡 Keine gültige Email provided: "${email}"`);
     }
 
     // Customer oder customer_email setzen
+    console.log(`🟢 Setze Customer Config:`, {
+      hasCustomerId: !!customerId,
+      customerId: customerId || "NOT_SET",
+      hasEmail: !!(email && email.trim() && email.includes("@")),
+      email: email || "NOT_PROVIDED",
+    });
+
     if (customerId) {
       sessionConfig.customer = customerId;
       // customer_update nur setzen wenn wir einen customer haben
@@ -430,27 +500,83 @@ serve(async (req) => {
         shipping: "auto",
         name: "auto",
       };
+      console.log(`🟢 Verwende existierenden/neuen Customer: ${customerId}`);
     } else if (email && email.trim() && email.includes("@")) {
       sessionConfig.customer_email = email;
+      console.log(`🟢 Verwende customer_email: ${email}`);
     }
 
-    const session = await stripe.checkout.sessions.create(sessionConfig);
+    console.log(`🟢 Finale Session Config:`, {
+      mode: sessionConfig.mode,
+      hasLineItems: !!sessionConfig.line_items,
+      lineItemsCount: sessionConfig.line_items?.length || 0,
+      priceId: sessionConfig.line_items?.[0]?.price || "NOT_SET",
+      hasSuccessUrl: !!sessionConfig.success_url,
+      hasCancelUrl: !!sessionConfig.cancel_url,
+      hasCustomer: !!sessionConfig.customer,
+      hasCustomerEmail: !!sessionConfig.customer_email,
+      clientReferenceId: sessionConfig.client_reference_id,
+      automaticTax: sessionConfig.automatic_tax,
+      taxIdCollection: sessionConfig.tax_id_collection,
+    });
 
-    // Erfolgreiche Antwort mit der Checkout-URL
-    return new Response(
-      JSON.stringify({
-        success: true,
+    console.log(`🟢 Erstelle Stripe Checkout Session...`);
+    try {
+      const session = await stripe.checkout.sessions.create(sessionConfig);
+      console.log(`🟢 Stripe Session erfolgreich erstellt:`, {
+        sessionId: session.id,
         url: session.url,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+        hasUrl: !!session.url,
+        urlLength: session.url?.length || 0,
+      });
+
+      // Erfolgreiche Antwort mit der Checkout-URL
+      return new Response(
+        JSON.stringify({
+          success: true,
+          url: session.url,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } catch (stripeSessionError) {
+      console.error(
+        "🔴 CRITICAL: Fehler beim Erstellen der Stripe Session:",
+        stripeSessionError
+      );
+      console.error("🔴 Stripe Session Error Details:", {
+        message: stripeSessionError.message,
+        type: stripeSessionError.type,
+        code: stripeSessionError.code,
+        param: stripeSessionError.param,
+        stack: stripeSessionError.stack,
+        requestId: stripeSessionError.requestId,
+      });
+
+      // Return detailed error for debugging
+      return new Response(
+        JSON.stringify({
+          error: "Stripe session creation failed",
+          userMessage:
+            "Unable to create payment session. Please try again later.",
+          debugInfo: {
+            stripeErrorType: stripeSessionError.type,
+            stripeErrorCode: stripeSessionError.code,
+            stripeErrorMessage: stripeSessionError.message,
+            environment: environment,
+          },
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        }
+      );
+    }
   } catch (error) {
     console.error("Unerwarteter Fehler:", error);
     return new Response(
       JSON.stringify({
-        error: "Ein unerwarteter Fehler ist aufgetreten",
-        userMessage:
-          "Ein technischer Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.",
+        error: "An unexpected error occurred",
+        userMessage: "A technical error occurred. Please try again later.",
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

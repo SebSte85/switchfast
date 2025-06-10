@@ -40,7 +40,48 @@ const SUPABASE_API_URL =
 const SUPABASE_ANON_KEY =
   process.env.SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvcW52Z3Z0eWx1dmVrdGV2bGFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMTYwMzUsImV4cCI6MjA2NDU5MjAzNX0.q2A6m7bQuKPb-VZNIBoizUVXS1LsgacM6QOVIaqrN1Q";
-const ACTIVE_ENVIRONMENT = process.env.ACTIVE_ENVIRONMENT || "test"; // Standard-Umgebung: 'test' oder 'prod'
+
+// Environment Configuration - zur Build-Zeit aus package.json injiziert
+const ACTIVE_ENVIRONMENT = (() => {
+  try {
+    // In Electron können wir package.json auch aus dem ASAR-Archive lesen
+    const packageJson = require("../../../package.json");
+    const environment = packageJson.environment || "test";
+    console.log(
+      "[LicenseManager] Umgebung aus package.json extraMetadata:",
+      environment
+    );
+    console.log(
+      "[LicenseManager] package.json.environment raw value:",
+      packageJson.environment
+    );
+    console.log(
+      "[LicenseManager] package.json keys:",
+      Object.keys(packageJson)
+    );
+    if (packageJson.environment) {
+      console.log(
+        "[LicenseManager] ✅ environment found in package.json:",
+        packageJson.environment
+      );
+    } else {
+      console.log(
+        "[LicenseManager] ❌ environment NOT found in package.json, using fallback 'test'"
+      );
+    }
+    return environment;
+  } catch (error) {
+    console.log(
+      "[LicenseManager] Fallback auf 'test' - package.json.environment nicht gefunden"
+    );
+    console.log(
+      "[LicenseManager] Error:",
+      error instanceof Error ? error.message : String(error)
+    );
+    return "test";
+  }
+})();
+
 const LICENSE_CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 Stunden
 const OFFLINE_GRACE_PERIOD = 7 * 24 * 60 * 60 * 1000; // 7 Tage
 const APP_SALT =
@@ -69,6 +110,11 @@ export class LicenseManager {
     this.deviceInfo = this.getDeviceInfo();
 
     console.log(`[LicenseManager] Device ID: ${this.getDeviceId()}`);
+    console.log(`[LicenseManager] ACTIVE_ENVIRONMENT: ${ACTIVE_ENVIRONMENT}`);
+    console.log(`[LicenseManager] NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(
+      `[LicenseManager] process.env.ACTIVE_ENVIRONMENT: ${process.env.ACTIVE_ENVIRONMENT}`
+    );
 
     if (this.isDevelopmentMode) {
       console.log("[LicenseManager] Development mode: Clearing local data");
@@ -621,18 +667,54 @@ export class LicenseManager {
    */
   public async openStripeCheckout(email?: string): Promise<void> {
     try {
+      console.log(
+        "🚀 [License] openStripeCheckout aufgerufen mit email:",
+        email
+      );
+
       // Umgebungsvariablen ausgeben (nur für Debugging)
       console.log("[License] Umgebungsvariablen:");
       console.log(`- ACTIVE_ENVIRONMENT: ${ACTIVE_ENVIRONMENT}`);
 
       // Stripe API-Schlüssel und Preis-ID basierend auf der aktiven Umgebung auswählen
       const isProd = ACTIVE_ENVIRONMENT === "prod";
+      console.log(`[License] isProd: ${isProd}`);
 
-      // Direkt die Umgebungsvariablen auslesen
-      const prodKey = process.env.PROD_STRIPE_SECRET_KEY;
-      const testKey = process.env.TEST_STRIPE_SECRET_KEY;
-      const prodPriceId = process.env.PROD_STRIPE_PRICE_ID;
-      const testPriceId = process.env.TEST_STRIPE_PRICE_ID;
+      // Stripe-Keys aus package.json lesen (zur Build-Zeit injiziert)
+      let prodKey, prodPriceId, testKey, testPriceId;
+
+      try {
+        console.log("[License] Versuche package.json zu lesen...");
+        const packageJson = require("../../../package.json");
+        prodKey = packageJson.prodStripeSecretKey;
+        prodPriceId = packageJson.prodStripePriceId;
+
+        console.log("[License] Stripe-Keys aus package.json:");
+        console.log(
+          `- prodStripeSecretKey: ${prodKey ? "vorhanden" : "fehlt"}`
+        );
+        console.log(
+          `- prodStripePriceId: ${prodPriceId ? "vorhanden" : "fehlt"}`
+        );
+        console.log(`- environment field: ${packageJson.environment}`);
+      } catch (error) {
+        console.log("[License] Fehler beim Lesen der package.json:", error);
+      }
+
+      // Fallback auf Environment-Variablen (für Development)
+      if (!prodKey) {
+        console.log("[License] Fallback auf Environment-Variable für prodKey");
+        prodKey = process.env.PROD_STRIPE_SECRET_KEY;
+      }
+      if (!prodPriceId) {
+        console.log(
+          "[License] Fallback auf Environment-Variable für prodPriceId"
+        );
+        prodPriceId = process.env.PROD_STRIPE_PRICE_ID;
+      }
+
+      testKey = process.env.TEST_STRIPE_SECRET_KEY;
+      testPriceId = process.env.TEST_STRIPE_PRICE_ID;
 
       console.log(`[License] Verfügbare Schlüssel:`);
       console.log(`- PROD_KEY: ${prodKey ? "vorhanden" : "fehlt"}`);
@@ -643,15 +725,21 @@ export class LicenseManager {
       const stripeSecretKey = isProd ? prodKey : testKey;
       const stripePriceId = isProd ? prodPriceId : testPriceId;
 
+      console.log(`[License] Gewählte Keys für ${isProd ? "PROD" : "TEST"}:`);
+      console.log(
+        `- stripeSecretKey: ${stripeSecretKey ? "vorhanden" : "fehlt"}`
+      );
+      console.log(`- stripePriceId: ${stripePriceId ? "vorhanden" : "fehlt"}`);
+
       // Verwende HTTPS-URLs für Stripe
       // Basis-URLs für Erfolg und Abbruch
       const baseSuccessUrl = isProd
-        ? "https://switchfast.io/payment/success"
-        : "https://test.switchfast.io/payment/success";
+        ? "https://www.switchfast.io/success"
+        : "https://www.switchfast.io/success";
 
       const baseCancelUrl = isProd
-        ? "https://switchfast.io/payment/cancel"
-        : "https://test.switchfast.io/payment/cancel";
+        ? "https://www.switchfast.io/cancel"
+        : "https://www.switchfast.io/cancel";
 
       // Füge Parameter hinzu: session_id (von Stripe), deviceId und Umgebung
       const successUrl = `${baseSuccessUrl}?session_id={CHECKOUT_SESSION_ID}&device_id=${encodeURIComponent(
@@ -669,30 +757,50 @@ export class LicenseManager {
       );
 
       if (!stripeSecretKey) {
+        console.error(
+          "[License] ❌ Stripe API-Schlüssel ist nicht konfiguriert"
+        );
         throw new Error("Stripe API-Schlüssel ist nicht konfiguriert");
       }
 
       if (!stripePriceId) {
+        console.error("[License] ❌ Stripe Preis-ID ist nicht konfiguriert");
         throw new Error("Stripe Preis-ID ist nicht konfiguriert");
       }
 
+      console.log(
+        "[License] ✅ Alle Keys vorhanden, rufe createCheckoutSession auf..."
+      );
+
       // **NEU: Prüfung vor Checkout-Erstellung, ob bereits eine Lizenz existiert**
       try {
+        const payload = {
+          deviceId: this.deviceInfo.deviceId,
+          deviceName: this.deviceInfo.deviceName,
+          email: email,
+          priceId: stripePriceId, // Preis-ID hinzufügen
+        };
+
+        const headers = {
+          "x-environment": ACTIVE_ENVIRONMENT,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json",
+        };
+
+        console.log("[License] 📤 Sende Request an createCheckoutSession:");
+        console.log("- URL:", `${SUPABASE_API_URL}/createCheckoutSession`);
+        console.log("- Payload:", JSON.stringify(payload, null, 2));
+        console.log("- Headers:", JSON.stringify(headers, null, 2));
+
         const preCheckResponse = await axios.post(
           `${SUPABASE_API_URL}/createCheckoutSession`,
-          {
-            deviceId: this.deviceInfo.deviceId,
-            deviceName: this.deviceInfo.deviceName,
-            email: email,
-            priceId: stripePriceId, // Preis-ID hinzufügen
-          },
-          {
-            headers: {
-              "x-environment": ACTIVE_ENVIRONMENT,
-              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-              "Content-Type": "application/json",
-            },
-          }
+          payload,
+          { headers }
+        );
+
+        console.log(
+          "[License] 📥 Response von createCheckoutSession:",
+          preCheckResponse.data
         );
 
         // Prüfe, ob Subscription reaktiviert wurde
@@ -714,10 +822,14 @@ export class LicenseManager {
           return;
         }
 
-        if (preCheckResponse.data.success && preCheckResponse.data.sessionUrl) {
+        if (preCheckResponse.data.success && preCheckResponse.data.url) {
           // Checkout-URL im Browser öffnen
+          console.log(
+            "[License] ✅ Öffne Stripe Checkout URL:",
+            preCheckResponse.data.url
+          );
           const { shell } = require("electron");
-          await shell.openExternal(preCheckResponse.data.sessionUrl);
+          await shell.openExternal(preCheckResponse.data.url);
           return;
         }
       } catch (error: any) {
