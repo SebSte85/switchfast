@@ -36,15 +36,20 @@ serve(async (req) => {
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
-    console.log(`Verwende Umgebung: ${environment}`);
+    console.log(`🟢 Using environment: ${environment}`);
 
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
 
     const { deviceId } = await req.json();
+    console.log(`🟢 Request data:`, {
+      deviceId: deviceId || "MISSING",
+    });
 
     // Validierung der Eingaben
     if (!deviceId) {
+      console.log(`🔴 ERROR: Missing device ID`);
       return new Response(JSON.stringify({ error: "Fehlende Geräte-ID" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
@@ -52,9 +57,18 @@ serve(async (req) => {
     }
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       {
         db: {
           schema: schema,
@@ -63,6 +77,7 @@ serve(async (req) => {
     );
 
     // Trial-Status in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
+    console.log(`🔍 Searching for trial data: ${deviceId}`);
     const { data: trialData, error: trialError } = await supabaseClient
       .from("trial_blocks")
       .select("*")
@@ -70,7 +85,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (trialError) {
-      console.error("Trial-Fehler:", JSON.stringify(trialError));
+      console.log(`🔴 ERROR: Failed to get trial status`, { trialError });
       return new Response(
         JSON.stringify({
           error: "Fehler beim Abrufen des Trial-Status",
@@ -84,8 +99,15 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 Trial query result:`, {
+      foundTrial: !!trialData,
+      isTrialUsed: trialData?.is_trial_used,
+      privacyConsent: trialData?.privacy_consent_given,
+    });
+
     // Wenn kein Trial-Eintrag gefunden wurde, erstellen wir einen neuen
     if (!trialData) {
+      console.log(`🟢 Creating new trial for device: ${deviceId}`);
       const trialStartDate = new Date();
       const trialEndDate = new Date(trialStartDate);
       trialEndDate.setDate(trialEndDate.getDate() + 7); // 7 Tage Trial
@@ -103,7 +125,7 @@ serve(async (req) => {
         .maybeSingle();
 
       if (insertError) {
-        console.error("Insert-Fehler:", JSON.stringify(insertError));
+        console.log(`🔴 ERROR: Failed to create trial`, { insertError });
         return new Response(
           JSON.stringify({
             error: "Fehler beim Erstellen des Trial-Status",
@@ -116,6 +138,12 @@ serve(async (req) => {
           }
         );
       }
+
+      console.log(`🟢 New trial created successfully:`, {
+        trialStartDate: newTrialData.trial_start_date,
+        trialEndDate: newTrialData.trial_end_date,
+        remainingDays: 7,
+      });
 
       return new Response(
         JSON.stringify({
@@ -133,6 +161,7 @@ serve(async (req) => {
 
     // Prüfen, ob der Trial bereits verwendet wurde
     if (trialData.is_trial_used) {
+      console.log(`🟡 Trial already used for device: ${deviceId}`);
       return new Response(
         JSON.stringify({
           success: true,
@@ -151,18 +180,24 @@ serve(async (req) => {
     const now = new Date();
     const trialEndDate = new Date(trialData.trial_end_date);
 
+    console.log(`🔍 Checking trial expiration:`, {
+      now: now.toISOString(),
+      trialEndDate: trialEndDate.toISOString(),
+      isExpired: now > trialEndDate,
+    });
+
     if (now > trialEndDate) {
       // Trial ist abgelaufen, als verwendet markieren (Schema ist bereits im Client konfiguriert)
+      console.log(`🟡 Trial expired, marking as used for device: ${deviceId}`);
       const { error: updateError } = await supabaseClient
         .from("trial_blocks")
         .update({ is_trial_used: true })
         .eq("device_id", deviceId);
 
       if (updateError) {
-        console.error(
-          "Fehler beim Aktualisieren des Trial-Status:",
-          updateError
-        );
+        console.log(`🔴 ERROR: Failed to mark trial as used`, { updateError });
+      } else {
+        console.log(`🟢 Trial marked as used successfully`);
       }
 
       return new Response(
@@ -184,6 +219,14 @@ serve(async (req) => {
       (trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
     );
 
+    console.log(`🟢 Trial is active:`, {
+      remainingDays: remainingDays,
+      trialEndDate: trialEndDate.toISOString(),
+      privacyConsent: trialData.privacy_consent_given,
+    });
+
+    console.log(`🟢 Trial status check completed successfully`);
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -197,7 +240,10 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Unerwarteter Fehler:", error);
+    console.log(`🔴 ERROR: Unexpected error occurred`, {
+      error: error.message,
+      stack: error.stack,
+    });
     return new Response(
       JSON.stringify({ error: "Ein unerwarteter Fehler ist aufgetreten" }),
       {

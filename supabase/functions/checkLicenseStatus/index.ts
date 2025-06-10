@@ -36,15 +36,20 @@ serve(async (req) => {
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
-    console.log(`Verwende Umgebung: ${environment}`);
+    console.log(`🟢 Using environment: ${environment}`);
 
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
 
     const { deviceId } = await req.json();
+    console.log(`🟢 Request data:`, {
+      deviceId: deviceId || "MISSING",
+    });
 
     // Validierung der Eingaben
     if (!deviceId) {
+      console.log(`🔴 ERROR: Missing device ID`);
       return new Response(
         JSON.stringify({ error: "Fehlende erforderliche Felder" }),
         {
@@ -55,9 +60,18 @@ serve(async (req) => {
     }
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       {
         db: {
           schema: schema,
@@ -66,6 +80,7 @@ serve(async (req) => {
     );
 
     // Geräteaktivierung in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
+    console.log(`🔍 Searching for device activation: ${deviceId}`);
     const { data: deviceDataArray, error: deviceError } = await supabaseClient
       .from("device_activations")
       .select("id, license_id, is_active")
@@ -75,7 +90,7 @@ serve(async (req) => {
       deviceDataArray && deviceDataArray.length > 0 ? deviceDataArray[0] : null;
 
     if (deviceError) {
-      console.error("Device Error:", deviceError);
+      console.log(`🔴 ERROR: Failed to check device`, { deviceError });
       return new Response(
         JSON.stringify({
           success: false,
@@ -91,12 +106,19 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 Device query result:`, {
+      foundDevice: !!deviceData,
+      deviceId: deviceData?.id,
+      licenseId: deviceData?.license_id,
+      isActive: deviceData?.is_active,
+    });
+
     // Wenn keine Geräteaktivierung gefunden wurde, prüfe trotzdem auf gecancelte Subscriptions
     if (!deviceData) {
       // Prüfe, ob es eine Lizenz mit gecancelten Subscription-Daten für dieses Gerät gibt
       // (über device_activations mit is_active=false)
       console.log(
-        `🔍 [checkLicenseStatus] Suche nach inaktiven Devices für deviceId: ${deviceId}`
+        `🔍 Searching for inactive devices for deviceId: ${deviceId}`
       );
       const { data: inactiveDeviceData, error: inactiveDeviceError } =
         await supabaseClient
@@ -106,14 +128,16 @@ serve(async (req) => {
           .eq("is_active", false)
           .limit(1);
 
-      console.log(
-        `🔍 [checkLicenseStatus] Inaktive Device-Daten:`,
-        inactiveDeviceData
-      );
-      console.log(
-        `🔍 [checkLicenseStatus] Inaktive Device Error:`,
-        inactiveDeviceError
-      );
+      console.log(`🟡 Inactive device data:`, {
+        found: !!inactiveDeviceData?.length,
+        count: inactiveDeviceData?.length || 0,
+      });
+
+      if (inactiveDeviceError) {
+        console.log(`🔴 ERROR: Failed to check inactive devices`, {
+          inactiveDeviceError,
+        });
+      }
 
       const latestInactiveDevice =
         inactiveDeviceData && inactiveDeviceData.length > 0
@@ -121,6 +145,9 @@ serve(async (req) => {
           : null;
 
       if (latestInactiveDevice) {
+        console.log(
+          `🔍 Found inactive device, checking license: ${latestInactiveDevice.license_id}`
+        );
         // Lizenz-Daten für die inaktive Geräteaktivierung abrufen
         const { data: licenseData, error: licenseError } = await supabaseClient
           .from("licenses")
@@ -136,10 +163,11 @@ serve(async (req) => {
           licenseData &&
           (licenseData.cancelled_at || licenseData.cancels_at_period_end)
         ) {
-          console.log(
-            "Gecancelte Subscription für inaktives Gerät gefunden:",
-            licenseData.cancelled_at
-          );
+          console.log(`🟡 Found canceled subscription for inactive device:`, {
+            cancelledAt: licenseData.cancelled_at,
+            cancelsAtPeriodEnd: licenseData.cancels_at_period_end,
+            email: licenseData.email,
+          });
           return new Response(
             JSON.stringify({
               success: true,
@@ -163,6 +191,7 @@ serve(async (req) => {
         }
       }
 
+      console.log(`🔴 No device activation found for device: ${deviceId}`);
       return new Response(
         JSON.stringify({
           success: false,
@@ -178,6 +207,9 @@ serve(async (req) => {
     }
 
     // Lizenz in der Datenbank suchen mit Subscription-Daten (auch für deaktivierte Geräte)
+    console.log(
+      `🔍 Fetching license data for license ID: ${deviceData.license_id}`
+    );
     const { data: licenseData, error: licenseError } = await supabaseClient
       .from("licenses")
       .select(
@@ -187,6 +219,10 @@ serve(async (req) => {
       .single();
 
     if (licenseError || !licenseData) {
+      console.log(`🔴 ERROR: License not found`, {
+        licenseId: deviceData.license_id,
+        licenseError,
+      });
       return new Response(
         JSON.stringify({
           success: false,
@@ -201,13 +237,28 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 License data retrieved:`, {
+      licenseId: licenseData.id,
+      isActive: licenseData.is_active,
+      email: licenseData.email,
+      hasSubscription: !!licenseData.stripe_subscription_id,
+      cancelledAt: licenseData.cancelled_at,
+      cancelsAtPeriodEnd: licenseData.cancels_at_period_end,
+    });
+
     // Auch für inaktive Lizenzen die Subscription-Informationen zurückgeben
     // (z.B. für gekündigte Subscriptions mit cancelled_at)
     const is_license_active = licenseData.is_active;
     const is_device_active = deviceData.is_active;
 
+    console.log(`🟢 Status check:`, {
+      isLicenseActive: is_license_active,
+      isDeviceActive: is_device_active,
+    });
+
     // Aktualisiere den last_check_in-Zeitstempel nur für aktive Geräte
     if (deviceData && is_device_active) {
+      console.log(`🟢 Updating last check-in for active device`);
       const { error: updateError } = await supabaseClient
         .from("device_activations")
         .update({
@@ -216,14 +267,16 @@ serve(async (req) => {
         .eq("id", deviceData.id);
 
       if (updateError) {
-        console.error(
-          "Fehler beim Aktualisieren des last_check_in-Zeitstempels:",
-          updateError
-        );
+        console.log(`🔴 ERROR: Failed to update last check-in`, {
+          updateError,
+        });
+      } else {
+        console.log(`🟢 Last check-in updated successfully`);
       }
     }
 
     // Anzahl der aktiven Geräte für diese Lizenz abrufen
+    console.log(`🔍 Counting active devices for license: ${licenseData.id}`);
     const { data: activeDevices, error: countError } = await supabaseClient
       .from("device_activations")
       .select("id")
@@ -231,8 +284,10 @@ serve(async (req) => {
       .eq("is_active", true);
 
     if (countError) {
-      console.error("Fehler beim Zählen der aktiven Geräte:", countError);
+      console.log(`🔴 ERROR: Failed to count active devices`, { countError });
     }
+
+    console.log(`🟢 Active devices count: ${activeDevices?.length || 0}`);
 
     // Status-Nachricht basierend auf Lizenz- und Gerätestatus
     let message = "Lizenz gefunden";
@@ -246,6 +301,9 @@ serve(async (req) => {
     } else {
       message = "Lizenz und Gerät sind aktiv";
     }
+
+    console.log(`🟢 Final status: ${message}`);
+    console.log(`🟢 License status check completed successfully`);
 
     // Immer success: true wenn eine Lizenz existiert (auch gekündigte Lizenzen)
     // Die App kann dann basierend auf is_license_valid und cancelled_at entscheiden
@@ -267,7 +325,10 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Unerwarteter Fehler:", error);
+    console.log(`🔴 ERROR: Unexpected error occurred`, {
+      error: error.message,
+      stack: error.stack,
+    });
     return new Response(
       JSON.stringify({ error: "Ein unerwarteter Fehler ist aufgetreten" }),
       {

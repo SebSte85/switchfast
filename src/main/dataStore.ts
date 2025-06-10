@@ -664,13 +664,54 @@ export class DataStore {
       return;
     }
 
+    // Sammle die Titel der zu entfernenden Fenster für die Bereinigung persistenter Identifikatoren
+    const windowTitlesToRemove = theme.windows
+      .filter((w) => windowIds.includes(w.hwnd))
+      .map((w) => w.title);
+
+    console.log(
+      `[DataStore] Entferne ${windowIds.length} Fenster aus Thema ${themeId}:`,
+      windowTitlesToRemove
+    );
+
+    // Entferne Fenster aus dem windows Array
     theme.windows = theme.windows.filter((w) => !windowIds.includes(w.hwnd));
 
-    // Also remove from applications array to ensure consistency
+    // Entferne auch aus dem applications Array für Konsistenz
     theme.applications = theme.applications.filter((id) => {
       // If id is a window handle and it's in the windowIds to remove, filter it out
       return typeof id === "number" && !windowIds.includes(id);
     });
+
+    // WICHTIG: Entferne auch die entsprechenden persistenten Identifikatoren
+    if (theme.persistentProcesses && windowTitlesToRemove.length > 0) {
+      const originalPersistentCount = theme.persistentProcesses.length;
+
+      theme.persistentProcesses = theme.persistentProcesses.filter(
+        (persistentProcess) => {
+          // Entferne persistente Identifikatoren, deren titlePattern mit einem der entfernten Fenster übereinstimmt
+          const shouldRemove = windowTitlesToRemove.some(
+            (title) => persistentProcess.titlePattern === title
+          );
+
+          if (shouldRemove) {
+            console.log(
+              `[DataStore] Entferne persistenten Identifikator für "${persistentProcess.titlePattern}"`
+            );
+          }
+
+          return !shouldRemove;
+        }
+      );
+
+      const removedPersistentCount =
+        originalPersistentCount - theme.persistentProcesses.length;
+      if (removedPersistentCount > 0) {
+        console.log(
+          `[DataStore] ${removedPersistentCount} persistente Identifikatoren entfernt`
+        );
+      }
+    }
 
     this.saveThemes();
   }

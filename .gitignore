@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 release/
+release-new/
 
 # Native addon build files
 build/

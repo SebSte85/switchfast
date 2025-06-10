@@ -23,13 +23,29 @@ serve(async (req) => {
   }
   try {
     const environment = getEnvironment(req);
+    console.log(`🟢 Using environment: ${environment}`);
+
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
+
     const {
       subscriptionId,
       email,
       cancelAtPeriodEnd = true,
     } = await req.json();
+
+    console.log(`🟢 Request data:`, {
+      hasSubscriptionId: !!subscriptionId,
+      subscriptionIdPrefix: subscriptionId?.substring(0, 20) || "MISSING",
+      email: email || "MISSING",
+      cancelAtPeriodEnd: cancelAtPeriodEnd,
+    });
+
     if (!subscriptionId || !email) {
+      console.log(`🔴 ERROR: Missing required fields`, {
+        hasSubscriptionId: !!subscriptionId,
+        hasEmail: !!email,
+      });
       return new Response(
         JSON.stringify({ error: "subscriptionId und email sind erforderlich" }),
         {
@@ -38,11 +54,22 @@ serve(async (req) => {
         }
       );
     }
+
     const stripeSecretKey =
       environment === "prod"
         ? Deno.env.get("PROD_STRIPE_SECRET_KEY")
         : Deno.env.get("TEST_STRIPE_SECRET_KEY");
+
+    console.log(`🟢 Stripe config:`, {
+      environment: environment,
+      hasSecretKey: !!stripeSecretKey,
+      secretKeyPrefix: stripeSecretKey?.substring(0, 10) || "MISSING",
+    });
+
     if (!stripeSecretKey) {
+      console.log(
+        `🔴 ERROR: Stripe Secret Key not configured for environment: ${environment}`
+      );
       return new Response(
         JSON.stringify({ error: "Stripe Secret Key nicht konfiguriert" }),
         {
@@ -51,14 +78,20 @@ serve(async (req) => {
         }
       );
     }
+
     const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
+    console.log(`🟢 Stripe client initialized`);
+
     // Stripe Subscription kündigen - REAKTIVIERBAR oder PERMANENT
     let canceledSub = null;
     try {
       if (cancelAtPeriodEnd) {
         // REAKTIVIERBARE Kündigung - Kunde kann bis zum Periodenende reaktivieren
         console.log(
-          `Kündige Subscription ${subscriptionId} REAKTIVIERBAR (cancel_at_period_end: true)`
+          `🟡 Canceling subscription ${subscriptionId.substring(
+            0,
+            20
+          )}... as REACTIVATABLE (cancel_at_period_end: true)`
         );
         canceledSub = await stripe.subscriptions.update(subscriptionId, {
           cancel_at_period_end: true,
@@ -66,11 +99,24 @@ serve(async (req) => {
       } else {
         // PERMANENTE Kündigung - Subscription wird sofort beendet (Fallback)
         console.log(
-          `Kündige Subscription ${subscriptionId} PERMANENT (sofort gelöscht)`
+          `🔴 Canceling subscription ${subscriptionId.substring(
+            0,
+            20
+          )}... as PERMANENT (immediate deletion)`
         );
         canceledSub = await stripe.subscriptions.del(subscriptionId);
       }
+      console.log(`🟢 Subscription canceled successfully`, {
+        subscriptionId: canceledSub.id,
+        status: canceledSub.status,
+        cancelAtPeriodEnd: canceledSub.cancel_at_period_end,
+      });
     } catch (err) {
+      console.log(`🔴 ERROR: Failed to cancel subscription`, {
+        subscriptionId: subscriptionId,
+        error: err.message,
+        cancelAtPeriodEnd: cancelAtPeriodEnd,
+      });
       return new Response(
         JSON.stringify({
           error: "Fehler beim Kündigen der Subscription",
@@ -82,10 +128,20 @@ serve(async (req) => {
         }
       );
     }
+
     // Supabase Lizenz entsprechend aktualisieren
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       { db: { schema } }
     );
 
@@ -97,7 +153,7 @@ serve(async (req) => {
         cancels_at_period_end: true,
         // is_active bleibt true, da die Subscription bis zum Periodenende läuft
       };
-      console.log("Markiere Lizenz als reaktivierbar gekündigt");
+      console.log(`🟡 Marking license as reactivatable canceled`);
     } else {
       // PERMANENTE Kündigung - Lizenz deaktivieren
       updateData = {
@@ -105,15 +161,27 @@ serve(async (req) => {
         cancelled_at: new Date().toISOString(),
         cancels_at_period_end: false,
       };
-      console.log("Deaktiviere Lizenz permanent");
+      console.log(`🔴 Deactivating license permanently`);
     }
+
+    console.log(`🔍 Updating license in database:`, {
+      subscriptionId: subscriptionId.substring(0, 20) + "...",
+      email: email,
+      updateData: updateData,
+    });
 
     const { error: updateError } = await supabaseClient
       .from("licenses")
       .update(updateData)
       .eq("stripe_subscription_id", subscriptionId)
       .eq("email", email);
+
     if (updateError) {
+      console.log(`🔴 ERROR: Failed to update license`, {
+        updateError: updateError.message,
+        subscriptionId: subscriptionId,
+        email: email,
+      });
       return new Response(
         JSON.stringify({
           error: "Fehler beim Aktualisieren der Lizenz",
@@ -125,10 +193,18 @@ serve(async (req) => {
         }
       );
     }
+
+    console.log(`🟢 License updated successfully`);
+    console.log(`🟢 Subscription cancellation completed successfully`);
+
     return new Response(JSON.stringify({ success: true, canceledSub }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
+    console.log(`🔴 ERROR: Unexpected error occurred`, {
+      error: error.message,
+      stack: error.stack,
+    });
     return new Response(
       JSON.stringify({ error: "Unerwarteter Fehler", details: error.message }),
       {

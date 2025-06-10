@@ -1416,8 +1416,54 @@ function setupIpcHandlers() {
           return false;
         }
 
-        // Prozessinformationen abrufen für persistente Identifikatoren
-        const processes = await getRunningApplications();
+        // OPTIMIERT: Nur die benötigten Prozesse abrufen statt aller
+        // Sammle alle einzigartigen Prozess-IDs aus den Fenstern
+        const uniqueProcessIds = [...new Set(windows.map((w) => w.processId))];
+        const processes: ProcessInfo[] = [];
+
+        // Für jede einzigartige Prozess-ID, rufe nur diese spezifische Information ab
+        for (const processId of uniqueProcessIds) {
+          try {
+            const script = `
+              $process = Get-Process -Id ${processId} -ErrorAction SilentlyContinue
+              if ($process) {
+                $name = $process.ProcessName
+                $path = $null
+                try { $path = $process.MainModule.FileName } catch {}
+                
+                [PSCustomObject]@{
+                  id = $process.Id
+                  name = $name
+                  path = $path
+                  title = $process.MainWindowTitle
+                } | ConvertTo-Json
+              }
+            `;
+
+            const result = await runPowerShellCommand(script);
+            if (result && result.trim()) {
+              const process = JSON.parse(result);
+              processes.push({
+                id: process.id,
+                name: formatAppName(
+                  process.name.toLowerCase().replace(".exe", "")
+                ),
+                title: process.title || process.name,
+                path: process.path || "",
+              });
+            }
+          } catch (error) {
+            console.error(
+              `[IPC] Fehler beim Abrufen des Prozesses ${processId} für Fenster:`,
+              error
+            );
+            // Weiter mit den anderen Prozessen, auch wenn einer fehlschlägt
+          }
+        }
+
+        console.log(
+          `[IPC] Optimiert: ${processes.length} spezifische Prozesse für ${windows.length} Fenster abgerufen`
+        );
 
         // Fenster zum Thema hinzufügen (inklusive automatischer Erstellung von persistenten Identifikatoren)
         dataStore.addWindowsToTheme(themeId, windows, processes);
@@ -1426,6 +1472,71 @@ function setupIpcHandlers() {
       } catch (error) {
         console.error(
           "[IPC] Fehler beim Hinzufügen von Fenstern zum Thema:",
+          error
+        );
+        return false;
+      }
+    }
+  );
+
+  // Handler für das Entfernen von Fenstern aus einem Thema
+  ipcMain.handle(
+    "remove-windows-from-theme",
+    async (_, themeId: string, windowIds: number[]) => {
+      try {
+        console.log(`[BACKEND STEP 1] remove-windows-from-theme aufgerufen:`);
+        console.log(`[BACKEND STEP 1] - themeId: ${themeId}`);
+        console.log(`[BACKEND STEP 1] - windowIds:`, windowIds);
+
+        // Theme vor Änderung anzeigen
+        const themeBefore = dataStore.getTheme(themeId);
+        console.log(
+          `[BACKEND STEP 1] - Theme VORHER:`,
+          JSON.stringify(
+            {
+              id: themeBefore?.id,
+              name: themeBefore?.name,
+              applications: themeBefore?.applications,
+              windows: (themeBefore as any)?.windows,
+            },
+            null,
+            2
+          )
+        );
+
+        // Thema abrufen
+        const theme = dataStore.getTheme(themeId);
+        if (!theme) {
+          console.error(`[IPC] Thema mit ID ${themeId} nicht gefunden.`);
+          return false;
+        }
+
+        // Fenster aus dem Thema entfernen
+        dataStore.removeWindowsFromTheme(themeId, windowIds);
+
+        // Theme nach Änderung anzeigen
+        const themeAfter = dataStore.getTheme(themeId);
+        console.log(
+          `[BACKEND STEP 2] - Theme NACHHER:`,
+          JSON.stringify(
+            {
+              id: themeAfter?.id,
+              name: themeAfter?.name,
+              applications: themeAfter?.applications,
+              windows: (themeAfter as any)?.windows,
+            },
+            null,
+            2
+          )
+        );
+
+        console.log(
+          `[BACKEND STEP 2] ${windowIds.length} Fenster erfolgreich aus Thema ${themeId} entfernt`
+        );
+        return true;
+      } catch (error) {
+        console.error(
+          "[IPC] Fehler beim Entfernen von Fenstern aus Thema:",
           error
         );
         return false;
@@ -1714,8 +1825,26 @@ function setupIpcHandlers() {
     "remove-process-from-theme",
     async (_, themeId: string, processId: number) => {
       try {
+        console.log(`[BACKEND STEP 3] remove-process-from-theme aufgerufen:`);
+        console.log(`[BACKEND STEP 3] - themeId: ${themeId}`);
+        console.log(`[BACKEND STEP 3] - processId: ${processId}`);
+
+        // Theme vor Änderung anzeigen
+        const themeBefore = dataStore.getTheme(themeId);
         console.log(
-          `[IPC] Received request to remove process ${processId} from theme ${themeId}`
+          `[BACKEND STEP 3] - Theme VORHER:`,
+          JSON.stringify(
+            {
+              id: themeBefore?.id,
+              name: themeBefore?.name,
+              applications: themeBefore?.applications,
+              processes: themeBefore?.processes,
+              persistentProcesses: themeBefore?.persistentProcesses,
+              windows: (themeBefore as any)?.windows,
+            },
+            null,
+            2
+          )
         );
 
         // Initial check for theme existence
@@ -1727,8 +1856,48 @@ function setupIpcHandlers() {
           return false;
         }
 
-        const runningProcesses = await getRunningApplications();
-        const process = runningProcesses.find((p) => p.id === processId);
+        // OPTIMIERT: Nur den spezifischen Prozess abrufen statt aller
+        let process: ProcessInfo | undefined;
+        try {
+          const script = `
+            $process = Get-Process -Id ${processId} -ErrorAction SilentlyContinue
+            if ($process) {
+              $name = $process.ProcessName
+              $path = $null
+              try { $path = $process.MainModule.FileName } catch {}
+              
+              [PSCustomObject]@{
+                id = $process.Id
+                name = $name
+                path = $path
+                title = $process.MainWindowTitle
+              } | ConvertTo-Json
+            }
+          `;
+
+          const result = await runPowerShellCommand(script);
+          if (result && result.trim()) {
+            const processData = JSON.parse(result);
+            process = {
+              id: processData.id,
+              name: formatAppName(
+                processData.name.toLowerCase().replace(".exe", "")
+              ),
+              title: processData.title || processData.name,
+              path: processData.path || "",
+            };
+            console.log(
+              `[IPC] Optimiert: Spezifischen Prozess ${process.name} (${process.id}) abgerufen`
+            );
+          }
+        } catch (error) {
+          console.error(
+            `[IPC] Fehler beim Abrufen des Prozesses ${processId}:`,
+            error
+          );
+          // Prozess ist nicht laufend oder nicht verfügbar
+          process = undefined;
+        }
 
         let success = false;
 

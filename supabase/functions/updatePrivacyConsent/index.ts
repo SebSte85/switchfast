@@ -36,15 +36,23 @@ serve(async (req) => {
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
-    console.log(`Verwende Umgebung: ${environment}`);
+    console.log(`🟢 Using environment: ${environment}`);
 
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
 
     const { deviceId, consentGiven } = await req.json();
 
+    console.log(`🟢 Request data:`, {
+      deviceId: deviceId || "MISSING",
+      consentGiven: consentGiven,
+      consentType: typeof consentGiven,
+    });
+
     // Validierung der Eingaben
     if (!deviceId) {
+      console.log(`🔴 ERROR: Missing device ID`);
       return new Response(JSON.stringify({ error: "Fehlende Geräte-ID" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
@@ -52,6 +60,10 @@ serve(async (req) => {
     }
 
     if (typeof consentGiven !== "boolean") {
+      console.log(`🔴 ERROR: Invalid consent type`, {
+        consentGiven: consentGiven,
+        type: typeof consentGiven,
+      });
       return new Response(
         JSON.stringify({ error: "Consent-Status muss ein Boolean sein" }),
         {
@@ -62,9 +74,18 @@ serve(async (req) => {
     }
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       {
         db: {
           schema: schema,
@@ -73,6 +94,7 @@ serve(async (req) => {
     );
 
     // Prüfen, ob bereits ein Trial-Eintrag existiert
+    console.log(`🔍 Checking for existing trial data: ${deviceId}`);
     const { data: existingTrialData, error: selectError } = await supabaseClient
       .from("trial_blocks")
       .select("*")
@@ -80,10 +102,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (selectError) {
-      console.error(
-        "Fehler beim Abrufen des Trial-Status:",
-        JSON.stringify(selectError)
-      );
+      console.log(`🔴 ERROR: Failed to retrieve trial status`, { selectError });
       return new Response(
         JSON.stringify({
           error: "Fehler beim Abrufen des Trial-Status",
@@ -97,18 +116,24 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 Trial query result:`, {
+      foundTrial: !!existingTrialData,
+      currentConsent: existingTrialData?.privacy_consent_given,
+      newConsent: consentGiven,
+    });
+
     if (existingTrialData) {
       // Trial-Eintrag existiert, aktualisiere den Consent-Status
+      console.log(`🟢 Updating existing trial consent`);
       const { error: updateError } = await supabaseClient
         .from("trial_blocks")
         .update({ privacy_consent_given: consentGiven })
         .eq("device_id", deviceId);
 
       if (updateError) {
-        console.error(
-          "Fehler beim Aktualisieren des Consent-Status:",
-          JSON.stringify(updateError)
-        );
+        console.log(`🔴 ERROR: Failed to update consent status`, {
+          updateError,
+        });
         return new Response(
           JSON.stringify({
             error: "Fehler beim Aktualisieren des Consent-Status",
@@ -122,6 +147,9 @@ serve(async (req) => {
         );
       }
 
+      console.log(`🟢 Privacy consent updated successfully`);
+      console.log(`🟢 Update privacy consent completed successfully`);
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -132,6 +160,7 @@ serve(async (req) => {
       );
     } else {
       // Noch kein Trial-Eintrag vorhanden, erstelle einen neuen
+      console.log(`🟢 Creating new trial entry with consent`);
       const trialStartDate = new Date();
       const trialEndDate = new Date(trialStartDate);
       trialEndDate.setDate(trialEndDate.getDate() + 7); // 7 Tage Trial
@@ -149,10 +178,7 @@ serve(async (req) => {
         .maybeSingle();
 
       if (insertError) {
-        console.error(
-          "Fehler beim Erstellen des Trial-Eintrags:",
-          JSON.stringify(insertError)
-        );
+        console.log(`🔴 ERROR: Failed to create trial entry`, { insertError });
         return new Response(
           JSON.stringify({
             error: "Fehler beim Erstellen des Trial-Eintrags",
@@ -166,6 +192,16 @@ serve(async (req) => {
         );
       }
 
+      console.log(`🟢 New trial entry created successfully:`, {
+        trialStartDate: newTrialData?.trial_start_date,
+        trialEndDate: newTrialData?.trial_end_date,
+        consentGiven: consentGiven,
+      });
+
+      console.log(
+        `🟢 Create trial with privacy consent completed successfully`
+      );
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -178,7 +214,10 @@ serve(async (req) => {
       );
     }
   } catch (error) {
-    console.error("Unerwarteter Fehler:", error);
+    console.log(`🔴 ERROR: Unexpected error occurred`, {
+      error: error.message,
+      stack: error.stack,
+    });
     return new Response(
       JSON.stringify({ error: "Ein unerwarteter Fehler ist aufgetreten" }),
       {

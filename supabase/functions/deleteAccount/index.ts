@@ -23,10 +23,19 @@ serve(async (req) => {
   }
   try {
     const environment = getEnvironment(req);
+    console.log(`🟢 Using environment: ${environment}`);
+
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
+
     const { email } = await req.json();
 
+    console.log(`🟢 Request data:`, {
+      email: email || "MISSING",
+    });
+
     if (!email) {
+      console.log(`🔴 ERROR: Missing email`);
       return new Response(JSON.stringify({ error: "email ist erforderlich" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 400,
@@ -34,12 +43,21 @@ serve(async (req) => {
     }
 
     console.log(
-      `🗑️ [DELETE ACCOUNT] Starting GDPR-compliant account deletion for email: ${email} in environment: ${environment}`
+      `🟢 Starting GDPR-compliant account deletion for email: ${email}`
     );
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       { db: { schema } }
     );
 
@@ -49,10 +67,15 @@ serve(async (req) => {
         ? Deno.env.get("PROD_STRIPE_SECRET_KEY")
         : Deno.env.get("TEST_STRIPE_SECRET_KEY");
 
+    console.log(`🟢 Stripe config:`, {
+      environment: environment,
+      hasSecretKey: !!stripeSecretKey,
+      secretKeyPrefix: stripeSecretKey?.substring(0, 10) || "MISSING",
+    });
+
     if (!stripeSecretKey) {
-      console.error(
-        "⚠️ [DELETE ACCOUNT] Stripe secret key not found for environment:",
-        environment
+      console.log(
+        `🔴 ERROR: Stripe secret key not found for environment: ${environment}`
       );
       return new Response(
         JSON.stringify({
@@ -67,18 +90,17 @@ serve(async (req) => {
     }
 
     const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
+    console.log(`🟢 Stripe client initialized`);
 
     // 1. Alle Lizenzen des Users mit Stripe-Informationen abrufen
+    console.log(`🔍 Searching for licenses for email: ${email}`);
     const { data: licenses, error: licenseError } = await supabaseClient
       .from("licenses")
       .select("id, stripe_subscription_id, stripe_customer_id, email")
       .eq("email", email);
 
     if (licenseError) {
-      console.error(
-        "❌ [DELETE ACCOUNT] Error finding licenses:",
-        licenseError
-      );
+      console.log(`🔴 ERROR: Failed to find licenses`, { licenseError });
       return new Response(
         JSON.stringify({
           error: "Fehler beim Finden der Lizenzen",
@@ -91,9 +113,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(
-      `📊 [DELETE ACCOUNT] Found ${licenses?.length || 0} licenses for user`
-    );
+    console.log(`🟢 Found ${licenses?.length || 0} licenses for user`);
 
     let gdprNotice = {
       stripe_data_notice:
@@ -114,22 +134,24 @@ serve(async (req) => {
 
     // 2. Umfassende Stripe-Bereinigung
     if (licenses && licenses.length > 0) {
+      console.log(`🟢 Processing ${licenses.length} licenses for cleanup`);
       for (const license of licenses) {
         // 2a. Subscription stornieren falls vorhanden
         if (license.stripe_subscription_id) {
           try {
             console.log(
-              `🚫 [DELETE ACCOUNT] Cancelling Stripe subscription: ${license.stripe_subscription_id}`
+              `🟡 Cancelling Stripe subscription: ${license.stripe_subscription_id.substring(
+                0,
+                20
+              )}...`
             );
             await stripe.subscriptions.cancel(license.stripe_subscription_id);
-            console.log(
-              `✅ [DELETE ACCOUNT] Stripe subscription cancelled: ${license.stripe_subscription_id}`
-            );
+            console.log(`🟢 Stripe subscription cancelled successfully`);
           } catch (stripeError) {
-            console.error(
-              `⚠️ [DELETE ACCOUNT] Failed to cancel subscription ${license.stripe_subscription_id}:`,
-              stripeError
-            );
+            console.log(`🔴 ERROR: Failed to cancel subscription`, {
+              subscriptionId: license.stripe_subscription_id,
+              error: stripeError.message,
+            });
             // Fortfahren, auch wenn Subscription-Stornierung fehlschlägt
           }
         }
@@ -138,30 +160,37 @@ serve(async (req) => {
         if (license.stripe_customer_id) {
           try {
             console.log(
-              `🔄 [DELETE ACCOUNT] Anonymizing Stripe customer data: ${license.stripe_customer_id}`
+              `🟡 Anonymizing Stripe customer data: ${license.stripe_customer_id.substring(
+                0,
+                20
+              )}...`
             );
 
             // Erst alle Payment Methods des Customers löschen
             try {
+              console.log(`🔍 Fetching payment methods for customer`);
               const paymentMethods = await stripe.paymentMethods.list({
                 customer: license.stripe_customer_id,
               });
 
+              console.log(
+                `🟢 Found ${paymentMethods.data.length} payment methods`
+              );
               for (const pm of paymentMethods.data) {
                 await stripe.paymentMethods.detach(pm.id);
                 console.log(
-                  `🗑️ [DELETE ACCOUNT] Detached payment method: ${pm.id}`
+                  `🟢 Detached payment method: ${pm.id.substring(0, 15)}...`
                 );
               }
             } catch (pmError) {
-              console.error(
-                `⚠️ [DELETE ACCOUNT] Error detaching payment methods:`,
-                pmError
-              );
+              console.log(`🔴 ERROR: Failed to detach payment methods`, {
+                pmError: pmError.message,
+              });
             }
 
             // Customer-Daten anonymisieren BEVOR wir löschen
             try {
+              console.log(`🟡 Anonymizing customer data`);
               await stripe.customers.update(license.stripe_customer_id, {
                 name: "[DELETED USER]",
                 email: null,
@@ -178,26 +207,22 @@ serve(async (req) => {
                 },
                 shipping: null,
               });
-              console.log(
-                `🔒 [DELETE ACCOUNT] Customer data anonymized: ${license.stripe_customer_id}`
-              );
+              console.log(`🟢 Customer data anonymized successfully`);
             } catch (updateError) {
-              console.error(
-                `⚠️ [DELETE ACCOUNT] Failed to anonymize customer data:`,
-                updateError
-              );
+              console.log(`🔴 ERROR: Failed to anonymize customer data`, {
+                updateError: updateError.message,
+              });
             }
 
             // Dann Customer löschen (soweit möglich)
+            console.log(`🟡 Deleting Stripe customer`);
             await stripe.customers.del(license.stripe_customer_id);
-            console.log(
-              `✅ [DELETE ACCOUNT] Stripe customer deleted: ${license.stripe_customer_id}`
-            );
+            console.log(`🟢 Stripe customer deleted successfully`);
           } catch (stripeError) {
-            console.error(
-              `⚠️ [DELETE ACCOUNT] Failed to process customer ${license.stripe_customer_id}:`,
-              stripeError
-            );
+            console.log(`🔴 ERROR: Failed to process customer`, {
+              customerId: license.stripe_customer_id,
+              error: stripeError.message,
+            });
             // Fortfahren, auch wenn Customer-Verarbeitung fehlschlägt
           }
         }

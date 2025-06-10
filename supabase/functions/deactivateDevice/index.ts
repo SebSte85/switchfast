@@ -36,15 +36,25 @@ serve(async (req) => {
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
-    console.log(`Verwende Umgebung: ${environment}`);
+    console.log(`🟢 Using environment: ${environment}`);
 
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
 
     const { licenseKey, deviceId } = await req.json();
+    console.log(`🟢 Request data:`, {
+      hasLicenseKey: !!licenseKey,
+      licenseKeyPrefix: licenseKey?.substring(0, 10) || "MISSING",
+      deviceId: deviceId || "MISSING",
+    });
 
     // Validierung der Eingaben
     if (!licenseKey || !deviceId) {
+      console.log(`🔴 ERROR: Missing required fields`, {
+        hasLicenseKey: !!licenseKey,
+        hasDeviceId: !!deviceId,
+      });
       return new Response(
         JSON.stringify({ error: "Fehlende erforderliche Felder" }),
         {
@@ -55,9 +65,18 @@ serve(async (req) => {
     }
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       {
         db: {
           schema: schema,
@@ -66,6 +85,9 @@ serve(async (req) => {
     );
 
     // Lizenz in der Datenbank suchen (Schema ist bereits im Client konfiguriert)
+    console.log(
+      `🔍 Searching for license with key: ${licenseKey.substring(0, 10)}...`
+    );
     const { data: licenseData, error: licenseError } = await supabaseClient
       .from("licenses")
       .select("id")
@@ -73,6 +95,7 @@ serve(async (req) => {
       .single();
 
     if (licenseError || !licenseData) {
+      console.log(`🔴 ERROR: Invalid license key`, { licenseError });
       return new Response(
         JSON.stringify({ error: "Ungültiger Lizenzschlüssel" }),
         {
@@ -82,7 +105,12 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 License found:`, {
+      licenseId: licenseData.id,
+    });
+
     // Gerät in der Datenbank suchen und deaktivieren (Schema ist bereits im Client konfiguriert)
+    console.log(`🔍 Searching for device: ${deviceId}`);
     const { data: deviceData, error: deviceError } = await supabaseClient
       .from("device_activations")
       .select("id, is_active")
@@ -91,6 +119,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (deviceError) {
+      console.log(`🔴 ERROR: Failed to search device`, { deviceError });
       return new Response(
         JSON.stringify({ error: "Fehler beim Suchen des Geräts" }),
         {
@@ -101,13 +130,23 @@ serve(async (req) => {
     }
 
     if (!deviceData) {
+      console.log(`🔴 ERROR: Device not found`, {
+        deviceId: deviceId,
+        licenseId: licenseData.id,
+      });
       return new Response(JSON.stringify({ error: "Gerät nicht gefunden" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 404,
       });
     }
 
+    console.log(`🟢 Device found:`, {
+      deviceActivationId: deviceData.id,
+      isActive: deviceData.is_active,
+    });
+
     if (!deviceData.is_active) {
+      console.log(`🟡 Device already deactivated`);
       return new Response(
         JSON.stringify({ message: "Gerät ist bereits deaktiviert" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -115,6 +154,7 @@ serve(async (req) => {
     }
 
     // Gerät deaktivieren (Schema ist bereits im Client konfiguriert)
+    console.log(`🟢 Deactivating device`);
     const { error: updateError } = await supabaseClient
       .from("device_activations")
       .update({
@@ -124,6 +164,7 @@ serve(async (req) => {
       .eq("id", deviceData.id);
 
     if (updateError) {
+      console.log(`🔴 ERROR: Failed to deactivate device`, { updateError });
       return new Response(
         JSON.stringify({ error: "Fehler beim Deaktivieren des Geräts" }),
         {
@@ -133,7 +174,12 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 Device deactivated successfully`);
+
     // Anzahl der verbleibenden aktiven Geräte für diese Lizenz abrufen
+    console.log(
+      `🔍 Counting remaining active devices for license: ${licenseData.id}`
+    );
     const { data: activeDevices, error: countError } = await supabaseClient
       .from("device_activations")
       .select("id")
@@ -141,8 +187,11 @@ serve(async (req) => {
       .eq("is_active", true);
 
     if (countError) {
-      console.error("Fehler beim Zählen der aktiven Geräte:", countError);
+      console.log(`🔴 ERROR: Failed to count active devices`, { countError });
     }
+
+    console.log(`🟢 Remaining active devices: ${activeDevices?.length || 0}`);
+    console.log(`🟢 Device deactivation completed successfully`);
 
     // Erfolgreiche Antwort
     return new Response(
@@ -154,7 +203,10 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Unerwarteter Fehler:", error);
+    console.log(`🔴 ERROR: Unexpected error occurred`, {
+      error: error.message,
+      stack: error.stack,
+    });
     return new Response(
       JSON.stringify({ error: "Ein unerwarteter Fehler ist aufgetreten" }),
       {

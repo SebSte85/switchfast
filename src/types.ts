@@ -34,6 +34,7 @@ export interface Theme {
   color?: string; // Farbe für die visuelle Darstellung des Themes
   persistentProcesses?: PersistentProcessIdentifier[]; // Persistente Prozessidentifikatoren für Wiederherstellung nach Neustart
   processes?: number[]; // Prozess-IDs für die Zuordnung zu Themen
+  windows?: WindowInfo[]; // Window-Handles für Browser-Subprozesse
 }
 
 // ApplicationListProps Interface

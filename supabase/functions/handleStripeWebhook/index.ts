@@ -27,13 +27,13 @@ function getEnvironment(req: Request): string {
   // 3. Prüfen des Referer-Headers (für Stripe-Webhooks)
   const referer = req.headers.get("referer") || "";
   if (referer.includes("stripe.com")) {
-    console.log("Webhook-Aufruf von Stripe erkannt, verwende Test-Umgebung");
+    console.log("🟢 Webhook call from Stripe detected, using test environment");
     return "test";
   }
 
   // 4. Fallback auf die Standardumgebung aus den Umgebungsvariablen
   const defaultEnv = Deno.env.get("ACTIVE_ENVIRONMENT") || "test";
-  console.log(`Fallback auf Umgebungsvariable: ${defaultEnv}`);
+  console.log(`🟢 Fallback to environment variable: ${defaultEnv}`);
   return defaultEnv;
 }
 
@@ -46,10 +46,11 @@ serve(async (req) => {
   try {
     // Umgebung bestimmen
     const environment = getEnvironment(req);
-    console.log(`Verwende Umgebung: ${environment}`);
+    console.log(`🟢 Using environment: ${environment}`);
 
     // Schema basierend auf der Umgebung auswählen
     const schema = environment === "prod" ? "prod" : "test";
+    console.log(`🟢 Using schema: ${schema}`);
 
     // Stripe-Konfiguration basierend auf der Umgebung auswählen
     const stripeSecretKey =
@@ -63,7 +64,7 @@ serve(async (req) => {
         ? "PROD_STRIPE_WEBHOOK_SECRET"
         : "TEST_STRIPE_WEBHOOK_SECRET";
 
-    console.log(`Suche nach Webhook-Secret mit Key: ${webhookSecretKey}`);
+    console.log(`🔍 Looking for webhook secret with key: ${webhookSecretKey}`);
 
     // TEMPORÄR: Webhook-Secret hart codieren für Debugging
     let stripeWebhookSecret = Deno.env.get(webhookSecretKey);
@@ -71,22 +72,25 @@ serve(async (req) => {
     // Wenn wir in der Test-Umgebung sind und kein Secret gefunden wurde, verwenden wir das hart codierte Secret
     if (environment === "test" && !stripeWebhookSecret) {
       stripeWebhookSecret = "whsec_IGSFWWT3TV4a9LmA5fBFstEjcNY4KocG";
-      console.log("TEMPORÄR: Verwende hart codiertes TEST Webhook-Secret");
+      console.log("🟡 TEMPORARY: Using hardcoded TEST webhook secret");
     }
 
     console.log(
-      `Webhook-Secret gefunden: ${stripeWebhookSecret ? "Ja" : "Nein"}`
+      `🟢 Webhook secret found: ${stripeWebhookSecret ? "Yes" : "No"}`
     );
 
-    // Alle verfügbaren Umgebungsvariablen ausgeben (nur Namen, keine Werte)
-    console.log(
-      "Verfügbare Umgebungsvariablen:",
-      Object.keys(Deno.env.toObject())
-    );
+    console.log(`🟢 Stripe config:`, {
+      environment: environment,
+      hasSecretKey: !!stripeSecretKey,
+      secretKeyPrefix: stripeSecretKey?.substring(0, 10) || "MISSING",
+      hasWebhookSecret: !!stripeWebhookSecret,
+      webhookSecretPrefix: stripeWebhookSecret?.substring(0, 10) || "MISSING",
+    });
 
     // Stripe-Webhook-Signatur aus dem Header extrahieren
     const signature = req.headers.get("stripe-signature");
     if (!signature) {
+      console.log(`🔴 ERROR: Missing Stripe signature`);
       return new Response(
         JSON.stringify({ error: "Fehlende Stripe-Signatur" }),
         {
@@ -96,13 +100,20 @@ serve(async (req) => {
       );
     }
 
+    console.log(`🟢 Stripe signature received:`, {
+      signaturePrefix: signature.substring(0, 20) + "...",
+    });
+
     // Webhook-Ereignis mit asynchroner Signaturverifizierung verarbeiten
     const rawBody = await req.text();
+    console.log(`🟢 Raw body received, length: ${rawBody.length}`);
+
     let event;
 
     try {
       // Stripe-Instanz erstellen
       const stripe = new Stripe(stripeSecretKey || "");
+      console.log(`🔍 Verifying webhook signature...`);
 
       // Asynchrone Methode zur Signaturverifizierung verwenden
       event = await stripe.webhooks.constructEventAsync(
@@ -110,12 +121,14 @@ serve(async (req) => {
         signature,
         stripeWebhookSecret || ""
       );
-      console.log("Signatur erfolgreich verifiziert mit constructEventAsync!");
-    } catch (err) {
-      console.error(
-        "Fehler bei Signaturverifikation (async):",
-        err instanceof Error ? err.message : err
+      console.log(
+        "🟢 Signature successfully verified with constructEventAsync!"
       );
+    } catch (err) {
+      console.log(`🔴 ERROR: Signature verification failed (async)`, {
+        error: err instanceof Error ? err.message : err,
+        environment: environment,
+      });
       return new Response(
         JSON.stringify({
           error: "Ungültige Signatur",
@@ -136,8 +149,8 @@ serve(async (req) => {
 
     // Wenn kein Webhook-Secret gefunden wurde, können wir die Signatur nicht verifizieren
     if (!stripeWebhookSecret) {
-      console.error(
-        `${environment.toUpperCase()}_STRIPE_WEBHOOK_SECRET ist nicht konfiguriert`
+      console.log(
+        `🔴 ERROR: ${environment.toUpperCase()}_STRIPE_WEBHOOK_SECRET is not configured`
       );
       return new Response(
         JSON.stringify({ error: "Webhook-Secret ist nicht konfiguriert" }),
@@ -148,19 +161,19 @@ serve(async (req) => {
       );
     }
 
-    // Debug-Informationen zur Signaturverifizierung
-    console.log(
-      `Verwende ${environment} Webhook-Secret: ${stripeWebhookSecret.substring(
-        0,
-        5
-      )}...`
-    );
-    console.log(`Signatur-Header: ${signature.substring(0, 20)}...`);
-
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    console.log(`🟢 Supabase config:`, {
+      hasUrl: !!supabaseUrl,
+      hasServiceKey: !!supabaseServiceKey,
+      schema: schema,
+    });
+
     const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      supabaseUrl ?? "",
+      supabaseServiceKey ?? "",
       {
         db: {
           schema: schema,
@@ -168,21 +181,30 @@ serve(async (req) => {
       }
     );
 
+    console.log(`🟢 Processing webhook event type: ${event.type}`);
+
     // Event-Typ verarbeiten
     switch (event.type) {
       case "checkout.session.completed": {
-        console.log("Verarbeite checkout.session.completed Event");
+        console.log("🟢 Processing checkout.session.completed event");
         const sessionId = event.data.object.id;
 
         // Checkout Session mit erweiterten line_items abrufen (Stripe Best Practice)
         let session;
         try {
+          console.log(
+            `🔍 Retrieving checkout session: ${sessionId.substring(0, 20)}...`
+          );
           session = await stripe.checkout.sessions.retrieve(sessionId, {
             expand: ["line_items"],
           });
-          console.log("Checkout Session erfolgreich abgerufen mit line_items");
+          console.log(
+            "🟢 Checkout session successfully retrieved with line_items"
+          );
         } catch (error) {
-          console.error("Fehler beim Abrufen der Checkout Session:", error);
+          console.log(`🔴 ERROR: Failed to retrieve checkout session`, {
+            error: error.message,
+          });
           return new Response(
             JSON.stringify({ error: "Fehler beim Abrufen der Session" }),
             {
@@ -192,12 +214,12 @@ serve(async (req) => {
           );
         }
 
-        console.log("Session payment_status:", session.payment_status);
-        console.log(
-          "Session client_reference_id:",
-          session.client_reference_id
-        );
-        console.log("Session metadata:", session.metadata);
+        console.log(`🟢 Session details:`, {
+          paymentStatus: session.payment_status,
+          clientReferenceId: session.client_reference_id,
+          hasMetadata:
+            !!session.metadata && Object.keys(session.metadata).length > 0,
+        });
 
         // Prüfen, ob die Zahlung erfolgreich war
         if (session.payment_status === "paid") {

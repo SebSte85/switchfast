@@ -114,29 +114,13 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
   const [processUpdateCounter, setProcessUpdateCounter] = useState<number>(0);
   const [isClosingPopup, setIsClosingPopup] = useState(false);
 
-  // Aktualisiere die Prozessinformationen, wenn das Popup geöffnet wird oder ein Prozess entfernt wurde
+  // Keine IPC-Calls mehr nötig - verwende direkt die verfügbaren Theme-Daten
   useEffect(() => {
     if (showProcessPopup) {
-      // Hole die aktuellen Prozesse vom Main-Prozess
-      const updateProcesses = async () => {
-        try {
-          const currentProcesses = await ipcRenderer.invoke(
-            "get-running-applications"
-          );
-          setPopupProcesses(currentProcesses || []);
-        } catch (error) {
-          console.error(
-            "Fehler beim Aktualisieren der Prozesse für das Popup:",
-            error
-          );
-          // Fallback auf die vorhandenen Prozesse
-          setPopupProcesses(applications);
-        }
-      };
-
-      updateProcesses();
+      // Verwende direkt die bereits verfügbaren applications - kein IPC-Call nötig
+      setPopupProcesses(applications);
     }
-  }, [showProcessPopup, processUpdateCounter, applications]); // Abhängigkeit von processUpdateCounter hinzugefügt
+  }, [showProcessPopup, processUpdateCounter, applications]);
 
   // Handle process popup open
   const handleProcessPopupOpen = (themeId: string) => {
@@ -471,7 +455,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     }
   };
 
-  const handleRemoveFromTheme = (
+  const handleRemoveFromTheme = async (
     themeId: string,
     processId: number | string,
     e?: React.MouseEvent
@@ -481,13 +465,113 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       e.preventDefault();
     }
 
-    // Überprüfe, ob die onRemoveFromTheme-Funktion existiert
+    console.log(`[STEP 1 DEBUG] handleRemoveFromTheme aufgerufen mit:`);
+    console.log(`[STEP 1 DEBUG] - themeId: ${themeId}`);
+    console.log(
+      `[STEP 1 DEBUG] - processId: ${processId} (type: ${typeof processId})`
+    );
+    console.log(
+      `[STEP 1 DEBUG] - themes:`,
+      themes.find((t) => t.id === themeId)
+    );
+
+    // LÖSUNG: Immer das aktuelle Theme vom Backend laden
     if (onRemoveFromTheme) {
-      // Rufe die onRemoveFromTheme-Funktion auf
-      onRemoveFromTheme(themeId, processId);
-      // Erzwinge eine Aktualisierung der Prozessliste im Popup ohne das Popup zu schließen
-      if (showProcessPopup === themeId) {
-        // Erhöhe den Counter, um eine Aktualisierung des useEffect auszulösen
+      const numId =
+        typeof processId === "string" ? parseInt(processId, 10) : processId;
+
+      console.log(
+        `[STEP 3 SOLUTION] Lade aktuelles Theme vom Backend für themeId: ${themeId}`
+      );
+
+      try {
+        // Lade das aktuelle Theme direkt vom Backend um sicherzustellen, dass wir die neuesten Daten haben
+        const freshTheme = await ipcRenderer.invoke("get-theme", themeId);
+        console.log(
+          `[STEP 3 SOLUTION] Frisches Theme vom Backend:`,
+          freshTheme
+        );
+
+        if (!freshTheme) {
+          console.error(`[STEP 3 SOLUTION] Theme ${themeId} nicht gefunden`);
+          return;
+        }
+
+        // Jetzt prüfen mit den frischen Daten
+        const directWindowHandle = freshTheme.windows?.find(
+          (w: any) => w.hwnd === numId
+        );
+        const windowByProcessId = freshTheme.windows?.find(
+          (w: any) => w.processId === numId
+        );
+        const isWindowHandle = !!(directWindowHandle || windowByProcessId);
+
+        console.log(
+          `[STEP 3 SOLUTION] Mit frischen Daten - isWindowHandle: ${isWindowHandle}`
+        );
+        console.log(
+          `[STEP 3 SOLUTION] directWindowHandle:`,
+          directWindowHandle
+        );
+        console.log(`[STEP 3 SOLUTION] windowByProcessId:`, windowByProcessId);
+
+        if (isWindowHandle) {
+          // Verwende das korrekte Window-Handle
+          const windowHandleToRemove = directWindowHandle
+            ? directWindowHandle.hwnd
+            : windowByProcessId!.hwnd;
+          // Das ist ein Window-Handle - verwende den speziellen remove-windows-from-theme Handler
+          console.log(
+            `[UI] Entferne Window-Handle ${windowHandleToRemove} (von Prozess ${numId}) aus Thema ${themeId}`
+          );
+
+          // SOFORTIGES UI-UPDATE: Entferne das Window-Handle sofort aus dem UI
+          onRemoveFromTheme(themeId, windowHandleToRemove);
+
+          // Erzwinge sofortige Popup-Aktualisierung
+          setProcessUpdateCounter((prev) => prev + 1);
+
+          // Schließe und öffne das Popup neu, um sicherzustellen, dass die Daten frisch sind
+          const currentPopup = showProcessPopup;
+          setShowProcessPopup(null);
+          setTimeout(() => {
+            setShowProcessPopup(currentPopup);
+          }, 50);
+
+          ipcRenderer
+            .invoke("remove-windows-from-theme", themeId, [
+              windowHandleToRemove,
+            ])
+            .then((success) => {
+              if (success) {
+                console.log(
+                  `[UI] Window-Handle ${windowHandleToRemove} erfolgreich entfernt`
+                );
+              } else {
+                console.error(
+                  `[UI] Fehler beim Entfernen des Window-Handles ${windowHandleToRemove}`
+                );
+                // Bei Fehler: UI-Update rückgängig machen (Theme neu laden)
+                setProcessUpdateCounter((prev) => prev + 1);
+              }
+            })
+            .catch((error) => {
+              console.error(
+                `[UI] Fehler beim IPC-Aufruf remove-windows-from-theme:`,
+                error
+              );
+              // Bei Fehler: UI-Update rückgängig machen (Theme neu laden)
+              setProcessUpdateCounter((prev) => prev + 1);
+            });
+        } else {
+          // Das ist eine normale Prozess-ID - verwende den normalen Handler
+          onRemoveFromTheme(themeId, processId);
+          setProcessUpdateCounter((prev) => prev + 1);
+        }
+      } catch (error) {
+        console.error(`[STEP 3 SOLUTION] Fehler beim Laden des Themes:`, error);
+        // Fallback: Verwende normale Prozess-Entfernung
+        onRemoveFromTheme(themeId, processId);
         setProcessUpdateCounter((prev) => prev + 1);
       }
     }
@@ -513,8 +597,8 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
     // Helper-Funktion zum Sammeln der Prozesse, die zu diesem Theme gehören
     const collectProcessesForTheme = () => {
-      // Alle verfügbaren Prozesse durchgehen
-      for (const process of popupProcesses) {
+      // Verwende direkt die verfügbaren applications
+      for (const process of applications) {
         let shouldInclude = false;
 
         // 1. Prüfen, ob die Prozess-ID direkt im applications-Array ist
@@ -572,7 +656,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
               process.title &&
               process.title.includes(persistentProcess.titlePattern);
 
-            if (matchesName && (matchesPath || matchesTitle)) {
+            if (matchesName || (matchesName && (matchesPath || matchesTitle))) {
               shouldInclude = true;
               break;
             }
@@ -587,11 +671,49 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
         // Rekursiv Kindprozesse prüfen
         if (process.children && process.children.length > 0) {
           for (const child of process.children) {
-            // Rekursive Prüfung für jeden Kindprozess
-            // Hier könnte man eine separate rekursive Funktion aufrufen
-            // Für Einfachheit beschränken wir uns auf die erste Ebene
+            // Prüfe auch Kindprozesse auf Theme-Zugehörigkeit
+            let childShouldInclude = false;
+
+            if (
+              theme.applications.includes(child.id) ||
+              (theme.processes && theme.processes.includes(child.id))
+            ) {
+              childShouldInclude = true;
+            }
+
+            if (
+              childShouldInclude &&
+              !themeProcesses.some((p) => p.id === child.id)
+            ) {
+              themeProcesses.push(child);
+            }
           }
         }
+      }
+
+      // Zusätzlicher Fallback: Direkte ID-Suche falls die normale Logik keine Prozesse findet
+      if (themeProcesses.length === 0) {
+        const allThemeIds = [
+          ...(theme.applications || []),
+          ...(theme.processes || []),
+        ];
+
+        allThemeIds.forEach((id) => {
+          const numericId = typeof id === "string" ? parseInt(id, 10) : id;
+          if (!isNaN(numericId) && numericId < 100000) {
+            // Fenster-Handles ausschließen
+            // Finde den Prozess direkt über die ID
+            const existingProcess = applications.find(
+              (app) => app.id === numericId
+            );
+            if (
+              existingProcess &&
+              !themeProcesses.some((p) => p.id === existingProcess.id)
+            ) {
+              themeProcesses.push(existingProcess);
+            }
+          }
+        });
       }
     };
 
@@ -610,7 +732,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="process-popup-header">
-            <div className="process-popup-title">Prozesse in {theme.name}</div>
+            <div className="process-popup-title">Processes in {theme.name}</div>
             <button
               className="process-popup-close"
               onClick={(e) => handleCloseProcessPopup(e)}
@@ -619,9 +741,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
             </button>
           </div>
           <div className="process-popup-content">
-            <div className="popup-process-list">
-              {themeProcesses.length > 0 ? (
-                themeProcesses.map((process) => (
+            {themeProcesses.length > 0 ? (
+              <div className="popup-process-list">
+                {themeProcesses.map((process) => (
                   <div key={process.id} className="popup-process-item">
                     <span>{process.title || process.name}</span>
                     <span
@@ -633,13 +755,13 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
                       ×
                     </span>
                   </div>
-                ))
-              ) : (
-                <div className="text-gray-400 text-center py-4">
-                  Keine Prozesse in dieser Gruppe
-                </div>
-              )}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-processes-message">
+                No processes in this group
+              </div>
+            )}
           </div>
         </div>
       </div>
