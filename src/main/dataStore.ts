@@ -673,16 +673,7 @@ export class DataStore {
       .map((w) => w.title);
 
     console.log(
-      `[DataStore DEBUG] Entferne ${windowIds.length} Fenster aus Thema ${themeId}:`
-    );
-    console.log(`[DataStore DEBUG] - windowIds:`, windowIds);
-    console.log(
-      `[DataStore DEBUG] - windowTitlesToRemove:`,
-      windowTitlesToRemove
-    );
-    console.log(
-      `[DataStore DEBUG] - Aktuelle persistentProcesses:`,
-      theme.persistentProcesses
+      `[DataStore] Entferne ${windowIds.length} Fenster aus Thema ${themeId}`
     );
 
     // Entferne Fenster aus dem windows Array
@@ -700,30 +691,8 @@ export class DataStore {
 
       theme.persistentProcesses = theme.persistentProcesses.filter(
         (persistentProcess) => {
-          // DEBUG: Detaillierter Vergleich der Titel
-          console.log(
-            `[DataStore DEBUG] Vergleiche persistentProcess.titlePattern mit Fenstertiteln:`
-          );
-          console.log(
-            `[DataStore DEBUG] - persistentProcess.titlePattern: "${persistentProcess.titlePattern}"`
-          );
-          console.log(
-            `[DataStore DEBUG] - persistentProcess.titlePattern (bytes):`,
-            persistentProcess.titlePattern
-              ? [...persistentProcess.titlePattern].map((c) => c.charCodeAt(0))
-              : []
-          );
-
           // Entferne persistente Identifikatoren, deren titlePattern mit einem der entfernten Fenster übereinstimmt
           const shouldRemove = windowTitlesToRemove.some((title) => {
-            console.log(
-              `[DataStore DEBUG] - Vergleiche mit Fenstertitel: "${title}"`
-            );
-            console.log(
-              `[DataStore DEBUG] - Fenstertitel (bytes):`,
-              [...title].map((c) => c.charCodeAt(0))
-            );
-
             // WICHTIG: Intelligenter Vergleich der Titel
             // Problem: title enthält echte Steuerzeichen (\x07 = Byte 7)
             // titlePattern enthält literal "\x07" String (4 Bytes: \, x, 0, 7)
@@ -736,22 +705,8 @@ export class DataStore {
               return String.fromCharCode(parseInt(hex, 16));
             });
 
-            console.log(
-              `[DataStore DEBUG] - Original title: "${titleWithRealControlChars}"`
-            );
-            console.log(
-              `[DataStore DEBUG] - Pattern mit echten Steuerzeichen: "${patternWithRealControlChars}"`
-            );
-
-            const matches =
-              patternWithRealControlChars === titleWithRealControlChars;
-            console.log(`[DataStore DEBUG] - Intelligenter Match: ${matches}`);
-            return matches;
+            return patternWithRealControlChars === titleWithRealControlChars;
           });
-
-          console.log(
-            `[DataStore DEBUG] - Soll entfernt werden: ${shouldRemove}`
-          );
 
           if (shouldRemove) {
             console.log(

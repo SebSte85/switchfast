@@ -253,10 +253,7 @@ export class LicenseManager {
 
         console.log("Edge Function Antwort erhalten:", response.status);
         const data = response.data;
-        console.log(
-          "🔍 [LicenseManager DEBUG] Edge Function Response Data:",
-          JSON.stringify(data, null, 2)
-        );
+        // Debug: Edge Function Response Data
 
         if (data.success && data.is_license_valid && data.is_device_activated) {
           // Subscription-Ablauf prüfen falls vorhanden
@@ -895,10 +892,7 @@ export class LicenseManager {
    */
   public getLicenseInfo(): LicenseInfo | null {
     const licenseInfo = secureStore.get("licenseInfo") as LicenseInfo | null;
-    console.log(
-      "🔍 [LicenseManager DEBUG] Lokale License Info:",
-      JSON.stringify(licenseInfo, null, 2)
-    );
+    // Debug: Lokale License Info
     return licenseInfo;
   }
 
@@ -961,29 +955,17 @@ export class LicenseManager {
    * Gibt die Trial-Informationen zurück
    */
   public getTrialInfo(): TrialInfo | null {
-    console.log("📋 [LicenseManager DEBUG] Rufe Trial Info ab...");
     try {
       const storedTrialInfo = secureStore.get("trialInfo") as
         | TrialInfo
         | undefined;
 
-      console.log(
-        "💾 [LicenseManager DEBUG] Gespeicherte Trial Info:",
-        storedTrialInfo
-      );
-
       if (!storedTrialInfo) {
-        console.log("❌ [LicenseManager DEBUG] Keine Trial Info gefunden");
         return null;
       }
 
       const now = new Date();
       const trialEndDate = new Date(storedTrialInfo.trialEndDate);
-
-      console.log("⏰ [LicenseManager DEBUG] Zeit-Vergleich:", {
-        now: now.toISOString(),
-        trialEndDate: trialEndDate.toISOString(),
-      });
 
       // Berechne verbleibende Tage
       const diffTime = Math.max(0, trialEndDate.getTime() - now.getTime());
@@ -992,32 +974,18 @@ export class LicenseManager {
       // Aktualisiere Trial-Status
       const isTrialActive = now < trialEndDate;
 
-      console.log("🧮 [LicenseManager DEBUG] Berechnete Werte:", {
-        diffTime,
-        diffDays,
-        isTrialActive,
-      });
-
       const updatedTrialInfo: TrialInfo = {
         ...storedTrialInfo,
         isTrialActive,
         remainingDays: diffDays,
       };
 
-      console.log(
-        "📝 [LicenseManager DEBUG] Aktualisierte Trial Info:",
-        updatedTrialInfo
-      );
-
       // Speichere aktualisierte Informationen
       secureStore.set("trialInfo", updatedTrialInfo);
 
       return updatedTrialInfo;
     } catch (error) {
-      console.error(
-        "💥 [LicenseManager DEBUG] Fehler beim Abrufen der Trial-Informationen:",
-        error
-      );
+      console.error("Fehler beim Abrufen der Trial-Informationen:", error);
       return null;
     }
   }
@@ -1327,19 +1295,12 @@ export class LicenseManager {
    * Setzt den Privacy Consent Status
    */
   public async setPrivacyConsent(consentGiven: boolean): Promise<boolean> {
-    console.log(
-      `🔒 [LicenseManager DEBUG] Setze Privacy Consent: ${consentGiven}`
-    );
     try {
       // In lokaler Speicherung setzen
       secureStore.set("privacyConsentGiven", consentGiven);
-      console.log(
-        `💾 [LicenseManager DEBUG] Privacy Consent in secureStore gesetzt`
-      );
 
       // Auch in Trial-Informationen aktualisieren, falls vorhanden
       const trialInfo = this.getTrialInfo();
-      console.log(`📋 [LicenseManager DEBUG] Aktuelle Trial Info:`, trialInfo);
 
       if (trialInfo) {
         const updatedTrialInfo: TrialInfo = {
@@ -1347,16 +1308,10 @@ export class LicenseManager {
           privacyConsentGiven: consentGiven,
         };
         this.updateTrialInfo(updatedTrialInfo);
-        console.log(
-          `📝 [LicenseManager DEBUG] Trial Info mit Consent aktualisiert:`,
-          updatedTrialInfo
-        );
       }
 
       // Auch in der Datenbank aktualisieren
-      console.log(
-        `🌐 [LicenseManager DEBUG] Aktualisiere Consent in Datenbank...`
-      );
+
       try {
         const response = await axios.post(
           `${SUPABASE_API_URL}/updatePrivacyConsent`,
@@ -1372,22 +1327,6 @@ export class LicenseManager {
             },
           }
         );
-
-        console.log(
-          `📡 [LicenseManager DEBUG] Datenbank Response:`,
-          response.data
-        );
-
-        if (response.data && response.data.success) {
-          console.log(
-            `✅ [LicenseManager DEBUG] Privacy Consent in Datenbank aktualisiert: ${consentGiven}`
-          );
-        } else {
-          console.warn(
-            `⚠️ [LicenseManager DEBUG] Warnung: Privacy Consent konnte nicht in Datenbank aktualisiert werden:`,
-            response.data
-          );
-        }
       } catch (dbError) {
         console.error(
           "💥 [LicenseManager DEBUG] Fehler beim Aktualisieren des Privacy Consents in der Datenbank:",
@@ -1396,9 +1335,6 @@ export class LicenseManager {
         // Lokaler Consent bleibt bestehen, auch wenn Datenbank-Update fehlschlägt
       }
 
-      console.log(
-        `🎉 [LicenseManager DEBUG] Privacy Consent lokal gesetzt: ${consentGiven}`
-      );
       return true;
     } catch (error) {
       console.error(

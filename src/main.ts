@@ -952,19 +952,41 @@ async function showDesktopExceptApps(
     const protectedWindowHandles = new Set<number>();
     const protectedProcessIds = new Set<number>();
 
+    console.log(
+      "[showDesktopExceptApps] Analyzing protected IDs:",
+      appIdsToProtect
+    );
+
     appIdsToProtect.forEach((id) => {
-      // Prüfe, ob die ID ein Window-Handle ist (im windowToPidMap vorhanden)
-      if (windowToPidMap.has(id)) {
-        // Es ist ein Window-Handle
+      // VERBESSERTE LOGIK: Window-Handles sind typischerweise viel größer als Prozess-IDs
+      // Window-Handles sind oft 6-7 stellige Zahlen, Prozess-IDs sind meist 4-5 stellig
+      const isLikelyWindowHandle = id > 65536; // 0x10000 - typischer Schwellwert
+
+      if (isLikelyWindowHandle && windowToPidMap.has(id)) {
+        // Es ist definitiv ein Window-Handle und in der Map
         protectedWindowHandles.add(id);
+        console.log(
+          `[showDesktopExceptApps] ID ${id} ist Window-Handle (in Map)`
+        );
+      } else if (isLikelyWindowHandle) {
+        // Es ist wahrscheinlich ein Window-Handle, aber nicht in der aktuellen Map
+        // (Fenster könnte minimiert oder versteckt sein)
+        protectedWindowHandles.add(id);
+        console.log(
+          `[showDesktopExceptApps] ID ${id} ist Window-Handle (nicht in Map, wahrscheinlich minimiert)`
+        );
       } else {
         // Es ist eine Prozess-ID
         protectedProcessIds.add(id);
+        console.log(`[showDesktopExceptApps] ID ${id} ist Prozess-ID`);
         // Füge alle Fenster dieser Prozess-ID hinzu
         if (pidToWindowsMap.has(id)) {
-          pidToWindowsMap
-            .get(id)!
-            .forEach((hwnd) => protectedWindowHandles.add(hwnd));
+          const windowsForProcess = pidToWindowsMap.get(id)!;
+          windowsForProcess.forEach((hwnd) => protectedWindowHandles.add(hwnd));
+          console.log(
+            `[showDesktopExceptApps] Hinzugefügt ${windowsForProcess.length} Fenster für Prozess ${id}:`,
+            windowsForProcess
+          );
         }
       }
     });
@@ -1183,6 +1205,16 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
       processes.length,
       "base processes"
     );
+
+    // DEBUG: Zeige alle Browser-Prozesse
+    const braveProcesses = processes.filter((p) =>
+      p.name.toLowerCase().includes("brave")
+    );
+    console.log(
+      `[getProcessesWithWindows] DEBUG: Gefunden ${braveProcesses.length} Brave-Prozesse:`,
+      braveProcesses.map((p) => `${p.name}(${p.id})`)
+    );
+
     const themes = dataStore.getThemes();
 
     // PowerShell command für Fensterabfrage
@@ -1276,6 +1308,16 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
         (window: WindowInfo | null): window is WindowInfo => window !== null
       );
 
+    // DEBUG: Zeige alle Brave-Fenster
+    const braveWindows = windows.filter((w) => {
+      const braveProcess = processes.find((p) => p.id === w.processId);
+      return braveProcess && braveProcess.name.toLowerCase().includes("brave");
+    });
+    console.log(
+      `[getProcessesWithWindows] DEBUG: Gefunden ${braveWindows.length} Brave-Fenster:`,
+      braveWindows.map((w) => `${w.hwnd}:"${w.title}" (PID:${w.processId})`)
+    );
+
     // Erstelle eine Map von Prozess-IDs zu ihren Fenstern
     const windowsByProcessId = new Map<number, WindowInfo[]>();
     windows.forEach((window: WindowInfo) => {
@@ -1298,6 +1340,17 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
     // Filtere Prozesse ohne Fenster heraus
     const result = processesWithWindows.filter(
       (p) => p.windows && p.windows.length > 0
+    );
+
+    // DEBUG: Zeige gefilterte Brave-Prozesse
+    const finalBraveProcesses = result.filter((p) =>
+      p.name.toLowerCase().includes("brave")
+    );
+    console.log(
+      `[getProcessesWithWindows] DEBUG: Final ${finalBraveProcesses.length} Brave-Prozesse mit Fenstern:`,
+      finalBraveProcesses.map(
+        (p) => `${p.name}(${p.id}) mit ${p.windows?.length || 0} Fenstern`
+      )
     );
 
     console.log(
@@ -3025,22 +3078,89 @@ async function restoreProcessAssociations() {
     // Aktualisiere die Prozesszuordnungen mit den neu gestarteten Anwendungen
     await updateProcessAssociations();
 
-    // Sende Event an den Renderer, dass Anwendungen gestartet wurden
-    if (mainWindow) {
-      console.log("[Restore] Sende apps-started Event an Renderer");
-      mainWindow.webContents.send("apps-started");
-    }
+    // WICHTIG: Zweiter Restore-Durchlauf für Window-Handles nach dem Browser-Start
+    console.log("[Restore] Starte zweiten Window-Handle-Restore-Durchlauf...");
+    setTimeout(async () => {
+      try {
+        const themes = dataStore.getThemes();
+        const currentProcesses = await getProcessesWithWindows();
+
+        console.log("[Restore] === ZWEITER RESTORE-DURCHLAUF ===");
+        console.log(
+          `[Restore] ${themes.length} Themes, ${currentProcesses.length} Prozesse mit Fenstern`
+        );
+
+        await restoreWindowHandles(themes, currentProcesses);
+        console.log("[Restore] Zweiter Restore-Durchlauf abgeschlossen.");
+
+        // Sende Event an den Renderer, dass Apps gestartet wurden
+        if (mainWindow) {
+          console.log(
+            "[Restore] Sende apps-started Event an Renderer (nach zweitem Restore)"
+          );
+          mainWindow.webContents.send("apps-started");
+        }
+      } catch (error) {
+        console.error(
+          "[Restore] Fehler beim zweiten Restore-Durchlauf:",
+          error
+        );
+
+        // Fallback: Sende Event trotzdem
+        if (mainWindow) {
+          console.log(
+            "[Restore] Sende apps-started Event an Renderer (Fallback nach Fehler)"
+          );
+          mainWindow.webContents.send("apps-started");
+        }
+      }
+    }, 3000); // Warte 3 Sekunden auf vollständigen Browser-Start
   } else {
     console.log("[Restore] Keine fehlenden Anwendungen zu starten.");
 
-    // Wenn keine Anwendungen zu starten sind, trotzdem das apps-started Event senden,
-    // damit der Ladebildschirm verschwindet
-    if (mainWindow) {
-      console.log(
-        "[Restore] Sende apps-started Event an Renderer (keine Apps zu starten)"
-      );
-      mainWindow.webContents.send("apps-started");
-    }
+    // WICHTIG: Auch hier zweiter Restore-Durchlauf für den Fall dass Browser bereits läuft
+    console.log(
+      "[Restore] Starte zweiten Window-Handle-Restore-Durchlauf (kein App-Start)..."
+    );
+    setTimeout(async () => {
+      try {
+        const themes = dataStore.getThemes();
+        const currentProcesses = await getProcessesWithWindows();
+
+        console.log(
+          "[Restore] === ZWEITER RESTORE-DURCHLAUF (KEIN APP-START) ==="
+        );
+        console.log(
+          `[Restore] ${themes.length} Themes, ${currentProcesses.length} Prozesse mit Fenstern`
+        );
+
+        await restoreWindowHandles(themes, currentProcesses);
+        console.log(
+          "[Restore] Zweiter Restore-Durchlauf abgeschlossen (kein App-Start)."
+        );
+
+        // Sende Event an den Renderer, dass Apps gestartet wurden
+        if (mainWindow) {
+          console.log(
+            "[Restore] Sende apps-started Event an Renderer (nach zweitem Restore, kein App-Start)"
+          );
+          mainWindow.webContents.send("apps-started");
+        }
+      } catch (error) {
+        console.error(
+          "[Restore] Fehler beim zweiten Restore-Durchlauf (kein App-Start):",
+          error
+        );
+
+        // Fallback: Sende Event trotzdem
+        if (mainWindow) {
+          console.log(
+            "[Restore] Sende apps-started Event an Renderer (Fallback, kein App-Start)"
+          );
+          mainWindow.webContents.send("apps-started");
+        }
+      }
+    }, 2000); // Kürzere Wartezeit da Browser schon läuft
   }
 }
 
@@ -3053,71 +3173,173 @@ async function restoreWindowHandles(
   currentProcesses: ProcessInfo[]
 ): Promise<void> {
   console.log("[Restore] Beginne Wiederherstellung der Window-Handles...");
+  console.log(
+    `[Restore] Gefunden ${currentProcesses.length} aktuelle Prozesse`
+  );
+  console.log(`[Restore] Zu verarbeitende Themes: ${themes.length}`);
 
   for (const theme of themes) {
+    console.log(`[Restore] === VERARBEITE THEME: "${theme.name}" ===`);
+    console.log(
+      `[Restore] persistentProcesses: ${theme.persistentProcesses?.length || 0}`
+    );
+    console.log(
+      `[Restore] existierende windows: ${theme.windows?.length || 0}`
+    );
+
     // Nur Themes mit persistenten Prozessen und existierenden Windows bearbeiten
     if (!theme.persistentProcesses || theme.persistentProcesses.length === 0) {
+      console.log(
+        `[Restore] SKIP: Theme "${theme.name}" hat keine persistenten Prozesse`
+      );
       continue;
     }
 
     if (!theme.windows || theme.windows.length === 0) {
+      console.log(`[Restore] SKIP: Theme "${theme.name}" hat keine Windows`);
       continue;
     }
 
     console.log(
       `[Restore] Verarbeite Theme "${theme.name}" mit ${theme.windows.length} Window-Handles...`
     );
+    console.log(
+      `[Restore] Alte Windows:`,
+      theme.windows.map((w: any) => `${w.hwnd}:"${w.title}"`)
+    );
 
     // Sammle alle aktuellen Fenster für dieses Theme basierend auf titlePattern
     const newWindows: WindowInfo[] = [];
 
-    theme.persistentProcesses.forEach((persistentProcess: any) => {
-      if (!persistentProcess.titlePattern) {
-        return;
-      }
-
-      console.log(
-        `[Restore] Suche Fenster für Pattern: "${persistentProcess.titlePattern}"`
-      );
-
-      // Finde passende Prozesse für diesen persistenten Prozess
-      const matchingProcesses = currentProcesses.filter((process) => {
-        return (
-          process.name.toLowerCase() ===
-          persistentProcess.executableName.toLowerCase()
+    theme.persistentProcesses.forEach(
+      (persistentProcess: any, index: number) => {
+        console.log(`[Restore] --- PERSISTENTER PROZESS ${index + 1} ---`);
+        console.log(
+          `[Restore] Suche nach executableName: "${persistentProcess.executableName}"`
         );
-      });
+        console.log(
+          `[Restore] executablePath: "${persistentProcess.executablePath}"`
+        );
+        console.log(
+          `[Restore] titlePattern: "${persistentProcess.titlePattern}"`
+        );
 
-      console.log(
-        `[Restore] Gefunden ${matchingProcesses.length} passende Prozesse für "${persistentProcess.executableName}"`
-      );
-
-      // Für jeden passenden Prozess, sammle alle Fenster die dem titlePattern entsprechen
-      matchingProcesses.forEach((process) => {
-        if (process.windows && process.windows.length > 0) {
-          process.windows.forEach((window) => {
-            // Überprüfe, ob dieses Fenster das richtige Titel-Pattern hat
-            if (window.title.includes(persistentProcess.titlePattern)) {
-              newWindows.push({
-                hwnd: window.hwnd,
-                processId: window.processId,
-                title: window.title,
-              });
-              console.log(
-                `[Restore] Gefunden passendes Fenster: ${window.title} (hwnd: ${window.hwnd})`
-              );
-            }
-          });
+        if (!persistentProcess.titlePattern) {
+          console.log(
+            `[Restore] ❌ Kein titlePattern für ${persistentProcess.executableName}`
+          );
+          return;
         }
-      });
-    });
+
+        // Finde passende Prozesse für diesen persistenten Prozess
+        const matchingProcesses = currentProcesses.filter((process) => {
+          const nameMatches =
+            process.name.toLowerCase() ===
+            persistentProcess.executableName.toLowerCase();
+          console.log(
+            `[Restore] Vergleiche "${process.name}" mit "${persistentProcess.executableName}" -> ${nameMatches}`
+          );
+          return nameMatches;
+        });
+
+        console.log(
+          `[Restore] Gefunden ${matchingProcesses.length} passende Prozesse für "${persistentProcess.executableName}"`
+        );
+
+        if (matchingProcesses.length === 0) {
+          console.log(`[Restore] ❌ Keine passenden Prozesse gefunden!`);
+          console.log(
+            `[Restore] Verfügbare Prozessnamen:`,
+            currentProcesses.map((p) => p.name).slice(0, 10)
+          );
+          return;
+        }
+
+        // Für jeden passenden Prozess, sammle alle Fenster die dem titlePattern entsprechen
+        matchingProcesses.forEach((process, processIndex) => {
+          console.log(
+            `[Restore] Prüfe Prozess ${processIndex + 1}: ${
+              process.name
+            } (PID: ${process.id})`
+          );
+          console.log(
+            `[Restore] Prozess hat ${process.windows?.length || 0} Fenster`
+          );
+
+          if (process.windows && process.windows.length > 0) {
+            process.windows.forEach((window, windowIndex) => {
+              console.log(
+                `[Restore] Prüfe Fenster ${windowIndex + 1}: "${window.title}"`
+              );
+              console.log(
+                `[Restore] Gegen Pattern: "${persistentProcess.titlePattern}"`
+              );
+
+              // VERBESSERTES TITEL-MATCHING: Berücksichtige Steuerzeichen-Behandlung
+              let titleMatches = false;
+              let matchMethod = "";
+
+              // Methode 1: Direkter Vergleich (für normale Titel ohne Steuerzeichen)
+              if (window.title.includes(persistentProcess.titlePattern)) {
+                titleMatches = true;
+                matchMethod = "direkt";
+                console.log(
+                  `[Restore] ✅ MATCH (direkt): "${window.title}" enthält "${persistentProcess.titlePattern}"`
+                );
+              }
+
+              // Methode 2: Konvertiere escaped Steuerzeichen zu echten Steuerzeichen für Vergleich
+              if (!titleMatches && persistentProcess.titlePattern) {
+                const patternWithRealControlChars =
+                  persistentProcess.titlePattern.replace(
+                    /\\x([0-9A-Fa-f]{2})/g,
+                    (match: string, hex: string) =>
+                      String.fromCharCode(parseInt(hex, 16))
+                  );
+                console.log(
+                  `[Restore] Versuche escaped Pattern: "${patternWithRealControlChars}"`
+                );
+
+                if (window.title.includes(patternWithRealControlChars)) {
+                  titleMatches = true;
+                  matchMethod = "escaped";
+                  console.log(
+                    `[Restore] ✅ MATCH (escaped): "${window.title}" enthält konvertiertes Pattern`
+                  );
+                }
+              }
+
+              if (titleMatches) {
+                newWindows.push({
+                  hwnd: window.hwnd,
+                  processId: window.processId,
+                  title: window.title,
+                });
+                console.log(
+                  `[Restore] ✅ Fenster hinzugefügt (${matchMethod}): ${window.title} (hwnd: ${window.hwnd}, PID: ${window.processId})`
+                );
+              } else {
+                console.log(`[Restore] ❌ Kein Match für: "${window.title}"`);
+              }
+            });
+          } else {
+            console.log(
+              `[Restore] ❌ Prozess ${process.name} hat keine Fenster`
+            );
+          }
+        });
+      }
+    );
 
     // Aktualisiere die Window-Handles für dieses Theme
-    if (newWindows.length > 0) {
-      console.log(
-        `[Restore] Ersetze alte Window-Handles für Theme "${theme.name}"`
-      );
+    console.log(`[Restore] === ERGEBNIS FÜR THEME "${theme.name}" ===`);
+    console.log(`[Restore] Gefundene neue Windows: ${newWindows.length}`);
+    console.log(
+      `[Restore] Neue Windows:`,
+      newWindows.map((w) => `${w.hwnd}:"${w.title}" (PID:${w.processId})`)
+    );
 
+    if (newWindows.length > 0) {
       // Entferne alle alten Window-Handles aus dem applications Array
       if (theme.windows && theme.windows.length > 0) {
         theme.windows.forEach((oldWindow: WindowInfo) => {
@@ -3148,13 +3370,19 @@ async function restoreWindowHandles(
         `[Restore] Theme "${theme.name}" aktualisiert mit ${newWindows.length} Window-Handles`
       );
 
-      // Entferne die Prozess-ID aus dem processes Array, da Window-Handles verwendet werden
-      const processIds = newWindows.map((w: WindowInfo) => w.processId);
+      // KORREKTUR: NUR die Prozess-IDs entfernen, die WIRKLICH zu den gefundenen Window-Handles gehören
+      // Das verhindert, dass andere Browser-Prozesse fälschlicherweise als Fallback verwendet werden
+      const processIdsToRemove = newWindows.map((w: WindowInfo) => w.processId);
+      const originalProcessCount = theme.processes.length;
+
+      // Entferne NUR die Prozess-IDs, die zu den neu gefundenen Window-Handles gehören
       theme.processes = theme.processes.filter(
-        (pid: number) => !processIds.includes(pid)
+        (pid: number) => !processIdsToRemove.includes(pid)
       );
+
+      const removedProcessCount = originalProcessCount - theme.processes.length;
       console.log(
-        `[Restore] Prozess-IDs aus Theme "${theme.name}" entfernt, da Window-Handles verwendet werden`
+        `[Restore] ${removedProcessCount} Prozess-IDs aus Theme "${theme.name}" entfernt, da spezifische Window-Handles verwendet werden`
       );
 
       // Speichere die Änderungen
@@ -3162,6 +3390,12 @@ async function restoreWindowHandles(
     } else {
       console.log(
         `[Restore] Keine neuen Window-Handles für Theme "${theme.name}" gefunden`
+      );
+
+      // WICHTIG: Wenn keine Window-Handles gefunden werden, behalte die ursprüngliche Struktur bei
+      // Entferne NICHT das processes Array - das wäre ein Fallback für den Fall dass Window-Handles nicht verfügbar sind
+      console.log(
+        `[Restore] Theme "${theme.name}" behält ursprüngliche Prozess-Zuordnungen als Fallback`
       );
     }
   }
