@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import * as os from "os";
 import { PersistentProcessIdentifier } from "../types";
+import { createPersistentIdentifier } from "../utils/processUtils";
 import { trackEvent } from "./analytics";
 
 // Deklariere globale Variable für TypeScript
@@ -586,12 +587,14 @@ export class DataStore {
           const process = processes.find((p) => p.id === window.processId);
           if (process) {
             console.log(`[DataStore] Found process:`, process);
-            // Import createPersistentIdentifier function (this will be handled in main.ts)
-            const persistentId = {
-              executablePath: process.path || "",
-              executableName: process.name,
-              titlePattern: window.title, // Verwende den Fenstertitel als Pattern
+
+            // Verwende die gemeinsame createPersistentIdentifier Funktion
+            // Diese normalisiert executableName und escaped Steuerzeichen im Titel
+            const processWithTitle = {
+              ...process,
+              title: window.title, // Verwende den Fenstertitel als Pattern
             };
+            const persistentId = createPersistentIdentifier(processWithTitle);
 
             // Prüfen, ob der persistente Identifikator bereits existiert
             const exists = theme.persistentProcesses.some(
@@ -670,8 +673,16 @@ export class DataStore {
       .map((w) => w.title);
 
     console.log(
-      `[DataStore] Entferne ${windowIds.length} Fenster aus Thema ${themeId}:`,
+      `[DataStore DEBUG] Entferne ${windowIds.length} Fenster aus Thema ${themeId}:`
+    );
+    console.log(`[DataStore DEBUG] - windowIds:`, windowIds);
+    console.log(
+      `[DataStore DEBUG] - windowTitlesToRemove:`,
       windowTitlesToRemove
+    );
+    console.log(
+      `[DataStore DEBUG] - Aktuelle persistentProcesses:`,
+      theme.persistentProcesses
     );
 
     // Entferne Fenster aus dem windows Array
@@ -689,9 +700,57 @@ export class DataStore {
 
       theme.persistentProcesses = theme.persistentProcesses.filter(
         (persistentProcess) => {
+          // DEBUG: Detaillierter Vergleich der Titel
+          console.log(
+            `[DataStore DEBUG] Vergleiche persistentProcess.titlePattern mit Fenstertiteln:`
+          );
+          console.log(
+            `[DataStore DEBUG] - persistentProcess.titlePattern: "${persistentProcess.titlePattern}"`
+          );
+          console.log(
+            `[DataStore DEBUG] - persistentProcess.titlePattern (bytes):`,
+            persistentProcess.titlePattern
+              ? [...persistentProcess.titlePattern].map((c) => c.charCodeAt(0))
+              : []
+          );
+
           // Entferne persistente Identifikatoren, deren titlePattern mit einem der entfernten Fenster übereinstimmt
-          const shouldRemove = windowTitlesToRemove.some(
-            (title) => persistentProcess.titlePattern === title
+          const shouldRemove = windowTitlesToRemove.some((title) => {
+            console.log(
+              `[DataStore DEBUG] - Vergleiche mit Fenstertitel: "${title}"`
+            );
+            console.log(
+              `[DataStore DEBUG] - Fenstertitel (bytes):`,
+              [...title].map((c) => c.charCodeAt(0))
+            );
+
+            // WICHTIG: Intelligenter Vergleich der Titel
+            // Problem: title enthält echte Steuerzeichen (\x07 = Byte 7)
+            // titlePattern enthält literal "\x07" String (4 Bytes: \, x, 0, 7)
+            // Lösung: Konvertiere literal hex-escapes zu echten Steuerzeichen vor Vergleich
+
+            const titleWithRealControlChars = title; // Bereits echte Steuerzeichen
+            const patternWithRealControlChars = (
+              persistentProcess.titlePattern || ""
+            ).replace(/\\x([0-9A-Fa-f]{2})/g, (match, hex) => {
+              return String.fromCharCode(parseInt(hex, 16));
+            });
+
+            console.log(
+              `[DataStore DEBUG] - Original title: "${titleWithRealControlChars}"`
+            );
+            console.log(
+              `[DataStore DEBUG] - Pattern mit echten Steuerzeichen: "${patternWithRealControlChars}"`
+            );
+
+            const matches =
+              patternWithRealControlChars === titleWithRealControlChars;
+            console.log(`[DataStore DEBUG] - Intelligenter Match: ${matches}`);
+            return matches;
+          });
+
+          console.log(
+            `[DataStore DEBUG] - Soll entfernt werden: ${shouldRemove}`
           );
 
           if (shouldRemove) {

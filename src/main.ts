@@ -23,6 +23,7 @@ import {
 import { spawn, exec, execFile } from "child_process";
 import { DataStore } from "./main/dataStore";
 import { PersistentProcessIdentifier, Theme } from "./types";
+import { createPersistentIdentifier } from "./utils/processUtils";
 import * as url from "url";
 import * as fs from "fs";
 import * as os from "os";
@@ -1424,6 +1425,8 @@ function setupIpcHandlers() {
         // Für jede einzigartige Prozess-ID, rufe nur diese spezifische Information ab
         for (const processId of uniqueProcessIds) {
           try {
+            console.log(`[IPC DEBUG] Verarbeite Prozess-ID: ${processId}`);
+
             const script = `
               $process = Get-Process -Id ${processId} -ErrorAction SilentlyContinue
               if ($process) {
@@ -1431,26 +1434,108 @@ function setupIpcHandlers() {
                 $path = $null
                 try { $path = $process.MainModule.FileName } catch {}
                 
-                [PSCustomObject]@{
+                # Log original title for debugging
+                $originalTitle = $process.MainWindowTitle
+                Write-Host "[PS DEBUG] Original title: '$originalTitle'"
+                Write-Host "[PS DEBUG] Original title bytes: $([System.Text.Encoding]::UTF8.GetBytes($originalTitle) -join ' ')"
+                
+                # Escape control characters in window title for safe JSON parsing
+                $title = $process.MainWindowTitle
+                if ($title) {
+                  $title = $title -replace [char]0x00, '\\x00' -replace [char]0x01, '\\x01' -replace [char]0x02, '\\x02' -replace [char]0x03, '\\x03' -replace [char]0x04, '\\x04' -replace [char]0x05, '\\x05' -replace [char]0x06, '\\x06' -replace [char]0x07, '\\x07' -replace [char]0x08, '\\x08' -replace [char]0x0B, '\\x0B' -replace [char]0x0C, '\\x0C' -replace [char]0x0E, '\\x0E' -replace [char]0x0F, '\\x0F' -replace [char]0x10, '\\x10' -replace [char]0x11, '\\x11' -replace [char]0x12, '\\x12' -replace [char]0x13, '\\x13' -replace [char]0x14, '\\x14' -replace [char]0x15, '\\x15' -replace [char]0x16, '\\x16' -replace [char]0x17, '\\x17' -replace [char]0x18, '\\x18' -replace [char]0x19, '\\x19' -replace [char]0x1A, '\\x1A' -replace [char]0x1B, '\\x1B' -replace [char]0x1C, '\\x1C' -replace [char]0x1D, '\\x1D' -replace [char]0x1E, '\\x1E' -replace [char]0x1F, '\\x1F' -replace [char]0x7F, '\\x7F'
+                  Write-Host "[PS DEBUG] Escaped title: '$title'"
+                }
+                
+                $jsonObj = [PSCustomObject]@{
                   id = $process.Id
                   name = $name
                   path = $path
-                  title = $process.MainWindowTitle
-                } | ConvertTo-Json
+                  title = $title
+                }
+                
+                Write-Host "[PS DEBUG] About to convert to JSON:"
+                $jsonString = $jsonObj | ConvertTo-Json
+                Write-Host "[PS DEBUG] JSON result: $jsonString"
+                $jsonString
               }
             `;
 
+            console.log(
+              `[IPC DEBUG] Führe PowerShell-Script aus für Prozess ${processId}`
+            );
             const result = await runPowerShellCommand(script);
+            console.log(
+              `[IPC DEBUG] PowerShell-Rohergebnis für Prozess ${processId}:`,
+              JSON.stringify(result)
+            );
+
             if (result && result.trim()) {
-              const process = JSON.parse(result);
-              processes.push({
-                id: process.id,
-                name: formatAppName(
-                  process.name.toLowerCase().replace(".exe", "")
-                ),
-                title: process.title || process.name,
-                path: process.path || "",
-              });
+              // Extrahiere das vollständige mehrzeilige JSON (alles nach dem letzten Debug-Log)
+              const lines = result.split("\n");
+              let jsonStartIndex = -1;
+
+              // Finde den Index wo das echte JSON beginnt (nach allen Debug-Logs)
+              for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i].trim();
+                if (line.startsWith("{")) {
+                  jsonStartIndex = i;
+                  break;
+                }
+              }
+
+              let jsonString = "";
+              if (jsonStartIndex >= 0) {
+                // Sammle alle Zeilen vom JSON-Start bis zum Ende
+                const jsonLines = [];
+                for (let i = jsonStartIndex; i < lines.length; i++) {
+                  const line = lines[i].trim();
+                  if (line) {
+                    // Ignoriere leere Zeilen
+                    jsonLines.push(line);
+                  }
+                }
+                jsonString = jsonLines.join("");
+              }
+
+              console.log(
+                `[IPC DEBUG] Extrahiertes vollständiges JSON für Prozess ${processId}:`,
+                JSON.stringify(jsonString)
+              );
+
+              if (jsonString) {
+                try {
+                  // WICHTIG: Entferne Steuerzeichen KOMPLETT!
+                  // \\x07 (BEL) und andere sind NICHT gültiges JSON - sie sind JSON5!
+                  // JSON unterstützt nur: \", \\, \/, \b, \f, \n, \r, \t und \uXXXX
+                  const cleanJsonString = jsonString.replace(
+                    /[\x00-\x1F\x7F]/g,
+                    ""
+                  );
+
+                  const process = JSON.parse(cleanJsonString);
+                  processes.push({
+                    id: process.id,
+                    name: formatAppName(
+                      process.name.toLowerCase().replace(".exe", "")
+                    ),
+                    title: process.title || process.name,
+                    path: process.path || "",
+                  });
+                } catch (parseError) {
+                  console.error(
+                    `[IPC] JSON-Parse-Fehler für Prozess ${processId}:`,
+                    parseError
+                  );
+                }
+              } else {
+                console.log(
+                  `[IPC DEBUG] Kein gültiges JSON gefunden für Prozess ${processId}`
+                );
+              }
+            } else {
+              console.log(
+                `[IPC DEBUG] Leeres PowerShell-Ergebnis für Prozess ${processId}`
+              );
             }
           } catch (error) {
             console.error(
@@ -1718,7 +1803,9 @@ function setupIpcHandlers() {
 
           const result = await runPowerShellCommand(script);
           if (result && result.trim()) {
-            process = JSON.parse(result);
+            // Bereinige Steuerzeichen die JSON.parse() zum Absturz bringen
+            const cleanedResult = result.replace(/[\x00-\x1F\x7F]/g, "");
+            process = JSON.parse(cleanedResult);
           }
         } catch (error) {
           console.error(
@@ -2791,20 +2878,7 @@ function sendStatusToWindow(text: string) {
   }
 }
 
-// Hilfsfunktion zum Erstellen eines persistenten Identifikators für einen Prozess
-function createPersistentIdentifier(
-  process: ProcessInfo
-): PersistentProcessIdentifier {
-  // Stelle sicher, dass der executableName normalisiert wird, um Konsistenz zu gewährleisten
-  // Wir normalisieren den Namen, indem wir ihn in Kleinbuchstaben umwandeln
-  const normalizedName = process.name ? process.name.toLowerCase() : "";
-
-  return {
-    executablePath: process.path,
-    executableName: normalizedName, // Normalisierter Name für konsistente Vergleiche
-    titlePattern: process.title,
-  };
-}
+// Die createPersistentIdentifier Funktion wird jetzt aus processUtils importiert
 
 /**
  * Findet einen passenden Prozess anhand eines persistenten Identifikators
