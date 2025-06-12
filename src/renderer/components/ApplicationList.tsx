@@ -69,7 +69,7 @@ const NewGroupInput = ({
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Gruppe benennen"
+        placeholder="Group name"
         autoFocus
       />
       <div className="color-options">
@@ -745,7 +745,9 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
               <div className="popup-process-list">
                 {themeProcesses.map((process) => (
                   <div key={process.id} className="popup-process-item">
-                    <span>{process.title || process.name}</span>
+                    <span data-posthog-mask>
+                      {process.title || process.name}
+                    </span>
                     <span
                       className="popup-process-remove"
                       onClick={(e) => {
@@ -948,7 +950,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
               onClick={() => setShowNewGroupInput(true)}
             >
               <div className="group-item-content">
-                <div className="group-item-name">Neue Gruppe</div>
+                <div className="group-item-name">New Group</div>
                 <div className="group-item-actions">
                   <div className="group-empty-icon">+</div>
                 </div>

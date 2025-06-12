@@ -41,6 +41,18 @@ const TrialSignupModal: React.FC<TrialSignupModalProps> = ({ onComplete }) => {
     }
   };
 
+  const handleTermsClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const { shell } = window.require("electron");
+    shell.openExternal("https://switchfast.io/terms");
+  };
+
+  const handlePrivacyClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const { shell } = window.require("electron");
+    shell.openExternal("https://switchfast.io/privacy");
+  };
+
   return (
     <div className="trial-signup-modal">
       <div className="modal-content">
@@ -77,6 +89,7 @@ const TrialSignupModal: React.FC<TrialSignupModalProps> = ({ onComplete }) => {
             href="https://switchfast.io/terms"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={handleTermsClick}
           >
             Nutzungsbedingungen
           </a>
@@ -85,6 +98,7 @@ const TrialSignupModal: React.FC<TrialSignupModalProps> = ({ onComplete }) => {
             href="https://switchfast.io/privacy"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={handlePrivacyClick}
           >
             Datenschutzrichtlinien
           </a>{" "}

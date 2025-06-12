@@ -52,6 +52,18 @@ const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
     shell.openExternal("https://www.switchfast.io");
   };
 
+  const handlePrivacyPolicyClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const { shell } = window.require("electron");
+    shell.openExternal("https://switchfast.io/privacy");
+  };
+
+  const handleTermsClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const { shell } = window.require("electron");
+    shell.openExternal("https://switchfast.io/terms");
+  };
+
   return (
     <div className="min-h-screen bg-[#2D2D3F] flex items-center justify-center p-4">
       <div className="max-w-lg w-full bg-[#2D2D3F] rounded-lg shadow-xl border border-gray-700 max-h-[90vh] flex flex-col">
@@ -135,18 +147,16 @@ const PrivacyConsentModal: React.FC<PrivacyConsentModalProps> = ({
                 More information can be found in our{" "}
                 <a
                   href="https://switchfast.io/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[#78d97c] hover:underline focus:outline-none"
+                  onClick={handlePrivacyPolicyClick}
+                  className="text-[#78d97c] hover:underline focus:outline-none cursor-pointer"
                 >
                   Privacy Policy
                 </a>{" "}
                 and{" "}
                 <a
                   href="https://switchfast.io/terms"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[#78d97c] hover:underline focus:outline-none"
+                  onClick={handleTermsClick}
+                  className="text-[#78d97c] hover:underline focus:outline-none cursor-pointer"
                 >
                   Terms of Service
                 </a>

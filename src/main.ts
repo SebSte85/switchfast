@@ -31,7 +31,19 @@ import { stderr } from "process";
 import Store from "electron-store";
 import { autoUpdater } from "electron-updater";
 import * as electronLog from "electron-log";
-import { initAnalytics, trackEvent, shutdownAnalytics } from "./main/analytics";
+import {
+  initAnalytics,
+  trackEvent,
+  shutdownAnalytics,
+  setupGlobalErrorHandlers,
+  captureException,
+} from "./main/analytics";
+import {
+  initEnhancedAnalytics,
+  captureEnhancedException,
+  trackUserAction,
+  trackPerformanceMetric,
+} from "./main/enhancedAnalytics";
 import { initializeLicenseSystem } from "./main/licenseIntegration";
 import { getLicenseManager } from "./main/licensing";
 import AutoLaunch from "auto-launch";
@@ -91,11 +103,12 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false,
     },
-    icon: path.join(__dirname, "assets/icon.png"),
+    icon: path.join(__dirname, "assets/logo 256.png"),
     frame: false,
     backgroundColor: "#414159",
     alwaysOnTop: compactMode,
     title: "switchfast",
+    show: false, // Verhindert leeren Rahmen beim Start
   });
 
   // Mache mainWindow als globale Variable verfügbar für DataStore
@@ -116,10 +129,21 @@ function createWindow() {
     })
   );
 
+  // Fenster anzeigen, sobald es bereit ist (Fallback)
+  mainWindow.once("ready-to-show", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
+  });
+
   // Track when UI window is created (but don't track event here anymore)
   mainWindow.webContents.once("did-finish-load", () => {
     const windowLoadDuration = Date.now() - windowCreateStart;
     // Fenster geladen
+    // Fenster anzeigen, wenn der Inhalt vollständig geladen ist
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
   });
 
   // Öffne Developer Tools nur in der Entwicklung
@@ -150,7 +174,7 @@ function createTray() {
   try {
     // Versuche, das Icon aus dem assets-Ordner zu laden
     const fs = require("fs");
-    const iconPath = path.join(__dirname, "assets/icon.png");
+    const iconPath = path.join(__dirname, "assets/logo 256.png");
 
     // Prüfe, ob das Icon existiert
     if (!fs.existsSync(iconPath)) {
@@ -212,6 +236,11 @@ function registerShortcuts() {
           "[Shortcut] Fehler bei der Registrierung der Theme-Shortcuts:",
           error
         );
+        captureException(error as Error, {
+          function: "registerShortcuts",
+          context: "Failed to register theme shortcuts",
+          step: "registerSavedShortcuts",
+        });
       }
     }, 2000); // Kurze Verzögerung, um sicherzustellen, dass die App vollständig geladen ist
   } catch (error) {
@@ -219,6 +248,11 @@ function registerShortcuts() {
       "[Shortcut] Fehler bei der Registrierung des globalen Shortcuts:",
       error
     );
+    captureException(error as Error, {
+      function: "registerShortcuts",
+      context: "Failed to register global shortcut",
+      step: "global_shortcut_registration",
+    });
   }
 }
 
@@ -230,61 +264,32 @@ let shortcutsRegistered = false;
 
 function registerThemeShortcut(themeId: string, shortcut: string): boolean {
   try {
-    console.log(
-      `[Shortcut] Registriere Shortcut für Theme ${themeId}: ${shortcut}`
-    );
-
-    // Wenn bereits ein Shortcut für dieses Theme existiert, entferne ihn zuerst
-    if (registeredShortcuts.has(themeId)) {
-      const oldShortcut = registeredShortcuts.get(themeId);
-      if (oldShortcut) {
-        try {
-          console.log(
-            `[Shortcut] Entferne alten Shortcut für Theme ${themeId}: ${oldShortcut}`
-          );
-          globalShortcut.unregister(oldShortcut);
-        } catch (err) {
-          console.error(
-            `[Shortcut] Fehler beim Entfernen des alten Shortcuts für Theme ${themeId}:`,
-            err
-          );
-        }
+    const existingShortcut = registeredShortcuts.get(themeId);
+    if (existingShortcut && existingShortcut !== shortcut) {
+      try {
+        globalShortcut.unregister(existingShortcut);
+      } catch (error) {
+        console.error(
+          `[Shortcut] Fehler beim Entfernen des alten Shortcuts für Theme ${themeId}:`,
+          error
+        );
       }
     }
 
-    // Prüfe, ob der Shortcut gültig ist
     if (!shortcut || shortcut.trim() === "") {
-      console.warn(
-        `[Shortcut] Ungültiger Shortcut für Theme ${themeId}: "${shortcut}"`
-      );
       return false;
     }
 
     const formattedShortcut = formatShortcutForElectron(shortcut);
-    console.log(
-      `[Shortcut] Formatierter Shortcut für Theme ${themeId}: ${formattedShortcut}`
-    );
 
-    // Überprüfen, ob Shortcut bereits registriert ist und entferne ihn
     if (globalShortcut.isRegistered(formattedShortcut)) {
-      console.log(
-        `[Shortcut] Shortcut ${formattedShortcut} ist bereits registriert, wird entfernt`
-      );
       globalShortcut.unregister(formattedShortcut);
     }
 
-    // Definiere den Handler für diesen Shortcut
     const handler = () => {
-      if (!mainWindow) {
-        console.warn(
-          `[Shortcut] Hauptfenster nicht verfügbar bei Aktivierung von ${themeId}`
-        );
+      if (!mainWindow || mainWindow.isDestroyed()) {
         return;
       }
-
-      console.log(
-        `[Shortcut] Shortcut ${formattedShortcut} für Theme ${themeId} wurde aktiviert`
-      );
 
       const theme = dataStore.getTheme(themeId);
       if (!theme) {
@@ -292,7 +297,6 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         return;
       }
 
-      // Track shortcut_used event with PostHog
       trackEvent("shortcut_used", {
         themeId: themeId,
         theme_name: theme.name || "unknown",
@@ -300,8 +304,12 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         action_type: "activate",
       });
 
-      // PERFORMANCE-OPTIMIERUNG: Sofort das Theme aktivieren, ohne auf PID-Aktualisierung zu warten
-      // Aktiviere Theme sofort
+      // Track user action for enhanced analytics
+      trackUserAction(`shortcut_used:${theme.name}`, {
+        themeId: themeId,
+        shortcut: formattedShortcut,
+      });
+
       if (mainWindow)
         mainWindow.webContents.send(
           "activate-theme-and-minimize",
@@ -309,7 +317,6 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
           theme
         );
 
-      // Aktualisiere die PIDs im Hintergrund, ohne den Shortcut-Trigger zu blockieren
       setTimeout(() => {
         updateThemeProcessIds(theme)
           .then(() => {
@@ -326,44 +333,33 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
       }, 0);
     };
 
-    // Speichere den Handler in der Map
     shortcutHandlers.set(themeId, handler);
 
-    // Registriere den Shortcut mit dem Handler
     const success = globalShortcut.register(formattedShortcut, handler);
 
-    if (!success) {
-      console.error(
-        `[Shortcut] Registrierung des Shortcuts ${formattedShortcut} für Theme ${themeId} fehlgeschlagen`
-      );
-      shortcutHandlers.delete(themeId);
-      return false;
-    }
+    if (success) {
+      registeredShortcuts.set(themeId, formattedShortcut);
 
-    // Speichere den registrierten Shortcut
-    registeredShortcuts.set(themeId, formattedShortcut);
-    console.log(
-      `[Shortcut] Shortcut ${formattedShortcut} für Theme ${themeId} erfolgreich registriert`
-    );
-
-    // Verifiziere, dass der Shortcut tatsächlich registriert wurde
-    if (globalShortcut.isRegistered(formattedShortcut)) {
-      console.log(
-        `[Shortcut] Verifizierung erfolgreich: ${formattedShortcut} ist registriert`
-      );
+      if (globalShortcut.isRegistered(formattedShortcut)) {
+        return true;
+      } else {
+        registeredShortcuts.delete(themeId);
+        return false;
+      }
     } else {
-      console.error(
-        `[Shortcut] Verifizierung fehlgeschlagen: ${formattedShortcut} ist NICHT registriert!`
-      );
       return false;
     }
-
-    return true;
   } catch (error) {
     console.error(
       `[Shortcut] Unerwarteter Fehler bei der Registrierung des Shortcuts für Theme ${themeId}:`,
       error
     );
+    captureException(error as Error, {
+      function: "registerThemeShortcut",
+      context: "Failed to register theme shortcut",
+      themeId: themeId,
+      shortcut: shortcut,
+    });
     return false;
   }
 }
@@ -438,57 +434,38 @@ function formatShortcutForElectron(shortcut: string): string {
   return formatted;
 }
 
-function unregisterThemeShortcut(themeId: string): boolean {
-  const shortcutEntry = registeredShortcuts.get(themeId);
-  console.log(
-    `[Shortcut] unregisterThemeShortcut called for themeId: ${themeId}. Current shortcut in map: ${
-      shortcutEntry || "Not found"
-    }`
-  );
+function unregisterThemeShortcut(themeId: string): void {
   try {
-    if (registeredShortcuts.has(themeId)) {
-      const shortcut = registeredShortcuts.get(themeId);
-      if (shortcut && shortcut.trim() !== "") {
-        // Ensure shortcut string is not empty
-        try {
-          console.log(
-            `[Shortcut] Attempting to unregister shortcut: "${shortcut}" for themeId: ${themeId}`
-          );
-          globalShortcut.unregister(shortcut);
-          registeredShortcuts.delete(themeId);
-          console.log(
-            `[Shortcut] Successfully unregistered and removed shortcut "${shortcut}" for themeId: ${themeId} from map.`
-          );
-          return true;
-        } catch (error) {
-          console.error(
-            `[Shortcut] Error during globalShortcut.unregister("${shortcut}") for themeId ${themeId}:`,
-            error
-          );
-          registeredShortcuts.delete(themeId); // Remove from map despite error
-          console.warn(
-            `[Shortcut] Removed shortcut for themeId ${themeId} from internal map despite unregistration error.`
-          );
-          return false; // Indicate failure
-        }
-      } else {
-        console.warn(
-          `[Shortcut] ThemeId ${themeId} found in registeredShortcuts, but shortcut string was empty/invalid. Removing from map.`
+    // Entfernt: [Shortcut] unregisterThemeShortcut called
+    const shortcut = registeredShortcuts.get(themeId);
+
+    if (shortcut) {
+      // Entfernt: [Shortcut] Attempting to unregister shortcut
+      try {
+        globalShortcut.unregister(shortcut);
+        registeredShortcuts.delete(themeId);
+        // Entfernt: [Shortcut] Successfully unregistered and removed shortcut
+      } catch (error) {
+        console.error(
+          `[Shortcut] Error during globalShortcut.unregister("${shortcut}") for themeId ${themeId}:`,
+          error
         );
-        registeredShortcuts.delete(themeId); // Clean up invalid entry
-        return true; // Considered a "clean" state as there's no valid shortcut to unregister.
+        registeredShortcuts.delete(themeId);
+        // Entfernt: [Shortcut] Removed shortcut from internal map despite unregistration error
       }
+    } else if (registeredShortcuts.has(themeId)) {
+      registeredShortcuts.delete(themeId);
+      // Entfernt: [Shortcut] ThemeId found in registeredShortcuts, but shortcut string was empty/invalid
+    } else {
+      // Entfernt: [Shortcut] No shortcut found in internal map
     }
-    console.log(
-      `[Shortcut] No shortcut found in internal map for themeId ${themeId}. Nothing to unregister.`
-    );
-    return true; // No shortcut was registered with us for this themeId.
+
+    shortcutHandlers.delete(themeId);
   } catch (error) {
     console.error(
       `[Shortcut] Unexpected error in unregisterThemeShortcut for themeId ${themeId}:`,
       error
     );
-    return false;
   }
 }
 /**
@@ -556,15 +533,8 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
 
     // PowerShell-Befehl ausführen und Ausgabe verarbeiten
     const stdout = await runPowerShellCommand(command);
-    console.log(
-      "[getRunningApplications] PowerShell output length:",
-      stdout?.length || 0
-    );
 
     if (!stdout || stdout.trim() === "") {
-      console.log(
-        "[getRunningApplications] No output from PowerShell, returning empty array"
-      );
       return [];
     }
 
@@ -585,10 +555,6 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
         const parentId = parseInt(parentIdStr);
 
         if (isNaN(id)) {
-          console.log(
-            "[getRunningApplications] Skipping line with invalid ID:",
-            line
-          );
           return null;
         }
 
@@ -602,20 +568,15 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
       })
       .filter((proc): proc is ProcessInfo => proc !== null);
 
-    console.log(
-      "[getRunningApplications] Returning",
-      processes.length,
-      "processes"
-    );
-    if (processes.length > 0) {
-      console.log(
-        "[getRunningApplications] First few processes:",
-        processes.slice(0, 3)
-      );
-    }
     return processes;
   } catch (error) {
     console.error("[getRunningApplications] Error:", error);
+    captureEnhancedException(error as Error, {
+      function: "getRunningApplications",
+      error_category: "system",
+      error_severity: "medium",
+      user_action: "app_initialization",
+    });
     return [];
   }
 }
@@ -1140,6 +1101,13 @@ async function showDesktopExceptApps(
     return true;
   } catch (error) {
     console.error("[showDesktopExceptApps] Error:", error);
+    captureEnhancedException(error as Error, {
+      function: "showDesktopExceptApps",
+      error_category: "system",
+      error_severity: "high",
+      process_ids: appIdsToProtect,
+      user_action: "desktop_management",
+    });
     return false;
   }
 }
@@ -1200,19 +1168,9 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
   try {
     // Starting process query with windows
     const processes = await getRunningApplications();
-    console.log(
-      "[getProcessesWithWindows] Got",
-      processes.length,
-      "base processes"
-    );
-
     // DEBUG: Zeige alle Browser-Prozesse
     const braveProcesses = processes.filter((p) =>
       p.name.toLowerCase().includes("brave")
-    );
-    console.log(
-      `[getProcessesWithWindows] DEBUG: Gefunden ${braveProcesses.length} Brave-Prozesse:`,
-      braveProcesses.map((p) => `${p.name}(${p.id})`)
     );
 
     const themes = dataStore.getThemes();
@@ -1275,15 +1233,8 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
 
     // Hole die Fenster
     const windowsOutput = await runPowerShellCommand(command);
-    console.log(
-      "[getProcessesWithWindows] Windows output length:",
-      windowsOutput?.length || 0
-    );
 
     if (!windowsOutput || windowsOutput.trim() === "") {
-      console.log(
-        "[getProcessesWithWindows] No windows output, returning empty array"
-      );
       return [];
     }
 
@@ -1313,10 +1264,6 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
       const braveProcess = processes.find((p) => p.id === w.processId);
       return braveProcess && braveProcess.name.toLowerCase().includes("brave");
     });
-    console.log(
-      `[getProcessesWithWindows] DEBUG: Gefunden ${braveWindows.length} Brave-Fenster:`,
-      braveWindows.map((w) => `${w.hwnd}:"${w.title}" (PID:${w.processId})`)
-    );
 
     // Erstelle eine Map von Prozess-IDs zu ihren Fenstern
     const windowsByProcessId = new Map<number, WindowInfo[]>();
@@ -1346,21 +1293,14 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
     const finalBraveProcesses = result.filter((p) =>
       p.name.toLowerCase().includes("brave")
     );
-    console.log(
-      `[getProcessesWithWindows] DEBUG: Final ${finalBraveProcesses.length} Brave-Prozesse mit Fenstern:`,
-      finalBraveProcesses.map(
-        (p) => `${p.name}(${p.id}) mit ${p.windows?.length || 0} Fenstern`
-      )
-    );
 
-    console.log(
-      "[getProcessesWithWindows] Returning",
-      result.length,
-      "processes with windows"
-    );
     return result;
   } catch (error) {
     console.error("[getProcessesWithWindows] Error:", error);
+    captureException(error as Error, {
+      function: "getProcessesWithWindows",
+      context: "Failed to retrieve processes with windows",
+    });
     return [];
   }
 }
@@ -1429,19 +1369,7 @@ function setupIpcHandlers() {
       );
 
       // Attempt to unregister the shortcut FIRST.
-      const unregisterSuccess = unregisterThemeShortcut(themeId);
-
-      if (!unregisterSuccess) {
-        console.error(
-          `[IPC] unregisterThemeShortcut returned false for themeId: ${themeId}. The shortcut might still be active.`
-        );
-        // Optionally, you could decide to not delete the theme if shortcut unregistration fails critically
-        // For now, we'll proceed with theme deletion but log the error.
-      } else {
-        console.log(
-          `[IPC] Shortcut unregistration for themeId ${themeId} was successful or no shortcut was registered.`
-        );
-      }
+      unregisterThemeShortcut(themeId);
 
       // Delete the theme data from the store
       dataStore.deleteTheme(themeId);
@@ -1478,8 +1406,6 @@ function setupIpcHandlers() {
         // Für jede einzigartige Prozess-ID, rufe nur diese spezifische Information ab
         for (const processId of uniqueProcessIds) {
           try {
-            console.log(`[IPC DEBUG] Verarbeite Prozess-ID: ${processId}`);
-
             const script = `
               $process = Get-Process -Id ${processId} -ErrorAction SilentlyContinue
               if ($process) {
@@ -1513,14 +1439,7 @@ function setupIpcHandlers() {
               }
             `;
 
-            console.log(
-              `[IPC DEBUG] Führe PowerShell-Script aus für Prozess ${processId}`
-            );
             const result = await runPowerShellCommand(script);
-            console.log(
-              `[IPC DEBUG] PowerShell-Rohergebnis für Prozess ${processId}:`,
-              JSON.stringify(result)
-            );
 
             if (result && result.trim()) {
               // Extrahiere das vollständige mehrzeilige JSON (alles nach dem letzten Debug-Log)
@@ -1550,11 +1469,6 @@ function setupIpcHandlers() {
                 jsonString = jsonLines.join("");
               }
 
-              console.log(
-                `[IPC DEBUG] Extrahiertes vollständiges JSON für Prozess ${processId}:`,
-                JSON.stringify(jsonString)
-              );
-
               if (jsonString) {
                 try {
                   // WICHTIG: Entferne Steuerzeichen KOMPLETT!
@@ -1580,15 +1494,7 @@ function setupIpcHandlers() {
                     parseError
                   );
                 }
-              } else {
-                console.log(
-                  `[IPC DEBUG] Kein gültiges JSON gefunden für Prozess ${processId}`
-                );
               }
-            } else {
-              console.log(
-                `[IPC DEBUG] Leeres PowerShell-Ergebnis für Prozess ${processId}`
-              );
             }
           } catch (error) {
             console.error(
@@ -1598,10 +1504,6 @@ function setupIpcHandlers() {
             // Weiter mit den anderen Prozessen, auch wenn einer fehlschlägt
           }
         }
-
-        console.log(
-          `[IPC] Optimiert: ${processes.length} spezifische Prozesse für ${windows.length} Fenster abgerufen`
-        );
 
         // Fenster zum Thema hinzufügen (inklusive automatischer Erstellung von persistenten Identifikatoren)
         dataStore.addWindowsToTheme(themeId, windows, processes);
@@ -1622,25 +1524,8 @@ function setupIpcHandlers() {
     "remove-windows-from-theme",
     async (_, themeId: string, windowIds: number[]) => {
       try {
-        console.log(`[BACKEND STEP 1] remove-windows-from-theme aufgerufen:`);
-        console.log(`[BACKEND STEP 1] - themeId: ${themeId}`);
-        console.log(`[BACKEND STEP 1] - windowIds:`, windowIds);
-
         // Theme vor Änderung anzeigen
         const themeBefore = dataStore.getTheme(themeId);
-        console.log(
-          `[BACKEND STEP 1] - Theme VORHER:`,
-          JSON.stringify(
-            {
-              id: themeBefore?.id,
-              name: themeBefore?.name,
-              applications: themeBefore?.applications,
-              windows: (themeBefore as any)?.windows,
-            },
-            null,
-            2
-          )
-        );
 
         // Thema abrufen
         const theme = dataStore.getTheme(themeId);
@@ -1654,23 +1539,6 @@ function setupIpcHandlers() {
 
         // Theme nach Änderung anzeigen
         const themeAfter = dataStore.getTheme(themeId);
-        console.log(
-          `[BACKEND STEP 2] - Theme NACHHER:`,
-          JSON.stringify(
-            {
-              id: themeAfter?.id,
-              name: themeAfter?.name,
-              applications: themeAfter?.applications,
-              windows: (themeAfter as any)?.windows,
-            },
-            null,
-            2
-          )
-        );
-
-        console.log(
-          `[BACKEND STEP 2] ${windowIds.length} Fenster erfolgreich aus Thema ${themeId} entfernt`
-        );
         return true;
       } catch (error) {
         console.error(
@@ -1917,9 +1785,6 @@ function setupIpcHandlers() {
           if (wasNewlyAdded) {
             const finalTheme = dataStore.getTheme(themeId);
             if (finalTheme) {
-              console.log(
-                `[Analytics] Tracking app_added_to_theme event for theme ${finalTheme.name}`
-              );
               trackEvent("app_added_to_theme", {
                 theme_name: finalTheme.name,
                 apps_in_theme:
@@ -1928,18 +1793,7 @@ function setupIpcHandlers() {
                     : finalTheme.applications?.length || 0,
                 apps_added: 1,
               });
-              console.log(
-                `[Analytics] app_added_to_theme event tracked successfully`
-              );
-            } else {
-              console.log(
-                `[Analytics] Could not track app_added_to_theme - finalTheme is null`
-              );
             }
-          } else {
-            console.log(
-              `[Analytics] Not tracking app_added_to_theme - wasNewlyAdded is false`
-            );
           }
 
           console.log(
@@ -2147,6 +2001,9 @@ function setupIpcHandlers() {
   ipcMain.on(
     "toggle-compact-mode",
     (_, isCompact: boolean, groupCount: number) => {
+      // Aktualisiere die globale compactMode Variable
+      compactMode = isCompact;
+
       // Berechne dynamische Breite basierend auf Gruppenanzahl
       let width = 300; // Mindestbreite
       if (isCompact && groupCount > 0) {
@@ -2157,7 +2014,7 @@ function setupIpcHandlers() {
 
       // Neue Fenstergröße für Kompaktmodus
       const newSize = isCompact
-        ? { width, height: 120, alwaysOnTop: true }
+        ? { width, height: 120, alwaysOnTop: false }
         : { width: 600, height: 680, alwaysOnTop: false };
 
       // Fenstereigenschaften anpassen und Übergang berücksichtigen
@@ -2457,7 +2314,7 @@ function startShortcutWatchdog() {
           );
 
           // Versuche, den Shortcut neu zu registrieren
-          const theme = dataStore.getThemes().find((t) => t.id === themeId);
+          const theme = dataStore.getTheme(themeId);
           if (theme && theme.shortcut) {
             registerThemeShortcut(themeId, theme.shortcut);
           }
@@ -2645,6 +2502,12 @@ app.whenReady().then(async () => {
   // Initialize analytics
   initAnalytics();
 
+  // Initialize enhanced analytics with rich context
+  initEnhancedAnalytics();
+
+  // Setup global error handlers for error tracking
+  setupGlobalErrorHandlers();
+
   // Lizenzsystem initialisieren
   initializeLicenseSystem();
 
@@ -2683,6 +2546,8 @@ app.whenReady().then(async () => {
 
   // Startup-Zeit wird jetzt im Frontend getrackt wenn Loading Screen verschwindet
   console.log(`[App] Initialisierung abgeschlossen`);
+
+  // PostHog Error Tracking is now working correctly with proper structure
 
   app.on("activate", () => {
     if (!mainWindow) {
@@ -2969,8 +2834,6 @@ function findMatchingProcess(
  * Stellt Prozesszuordnungen nach einem Neustart wieder her und startet fehlende Anwendungen
  */
 async function restoreProcessAssociations() {
-  console.log("[Restore] Beginne Wiederherstellung der Prozesszuordnungen...");
-
   // Bereinige zuerst konflikthafte Prozess-IDs (für Browser-Subprozesse)
   dataStore.cleanupConflictingProcessIds();
 
@@ -2979,10 +2842,6 @@ async function restoreProcessAssociations() {
 
   // Aktuelle Prozesse MIT Windows abrufen (wichtig für restoreWindowHandles)
   const currentProcesses = await getProcessesWithWindows();
-
-  console.log(
-    `[Restore] ${themes.length} Themen und ${currentProcesses.length} laufende Prozesse gefunden.`
-  );
 
   // Window-Handles für Browser-Subprozesse wiederherstellen
   await restoreWindowHandles(themes, currentProcesses);
@@ -2994,10 +2853,6 @@ async function restoreProcessAssociations() {
   themes.forEach((theme) => {
     // Für jeden persistenten Prozessidentifikator im Thema
     if (theme.persistentProcesses && theme.persistentProcesses.length > 0) {
-      console.log(
-        `[Restore] Verarbeite Thema "${theme.name}" mit ${theme.persistentProcesses.length} persistenten Prozessen.`
-      );
-
       theme.persistentProcesses.forEach((persistentId) => {
         // Passenden aktuellen Prozess finden
         const matchingProcess = findMatchingProcess(
@@ -3006,29 +2861,14 @@ async function restoreProcessAssociations() {
         );
 
         if (matchingProcess) {
-          console.log(
-            `[Restore] Passenden Prozess gefunden: ${matchingProcess.name} (${matchingProcess.id})`
-          );
-
           // Nur Prozess-ID hinzufügen wenn das Theme keine Window-Handles hat
           if (!theme.windows || theme.windows.length === 0) {
             if (!theme.processes.includes(matchingProcess.id)) {
-              console.log(
-                `[Restore] Füge Prozess ${matchingProcess.id} zum Thema ${theme.id} hinzu.`
-              );
               theme.processes.push(matchingProcess.id);
               dataStore.updateTheme(theme.id, theme);
             }
-          } else {
-            console.log(
-              `[Restore] Theme "${theme.name}" hat Window-Handles, überspringe Prozess-ID-Zuordnung`
-            );
           }
         } else {
-          console.log(
-            `[Restore] Kein passender Prozess für ${persistentId.executableName} gefunden.`
-          );
-
           // Prüfen, ob die Anwendung gestartet werden kann
           if (persistentId.executablePath) {
             // Prüfen, ob die Anwendung bereits in der Liste der zu startenden Anwendungen ist
@@ -3037,67 +2877,39 @@ async function restoreProcessAssociations() {
             );
 
             if (!alreadyInStartList) {
-              console.log(
-                `[Restore] Füge ${persistentId.executableName} zur Liste der zu startenden Anwendungen hinzu.`
-              );
               applicationsToStart.push(persistentId);
             }
           }
         }
       });
-    } else {
-      console.log(
-        `[Restore] Thema "${theme.name}" hat keine persistenten Prozesse.`
-      );
     }
   });
-
-  console.log(
-    "[Restore] Wiederherstellung der Prozesszuordnungen abgeschlossen."
-  );
 
   // Starte die fehlenden Anwendungen
   if (applicationsToStart.length > 0) {
     // Sende Event an den Renderer, dass Anwendungen gestartet werden
     if (mainWindow) {
-      console.log("[Restore] Sende apps-starting Event an Renderer");
       mainWindow.webContents.send("apps-starting");
     }
 
-    console.log(
-      `[Restore] Starte ${applicationsToStart.length} fehlende Anwendungen...`
-    );
     await startMissingApplications(applicationsToStart);
 
     // Warte kurz und aktualisiere dann die Prozessliste, um die neuen Prozesse zu erfassen
-    console.log(
-      "[Restore] Warte auf Prozessstart und aktualisiere Zuordnungen..."
-    );
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
     // Aktualisiere die Prozesszuordnungen mit den neu gestarteten Anwendungen
     await updateProcessAssociations();
 
     // WICHTIG: Zweiter Restore-Durchlauf für Window-Handles nach dem Browser-Start
-    console.log("[Restore] Starte zweiten Window-Handle-Restore-Durchlauf...");
     setTimeout(async () => {
       try {
         const themes = dataStore.getThemes();
         const currentProcesses = await getProcessesWithWindows();
 
-        console.log("[Restore] === ZWEITER RESTORE-DURCHLAUF ===");
-        console.log(
-          `[Restore] ${themes.length} Themes, ${currentProcesses.length} Prozesse mit Fenstern`
-        );
-
         await restoreWindowHandles(themes, currentProcesses);
-        console.log("[Restore] Zweiter Restore-Durchlauf abgeschlossen.");
 
         // Sende Event an den Renderer, dass Apps gestartet wurden
         if (mainWindow) {
-          console.log(
-            "[Restore] Sende apps-started Event an Renderer (nach zweitem Restore)"
-          );
           mainWindow.webContents.send("apps-started");
         }
       } catch (error) {
@@ -3108,42 +2920,21 @@ async function restoreProcessAssociations() {
 
         // Fallback: Sende Event trotzdem
         if (mainWindow) {
-          console.log(
-            "[Restore] Sende apps-started Event an Renderer (Fallback nach Fehler)"
-          );
           mainWindow.webContents.send("apps-started");
         }
       }
     }, 3000); // Warte 3 Sekunden auf vollständigen Browser-Start
   } else {
-    console.log("[Restore] Keine fehlenden Anwendungen zu starten.");
-
     // WICHTIG: Auch hier zweiter Restore-Durchlauf für den Fall dass Browser bereits läuft
-    console.log(
-      "[Restore] Starte zweiten Window-Handle-Restore-Durchlauf (kein App-Start)..."
-    );
     setTimeout(async () => {
       try {
         const themes = dataStore.getThemes();
         const currentProcesses = await getProcessesWithWindows();
 
-        console.log(
-          "[Restore] === ZWEITER RESTORE-DURCHLAUF (KEIN APP-START) ==="
-        );
-        console.log(
-          `[Restore] ${themes.length} Themes, ${currentProcesses.length} Prozesse mit Fenstern`
-        );
-
         await restoreWindowHandles(themes, currentProcesses);
-        console.log(
-          "[Restore] Zweiter Restore-Durchlauf abgeschlossen (kein App-Start)."
-        );
 
         // Sende Event an den Renderer, dass Apps gestartet wurden
         if (mainWindow) {
-          console.log(
-            "[Restore] Sende apps-started Event an Renderer (nach zweitem Restore, kein App-Start)"
-          );
           mainWindow.webContents.send("apps-started");
         }
       } catch (error) {
@@ -3154,9 +2945,6 @@ async function restoreProcessAssociations() {
 
         // Fallback: Sende Event trotzdem
         if (mainWindow) {
-          console.log(
-            "[Restore] Sende apps-started Event an Renderer (Fallback, kein App-Start)"
-          );
           mainWindow.webContents.send("apps-started");
         }
       }
@@ -3179,55 +2967,21 @@ async function restoreWindowHandles(
   console.log(`[Restore] Zu verarbeitende Themes: ${themes.length}`);
 
   for (const theme of themes) {
-    console.log(`[Restore] === VERARBEITE THEME: "${theme.name}" ===`);
-    console.log(
-      `[Restore] persistentProcesses: ${theme.persistentProcesses?.length || 0}`
-    );
-    console.log(
-      `[Restore] existierende windows: ${theme.windows?.length || 0}`
-    );
-
     // Nur Themes mit persistenten Prozessen und existierenden Windows bearbeiten
     if (!theme.persistentProcesses || theme.persistentProcesses.length === 0) {
-      console.log(
-        `[Restore] SKIP: Theme "${theme.name}" hat keine persistenten Prozesse`
-      );
       continue;
     }
 
     if (!theme.windows || theme.windows.length === 0) {
-      console.log(`[Restore] SKIP: Theme "${theme.name}" hat keine Windows`);
       continue;
     }
-
-    console.log(
-      `[Restore] Verarbeite Theme "${theme.name}" mit ${theme.windows.length} Window-Handles...`
-    );
-    console.log(
-      `[Restore] Alte Windows:`,
-      theme.windows.map((w: any) => `${w.hwnd}:"${w.title}"`)
-    );
 
     // Sammle alle aktuellen Fenster für dieses Theme basierend auf titlePattern
     const newWindows: WindowInfo[] = [];
 
     theme.persistentProcesses.forEach(
       (persistentProcess: any, index: number) => {
-        console.log(`[Restore] --- PERSISTENTER PROZESS ${index + 1} ---`);
-        console.log(
-          `[Restore] Suche nach executableName: "${persistentProcess.executableName}"`
-        );
-        console.log(
-          `[Restore] executablePath: "${persistentProcess.executablePath}"`
-        );
-        console.log(
-          `[Restore] titlePattern: "${persistentProcess.titlePattern}"`
-        );
-
         if (!persistentProcess.titlePattern) {
-          console.log(
-            `[Restore] ❌ Kein titlePattern für ${persistentProcess.executableName}`
-          );
           return;
         }
 
@@ -3236,56 +2990,23 @@ async function restoreWindowHandles(
           const nameMatches =
             process.name.toLowerCase() ===
             persistentProcess.executableName.toLowerCase();
-          console.log(
-            `[Restore] Vergleiche "${process.name}" mit "${persistentProcess.executableName}" -> ${nameMatches}`
-          );
           return nameMatches;
         });
 
-        console.log(
-          `[Restore] Gefunden ${matchingProcesses.length} passende Prozesse für "${persistentProcess.executableName}"`
-        );
-
         if (matchingProcesses.length === 0) {
-          console.log(`[Restore] ❌ Keine passenden Prozesse gefunden!`);
-          console.log(
-            `[Restore] Verfügbare Prozessnamen:`,
-            currentProcesses.map((p) => p.name).slice(0, 10)
-          );
           return;
         }
 
         // Für jeden passenden Prozess, sammle alle Fenster die dem titlePattern entsprechen
         matchingProcesses.forEach((process, processIndex) => {
-          console.log(
-            `[Restore] Prüfe Prozess ${processIndex + 1}: ${
-              process.name
-            } (PID: ${process.id})`
-          );
-          console.log(
-            `[Restore] Prozess hat ${process.windows?.length || 0} Fenster`
-          );
-
           if (process.windows && process.windows.length > 0) {
             process.windows.forEach((window, windowIndex) => {
-              console.log(
-                `[Restore] Prüfe Fenster ${windowIndex + 1}: "${window.title}"`
-              );
-              console.log(
-                `[Restore] Gegen Pattern: "${persistentProcess.titlePattern}"`
-              );
-
               // VERBESSERTES TITEL-MATCHING: Berücksichtige Steuerzeichen-Behandlung
               let titleMatches = false;
-              let matchMethod = "";
 
               // Methode 1: Direkter Vergleich (für normale Titel ohne Steuerzeichen)
               if (window.title.includes(persistentProcess.titlePattern)) {
                 titleMatches = true;
-                matchMethod = "direkt";
-                console.log(
-                  `[Restore] ✅ MATCH (direkt): "${window.title}" enthält "${persistentProcess.titlePattern}"`
-                );
               }
 
               // Methode 2: Konvertiere escaped Steuerzeichen zu echten Steuerzeichen für Vergleich
@@ -3296,16 +3017,9 @@ async function restoreWindowHandles(
                     (match: string, hex: string) =>
                       String.fromCharCode(parseInt(hex, 16))
                   );
-                console.log(
-                  `[Restore] Versuche escaped Pattern: "${patternWithRealControlChars}"`
-                );
 
                 if (window.title.includes(patternWithRealControlChars)) {
                   titleMatches = true;
-                  matchMethod = "escaped";
-                  console.log(
-                    `[Restore] ✅ MATCH (escaped): "${window.title}" enthält konvertiertes Pattern`
-                  );
                 }
               }
 
@@ -3315,30 +3029,14 @@ async function restoreWindowHandles(
                   processId: window.processId,
                   title: window.title,
                 });
-                console.log(
-                  `[Restore] ✅ Fenster hinzugefügt (${matchMethod}): ${window.title} (hwnd: ${window.hwnd}, PID: ${window.processId})`
-                );
-              } else {
-                console.log(`[Restore] ❌ Kein Match für: "${window.title}"`);
               }
             });
-          } else {
-            console.log(
-              `[Restore] ❌ Prozess ${process.name} hat keine Fenster`
-            );
           }
         });
       }
     );
 
     // Aktualisiere die Window-Handles für dieses Theme
-    console.log(`[Restore] === ERGEBNIS FÜR THEME "${theme.name}" ===`);
-    console.log(`[Restore] Gefundene neue Windows: ${newWindows.length}`);
-    console.log(
-      `[Restore] Neue Windows:`,
-      newWindows.map((w) => `${w.hwnd}:"${w.title}" (PID:${w.processId})`)
-    );
-
     if (newWindows.length > 0) {
       // Entferne alle alten Window-Handles aus dem applications Array
       if (theme.windows && theme.windows.length > 0) {
@@ -3346,9 +3044,6 @@ async function restoreWindowHandles(
           const appIndex = theme.applications.indexOf(oldWindow.hwnd);
           if (appIndex >= 0) {
             theme.applications.splice(appIndex, 1);
-            console.log(
-              `[Restore] Entfernt altes Window-Handle ${oldWindow.hwnd} aus applications`
-            );
           }
         });
       }
@@ -3360,15 +3055,8 @@ async function restoreWindowHandles(
       newWindows.forEach((newWindow) => {
         if (!theme.applications.includes(newWindow.hwnd)) {
           theme.applications.push(newWindow.hwnd);
-          console.log(
-            `[Restore] Window-Handle ${newWindow.hwnd} zu applications hinzugefügt für "${newWindow.title}"`
-          );
         }
       });
-
-      console.log(
-        `[Restore] Theme "${theme.name}" aktualisiert mit ${newWindows.length} Window-Handles`
-      );
 
       // KORREKTUR: NUR die Prozess-IDs entfernen, die WIRKLICH zu den gefundenen Window-Handles gehören
       // Das verhindert, dass andere Browser-Prozesse fälschlicherweise als Fallback verwendet werden
@@ -3399,8 +3087,6 @@ async function restoreWindowHandles(
       );
     }
   }
-
-  console.log("[Restore] Wiederherstellung der Window-Handles abgeschlossen.");
 }
 
 /**
@@ -3409,8 +3095,6 @@ async function restoreWindowHandles(
 async function startMissingApplications(
   applications: PersistentProcessIdentifier[]
 ): Promise<void> {
-  console.log(`[Restore] Starte ${applications.length} Anwendungen...`);
-
   // Starte jede Anwendung
   for (const app of applications) {
     if (app.executablePath) {
@@ -3420,13 +3104,6 @@ async function startMissingApplications(
         const exists = fs.existsSync(app.executablePath);
 
         if (!exists) {
-          console.error(
-            `[Restore] Fehler: Die Datei ${app.executablePath} für ${app.executableName} existiert nicht.`
-          );
-          console.log(
-            `[Restore] Versuche, den Pfad für ${app.executableName} zu finden...`
-          );
-
           // Hier könnte man eine Suche nach der Anwendung implementieren
           // Zum Beispiel für bekannte Browser und Anwendungen
           let alternativePath = null;
@@ -3442,9 +3119,6 @@ async function startMissingApplications(
             for (const path of possiblePaths) {
               if (fs.existsSync(path)) {
                 alternativePath = path;
-                console.log(
-                  `[Restore] Alternativer Pfad für Perplexity gefunden: ${path}`
-                );
                 break;
               }
             }
@@ -3459,28 +3133,15 @@ async function startMissingApplications(
             for (const path of possiblePaths) {
               if (fs.existsSync(path)) {
                 alternativePath = path;
-                console.log(
-                  `[Restore] Alternativer Pfad für ChatGPT gefunden: ${path}`
-                );
                 break;
               }
             }
           }
 
           if (alternativePath) {
-            console.log(
-              `[Restore] Starte Anwendung mit alternativem Pfad: ${app.executableName} (${alternativePath})`
-            );
             await startApplication(alternativePath);
-          } else {
-            console.error(
-              `[Restore] Kein alternativer Pfad für ${app.executableName} gefunden. Anwendung kann nicht gestartet werden.`
-            );
           }
         } else {
-          console.log(
-            `[Restore] Starte Anwendung: ${app.executableName} (${app.executablePath})`
-          );
           // Starte die Anwendung
           await startApplication(app.executablePath);
         }
@@ -3493,14 +3154,8 @@ async function startMissingApplications(
           error
         );
       }
-    } else {
-      console.error(
-        `[Restore] Fehler: Kein Pfad für ${app.executableName} angegeben.`
-      );
     }
   }
-
-  console.log("[Restore] Alle Anwendungen gestartet.");
 }
 
 /**
@@ -3511,8 +3166,6 @@ async function startApplication(executablePath: string): Promise<void> {
     try {
       // Verwende child_process.spawn, um die Anwendung zu starten (besser für mehrere Prozesse)
       const { spawn } = require("child_process");
-
-      console.log(`[Restore] Starte Anwendung mit spawn: ${executablePath}`);
 
       // Unter Windows müssen wir cmd.exe verwenden, um den start-Befehl auszuführen
       // Der /c Parameter bedeutet, dass cmd nach Ausführung des Befehls beendet wird
@@ -3532,9 +3185,6 @@ async function startApplication(executablePath: string): Promise<void> {
 
       // Kurze Verzögerung, um sicherzustellen, dass der Prozess gestartet wird
       setTimeout(() => {
-        console.log(
-          `[Restore] Anwendung ${executablePath} erfolgreich gestartet.`
-        );
         resolve();
       }, 500);
     } catch (error) {
@@ -3551,10 +3201,6 @@ async function startApplication(executablePath: string): Promise<void> {
  * Aktualisiert die Prozesszuordnungen nach dem Starten neuer Anwendungen
  */
 async function updateProcessAssociations(): Promise<void> {
-  console.log(
-    "[Restore] Aktualisiere Prozesszuordnungen nach dem Starten neuer Anwendungen..."
-  );
-
   // Alle gespeicherten Themen abrufen
   const themes = dataStore.getThemes();
 
@@ -3623,27 +3269,12 @@ async function updateProcessAssociations(): Promise<void> {
       // Finde das entsprechende Theme
       const theme = themes.find((t) => t.id === bestMatch.themeId);
       if (theme) {
-        console.log(
-          `[Restore] Füge neu gestarteten Prozess ${processId} (${matchingProcess.name}) zum Thema ${theme.id} hinzu (Score: ${bestMatch.score}).`
-        );
-
         // Füge den Prozess nur zu diesem einen Theme hinzu
         theme.processes.push(processId);
         dataStore.updateTheme(theme.id, theme);
-
-        // Log wenn andere Themes auch gematcht hätten
-        if (matches.length > 1) {
-          console.log(
-            `[Restore] Prozess ${processId} hätte auch zu ${
-              matches.length - 1
-            } anderen Themes gepasst, aber wurde dem besten Match zugeordnet.`
-          );
-        }
       }
     }
   }
-
-  console.log("[Restore] Aktualisierung der Prozesszuordnungen abgeschlossen.");
 }
 
 /**
@@ -3652,36 +3283,17 @@ async function updateProcessAssociations(): Promise<void> {
  * persistente Prozessidentifikatoren für ihre Prozesse haben
  */
 async function updateExistingThemesWithPersistentIdentifiers(): Promise<void> {
-  console.log(
-    "[Init] Aktualisiere bestehende Themen mit persistenten Prozessidentifikatoren..."
-  );
-
   try {
     // Alle gespeicherten Themen abrufen
     const themes = dataStore.getThemes();
 
     // Wenn keine Themen vorhanden sind, gibt es nichts zu tun
     if (themes.length === 0) {
-      console.log(
-        "[Init] Keine Themen gefunden, die aktualisiert werden müssen."
-      );
       return;
     }
 
     // Aktuelle Prozesse abrufen
     const currentProcesses = await getRunningApplications();
-    console.log(
-      `[Init] ${themes.length} Themen und ${currentProcesses.length} laufende Prozesse gefunden.`
-    );
-
-    // Debug: Zeige alle laufenden Prozesse an
-    currentProcesses.forEach((process) => {
-      console.log(
-        `[Init] Laufender Prozess: ${process.name} (${process.id}), Pfad: ${
-          process.path || "unbekannt"
-        }`
-      );
-    });
 
     // Sammle alle Informationen über Prozesse aus allen Themen
     const processInfoMap = new Map<number, ProcessInfo>();
@@ -3696,13 +3308,8 @@ async function updateExistingThemesWithPersistentIdentifiers(): Promise<void> {
     for (const theme of themes) {
       let themeUpdated = false;
 
-      console.log(`[Init] Verarbeite Thema "${theme.name}" (ID: ${theme.id})`);
-
       // Initialisiere persistentProcesses, falls nicht vorhanden
       if (!theme.persistentProcesses) {
-        console.log(
-          `[Init] Initialisiere persistentProcesses für Thema "${theme.name}".`
-        );
         theme.persistentProcesses = [];
         themeUpdated = true; // Markiere als aktualisiert, damit es gespeichert wird
       }
@@ -3737,36 +3344,20 @@ async function updateExistingThemesWithPersistentIdentifiers(): Promise<void> {
         });
       }
 
-      console.log(
-        `[Init] Thema "${theme.name}" hat ${allProcessIds.size} zugeordnete Prozesse (kombiniert aus applications und processes).`
-      );
-
       // Für jeden Prozess im Thema
       if (allProcessIds.size > 0) {
         // Speichere die aktuellen Prozess-IDs, um später nicht mehr existierende zu entfernen
         const validProcessIds = [];
 
         for (const processId of allProcessIds) {
-          console.log(
-            `[Init] Verarbeite Prozess mit ID ${processId} im Thema "${theme.name}".`
-          );
-
           // Finde den Prozess in der Liste der laufenden Prozesse
           const process = processInfoMap.get(processId);
 
           if (process) {
-            console.log(
-              `[Init] Prozess gefunden: ${process.name} (${process.id})`
-            );
             validProcessIds.push(processId);
 
             // Erstelle einen persistenten Identifikator für den Prozess
             const persistentId = createPersistentIdentifier(process);
-            console.log(
-              `[Init] Persistenter Identifikator erstellt: ${JSON.stringify(
-                persistentId
-              )}`
-            );
 
             // Prüfe, ob der persistente Identifikator bereits existiert
             const exists = theme.persistentProcesses.some(
@@ -3774,49 +3365,25 @@ async function updateExistingThemesWithPersistentIdentifiers(): Promise<void> {
             );
 
             if (!exists) {
-              console.log(
-                `[Init] Füge persistenten Identifikator für ${process.name} (${process.id}) zum Thema ${theme.id} hinzu.`
-              );
               theme.persistentProcesses.push(persistentId);
               themeUpdated = true;
               processesWithPersistentIds++;
-            } else {
-              console.log(
-                `[Init] Persistenter Identifikator für ${process.name} existiert bereits im Thema ${theme.id}.`
-              );
             }
-          } else {
-            console.log(
-              `[Init] Prozess mit ID ${processId} nicht in der Liste der laufenden Prozesse gefunden.`
-            );
-            // Wir behalten den Prozess bei, auch wenn er nicht mehr läuft
           }
+          // Wir behalten den Prozess bei, auch wenn er nicht mehr läuft
         }
-      } else {
-        console.log(
-          `[Init] Thema "${theme.name}" hat keine zugeordneten Prozesse.`
-        );
       }
 
       // Speichere das aktualisierte Thema
       if (themeUpdated) {
-        console.log(
-          `[Init] Speichere aktualisiertes Thema "${theme.name}" mit ${theme.persistentProcesses.length} persistenten Prozessidentifikatoren.`
-        );
         dataStore.updateTheme(theme.id, theme);
         themesUpdated++;
-      } else {
-        console.log(`[Init] Keine Änderungen am Thema "${theme.name}".`);
       }
     }
 
     // Erzwinge das Speichern aller Themen, auch wenn keine Änderungen vorgenommen wurden
     // Dies stellt sicher, dass die persistentProcesses und processes Arrays in der JSON-Datei gespeichert werden
     dataStore.setThemes(themes);
-
-    console.log(
-      `[Init] ${themesUpdated} Themen mit insgesamt ${processesWithPersistentIds} persistenten Prozessidentifikatoren aktualisiert.`
-    );
   } catch (error) {
     console.error(
       "[Init] Fehler bei der Aktualisierung der Themen mit persistenten Prozessidentifikatoren:",

@@ -173,11 +173,8 @@ export function setupLicenseIPC(licenseManager: LicenseManager) {
 
   // Privacy Consent Status abrufen
   ipcMain.handle("privacy:getConsentStatus", async () => {
-    console.log("🔍 [IPC PRIVACY] ==> privacy:getConsentStatus aufgerufen");
     await licenseManager.waitUntilReady();
-    console.log("🔍 [IPC PRIVACY] ==> LicenseManager ist ready");
     const result = licenseManager.getPrivacyConsentStatus();
-    console.log("🔍 [IPC PRIVACY] ==> Ergebnis:", result);
     return result;
   });
 

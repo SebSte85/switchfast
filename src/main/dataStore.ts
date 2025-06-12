@@ -89,9 +89,7 @@ export class DataStore {
         const themes = _parseThemes(data, this.dataPath);
         if (themes) {
           this.themes = themes;
-          console.log(
-            `[DataStore] ${this.themes.length} Themen erfolgreich aus ${this.dataPath} geladen.`
-          );
+
           loadedSuccessfully = true;
         }
       } catch (readError) {
@@ -116,15 +114,10 @@ export class DataStore {
         const backupThemes = _parseThemes(backupData, backupPath);
         if (backupThemes) {
           this.themes = backupThemes;
-          console.log(
-            `[DataStore] ${this.themes.length} Themen erfolgreich aus Backup ${backupPath} geladen.`
-          );
+
           loadedSuccessfully = true;
           // Versuche, die Hauptdatei mit den Backup-Daten zu reparieren
           try {
-            console.log(
-              `[DataStore] Versuche, ${this.dataPath} mit Daten aus Backup zu reparieren.`
-            );
             this.saveThemes(); // Nutzt die neue, robuste saveThemes Methode
           } catch (repairSaveError) {
             console.error(
@@ -143,9 +136,6 @@ export class DataStore {
 
     // 3. Wenn immer noch nicht geladen, initialisiere als leer
     if (!loadedSuccessfully) {
-      console.warn(
-        "[DataStore] Weder Haupt- noch Backup-Themedatei konnte geladen werden. Initialisiere mit leeren Themes."
-      );
       this.themes = [];
     }
   }
@@ -156,103 +146,29 @@ export class DataStore {
   }
 
   private saveThemes(): void {
-    const backupPath = this.dataPath + ".bak";
-
     try {
-      // 1. Backup der aktuellen themes.json erstellen, falls sie existiert
-      if (fs.existsSync(this.dataPath)) {
-        // Alte .bak-Datei löschen, falls vorhanden
-        if (fs.existsSync(backupPath)) {
-          fs.unlinkSync(backupPath);
-        }
-        fs.renameSync(this.dataPath, backupPath);
-        console.log(
-          `[DataStore] Backup erstellt: ${this.dataPath} -> ${backupPath}`
-        );
-      }
-
-      // 2. Sicherstellen, dass der Ordner existiert
       const dir = path.dirname(this.dataPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // 3. Aktuellen In-Memory-Zustand (this.themes) in themes.json schreiben
-      //    Sicherstellen, dass alle Themes die notwendigen Felder haben und bestehende Daten beibehalten werden
-      const themesToSave = this.themes.map((theme) => {
-        // Stelle sicher, dass wir alle vorhandenen Felder des Themes beibehalten
-        // und nur fehlende Felder mit Standardwerten initialisieren
-        return {
-          ...theme, // Behalte alle vorhandenen Eigenschaften bei
-          id: theme.id,
-          name: theme.name,
-          // Verwende die vorhandenen Arrays, wenn sie existieren, sonst leere Arrays
-          applications: Array.isArray(theme.applications)
-            ? theme.applications
-            : [],
-          shortcut: theme.shortcut || "",
-          color: theme.color || "",
-          // WICHTIG: Stelle sicher, dass processes und persistentProcesses korrekt beibehalten werden
-          processes: Array.isArray(theme.processes) ? theme.processes : [],
-          persistentProcesses: Array.isArray(theme.persistentProcesses)
-            ? theme.persistentProcesses
-            : [],
-          windows: Array.isArray(theme.windows) ? theme.windows : [],
-        };
-      });
-
-      // Für Debugging: Zeige die zu speichernden Themes an
-      console.log(
-        `[DataStore] Speichere ${themesToSave.length} Themes. Erstes Theme:`,
-        themesToSave.length > 0
-          ? JSON.stringify(themesToSave[0], null, 2)
-          : "Keine Themes"
-      );
+      const themesToSave = this.themes.map((theme) => ({
+        ...theme,
+        processes: Array.isArray(theme.processes) ? theme.processes : [],
+        persistentProcesses: Array.isArray(theme.persistentProcesses)
+          ? theme.persistentProcesses
+          : [],
+      }));
 
       const jsonContent = JSON.stringify(themesToSave, null, 2);
       fs.writeFileSync(this.dataPath, jsonContent);
 
-      console.log(
-        `[DataStore] Themes erfolgreich in ${this.dataPath} gespeichert.`
-      );
-
       // Event an den Renderer senden, dass die Themes gespeichert wurden
       if (global.mainWindow && !global.mainWindow.isDestroyed()) {
         global.mainWindow.webContents.send("themes-saved");
-        console.log(`[DataStore] Event 'themes-saved' an Renderer gesendet`);
-      } else {
-        console.log(
-          `[DataStore] Konnte Event 'themes-saved' nicht senden, mainWindow nicht verfügbar`
-        );
       }
     } catch (error) {
-      console.error(`[DataStore] Fehler beim Speichern der Themes:`, error);
-
-      // 4. Bei Fehler versuchen, aus dem Backup wiederherzustellen
-      try {
-        if (fs.existsSync(backupPath)) {
-          // Geschriebene, potenziell korrupte Datei löschen
-          if (fs.existsSync(this.dataPath)) {
-            fs.unlinkSync(this.dataPath);
-          }
-          fs.renameSync(backupPath, this.dataPath);
-          console.log(
-            `[DataStore] Wiederherstellung aus Backup erfolgreich: ${backupPath} -> ${this.dataPath}`
-          );
-        } else {
-          console.warn(
-            `[DataStore] Kein Backup (${backupPath}) für Wiederherstellung gefunden.`
-          );
-        }
-      } catch (restoreError) {
-        console.error(
-          `[DataStore] Kritischer Fehler beim Wiederherstellen aus Backup:`,
-          restoreError
-        );
-        // An dieser Stelle könnte die themes.json fehlen oder korrupt sein, und das Backup auch.
-      }
-      // Den ursprünglichen Speicherfehler weiterwerfen, damit er behandelt werden kann
-      throw error;
+      console.error("[DataStore] Fehler beim Speichern der Themes:", error);
     }
   }
 
@@ -265,68 +181,43 @@ export class DataStore {
   }
 
   setThemes(themes: Theme[]): void {
-    // Sichere die aktuellen Themes, um Daten zu erhalten
-    const currentThemes = [...this.themes];
+    const existingThemes = JSON.parse(JSON.stringify(this.themes));
 
-    // Erstelle eine Map der aktuellen Themes nach ID für schnellen Zugriff
-    const currentThemesMap = new Map<string, Theme>();
-    currentThemes.forEach((theme) => {
-      currentThemesMap.set(theme.id, theme);
-    });
-
-    // Für jedes neue Theme, behalte die persistentProcesses und processes aus dem aktuellen Theme bei,
-    // wenn sie nicht im neuen Theme definiert sind
     const mergedThemes = themes.map((newTheme) => {
-      const currentTheme = currentThemesMap.get(newTheme.id);
+      const existingTheme = existingThemes.find(
+        (existing: Theme) => existing.id === newTheme.id
+      );
 
-      // Wenn es kein entsprechendes aktuelles Theme gibt, verwende das neue Theme unverändert
-      if (!currentTheme) {
+      if (existingTheme) {
         return {
           ...newTheme,
-          processes: Array.isArray(newTheme.processes)
+          processes: Array.isArray(existingTheme.processes)
+            ? existingTheme.processes
+            : Array.isArray(newTheme.processes)
             ? newTheme.processes
             : [],
-          persistentProcesses: Array.isArray(newTheme.persistentProcesses)
+          persistentProcesses: Array.isArray(existingTheme.persistentProcesses)
+            ? existingTheme.persistentProcesses
+            : Array.isArray(newTheme.persistentProcesses)
             ? newTheme.persistentProcesses
             : [],
-          windows: Array.isArray(newTheme.windows) ? newTheme.windows : [],
+          windows: Array.isArray(existingTheme.windows)
+            ? existingTheme.windows
+            : Array.isArray(newTheme.windows)
+            ? newTheme.windows
+            : [],
         };
       }
 
-      // Behalte die persistentProcesses und processes bei, wenn sie im neuen Theme nicht definiert sind
       return {
         ...newTheme,
-        processes:
-          Array.isArray(newTheme.processes) && newTheme.processes.length > 0
-            ? newTheme.processes
-            : Array.isArray(currentTheme.processes)
-            ? currentTheme.processes
-            : [],
-        persistentProcesses:
-          Array.isArray(newTheme.persistentProcesses) &&
-          newTheme.persistentProcesses.length > 0
-            ? newTheme.persistentProcesses
-            : Array.isArray(currentTheme.persistentProcesses)
-            ? currentTheme.persistentProcesses
-            : [],
-        windows:
-          Array.isArray(newTheme.windows) && newTheme.windows.length > 0
-            ? newTheme.windows
-            : Array.isArray(currentTheme.windows)
-            ? currentTheme.windows
-            : [],
+        processes: Array.isArray(newTheme.processes) ? newTheme.processes : [],
+        persistentProcesses: Array.isArray(newTheme.persistentProcesses)
+          ? newTheme.persistentProcesses
+          : [],
+        windows: Array.isArray(newTheme.windows) ? newTheme.windows : [],
       };
     });
-
-    // Debug-Ausgabe
-    if (mergedThemes.length > 0) {
-      const firstTheme = mergedThemes[0];
-      console.log(
-        `[DataStore] setThemes - Erstes Theme nach Zusammenführung: ${firstTheme.name}, ` +
-          `processes: ${firstTheme.processes?.length || 0}, ` +
-          `persistentProcesses: ${firstTheme.persistentProcesses?.length || 0}`
-      );
-    }
 
     this.themes = mergedThemes;
     this.saveThemes();
@@ -361,9 +252,6 @@ export class DataStore {
 
     // Füge das neue Theme hinzu
     this.themes.push(newTheme);
-    console.log(
-      `[DataStore] Neues Thema hinzugefügt: ${newTheme.name} (${newTheme.id})`
-    );
 
     // Analytics: Theme erstellt
     trackEvent("theme_created", {
@@ -373,33 +261,10 @@ export class DataStore {
       has_shortcut: !!newTheme.shortcut,
     });
 
-    // Für Debugging: Zeige den Zustand der Themes vor dem Speichern
-    if (this.themes.length > 1) {
-      const firstTheme = this.themes[0];
-      console.log(
-        `[DataStore] Vor dem Speichern - Erstes Theme: ${firstTheme.name}, ` +
-          `processes: ${firstTheme.processes?.length || 0}, ` +
-          `persistentProcesses: ${firstTheme.persistentProcesses?.length || 0}`
-      );
-    }
-
-    // Speichere die Themes
-    try {
-      this.saveThemes();
-    } catch (error) {
-      // Bei einem Fehler stellen wir den vorherigen Zustand wieder her
-      console.error(
-        `[DataStore] Fehler beim Speichern nach Hinzufügen des Themes:`,
-        error
-      );
-      this.themes = currentThemes;
-      throw error;
-    }
+    this.saveThemes();
   }
 
   updateTheme(themeId: string, updatedTheme: Theme): void {
-    console.log(`[DataStore] updateTheme für Theme-ID ${themeId} aufgerufen`);
-
     const index = this.themes.findIndex((theme) => theme.id === themeId);
     if (index === -1) {
       console.error(`[DataStore] Theme mit ID ${themeId} nicht gefunden`);
@@ -409,13 +274,6 @@ export class DataStore {
     // Sichere die aktuellen Themes, bevor wir Änderungen vornehmen
     const currentThemes = JSON.parse(JSON.stringify(this.themes)); // Tiefe Kopie erstellen
     const oldTheme = this.themes[index];
-
-    // Debug: Was wird geupdatet?
-    console.log(`[DataStore] Old theme applications:`, oldTheme.applications);
-    console.log(
-      `[DataStore] New theme applications:`,
-      updatedTheme.applications
-    );
 
     // Wenn es persistentProcesses im Original gibt, behalte sie bei
     const persistentProcesses = Array.isArray(oldTheme.persistentProcesses)
@@ -436,8 +294,6 @@ export class DataStore {
           : []),
       ]),
     ];
-
-    console.log(`[DataStore] Combined applications:`, combinedApplications);
 
     // Analytics: App zu Theme hinzugefügt
     const oldAppCount = oldTheme.applications?.length || 0;
@@ -463,8 +319,6 @@ export class DataStore {
       processes: processes,
     };
 
-    console.log(`[DataStore] Final updated theme:`, this.themes[index]);
-
     try {
       this.saveThemes();
     } catch (error) {
@@ -480,8 +334,6 @@ export class DataStore {
 
   // Methode zum Löschen eines Themes anhand seiner ID
   deleteTheme(themeId: string): boolean {
-    console.log(`[DataStore] Lösche Theme mit ID ${themeId}`);
-
     // Theme-Info für Analytics vor dem Löschen sammeln
     const themeToDelete = this.themes.find((theme) => theme.id === themeId);
 
@@ -496,10 +348,6 @@ export class DataStore {
     const themeRemoved = originalLength > newLength;
 
     if (themeRemoved) {
-      console.log(
-        `[DataStore] Theme mit ID ${themeId} erfolgreich entfernt. Verbleibende Themes: ${newLength}`
-      );
-
       // Analytics: Theme gelöscht
       trackEvent("theme_deleted", {
         theme_name: themeToDelete?.name || "unknown",
@@ -511,10 +359,8 @@ export class DataStore {
       // Speichere die Änderungen
       this.saveThemes();
       return true;
-    } else {
-      console.log(`[DataStore] Kein Theme mit ID ${themeId} gefunden.`);
-      return false;
     }
+    return false;
   }
 
   addWindowsToTheme(
@@ -522,23 +368,12 @@ export class DataStore {
     newWindows: WindowInfo[],
     processes?: any[]
   ) {
-    console.log(`[DataStore] Adding windows to theme ${themeId}:`, newWindows);
-    console.log(
-      `[DataStore] Processes parameter:`,
-      processes
-        ? `${processes.length} processes provided`
-        : "No processes provided"
-    );
-
     const themes = this.getThemes();
     const theme = themes.find((t) => t.id === themeId);
 
     if (!theme) {
-      console.log(`[DataStore] Theme ${themeId} not found`);
       return;
     }
-
-    console.log(`[DataStore] Current theme state:`, theme);
 
     // Initialize arrays if they don't exist
     if (!theme.windows) theme.windows = [];
@@ -551,7 +386,6 @@ export class DataStore {
     newWindows.forEach((window) => {
       // Check if window already exists
       const exists = theme.windows!.some((w) => w.hwnd === window.hwnd);
-      console.log(`[DataStore] Window ${window.hwnd} exists? ${exists}`);
 
       if (!exists) {
         // Add window to windows array
@@ -561,18 +395,9 @@ export class DataStore {
           title: window.title,
         });
 
-        // WICHTIG: Für Browser-Subprozesse NICHT die Prozess-ID hinzufügen
-        // wenn bereits Window-Handles verwendet werden, um Konflikte zu vermeiden
-        console.log(
-          `[DataStore] Skipping process ID ${window.processId} for window-based assignment to avoid conflicts with other themes`
-        );
-
         // Add window handle to applications array
         if (!theme.applications.includes(window.hwnd)) {
           theme.applications.push(window.hwnd);
-          console.log(
-            `[DataStore] Added window handle ${window.hwnd} to applications`
-          );
 
           // Flag für Analytics - Window wurde hinzugefügt
           windowWasAdded = true;
@@ -581,13 +406,8 @@ export class DataStore {
         // WICHTIG: Erstelle auch persistente Identifikatoren für Window-Handles
         // damit sie nach einem Neustart wiederhergestellt werden können
         if (processes) {
-          console.log(
-            `[DataStore] Looking for process ${window.processId} in ${processes.length} processes`
-          );
           const process = processes.find((p) => p.id === window.processId);
           if (process) {
-            console.log(`[DataStore] Found process:`, process);
-
             // Verwende die gemeinsame createPersistentIdentifier Funktion
             // Diese normalisiert executableName und escaped Steuerzeichen im Titel
             const processWithTitle = {
@@ -604,29 +424,12 @@ export class DataStore {
             );
 
             if (!exists) {
-              console.log(
-                `[DataStore] Adding persistent identifier for ${process.name} with title pattern "${window.title}"`
-              );
               theme.persistentProcesses.push(persistentId);
-            } else {
-              console.log(
-                `[DataStore] Persistent identifier already exists for ${process.name} with title pattern "${window.title}"`
-              );
             }
-          } else {
-            console.log(
-              `[DataStore] Process ${window.processId} not found in processes array`
-            );
           }
-        } else {
-          console.log(
-            `[DataStore] No processes provided - cannot create persistent identifier`
-          );
         }
       }
     });
-
-    console.log(`[DataStore] Final theme state:`, theme);
 
     // Save changes
     this.saveThemes();
@@ -643,13 +446,6 @@ export class DataStore {
           finalTheme.applications?.length || 0,
           finalTheme.persistentProcesses?.length || 0,
           finalTheme.windows?.length || 0
-        );
-
-        console.log(
-          `[DataStore] Analytics for subprocess - apps_in_theme: ${totalAppsInTheme}`
-        );
-        console.log(
-          `[DataStore] Theme state: processes=${finalTheme.processes?.length}, applications=${finalTheme.applications?.length}, persistentProcesses=${finalTheme.persistentProcesses?.length}, windows=${finalTheme.windows?.length}`
         );
 
         trackEvent("app_added_to_theme", {

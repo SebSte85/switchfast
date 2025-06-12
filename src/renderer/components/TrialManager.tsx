@@ -33,25 +33,13 @@ const TrialManager: React.FC<{ children: React.ReactNode }> = ({
     const checkLicenseStatus = async () => {
       try {
         // ZUERST Privacy Consent prüfen - ohne Consent darf die App nicht verwendet werden
-        console.log("🔍 [TRIAL MANAGER] Prüfe Privacy Consent...");
         const consentGiven = await ipcRenderer.invoke(
           "privacy:getConsentStatus"
         );
-        console.log(
-          "🔍 [TRIAL MANAGER] Privacy Consent Ergebnis:",
-          consentGiven
-        );
 
         if (!consentGiven) {
-          console.log(
-            "❌ [TRIAL MANAGER] Kein Consent gefunden - zeige Privacy Screen"
-          );
           setShowPrivacyConsent(true);
           return;
-        } else {
-          console.log(
-            "✅ [TRIAL MANAGER] Consent vorhanden - überspringe Privacy Screen"
-          );
         }
 
         // NUR wenn Consent vorliegt, prüfen wir den Lizenzstatus

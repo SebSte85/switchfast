@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "concurrently \"npm run watch:electron\" \"npm run watch:react\"",
     "dev:native": "concurrently \"npm run build:addon\" \"npm run watch:electron\" \"npm run watch:react\"",
-    "build": "tsc && webpack --config webpack.config.js",
+    "build": "tsc && webpack --config webpack.config.js && npm run copy:assets",
+    "copy:assets": "node scripts/copy-assets.js",
     "build:full": "npm run build:addon && npm run build",
     "build:addon": "node-gyp rebuild",
     "watch:electron": "tsc -w",
@@ -16,6 +17,9 @@
     "build:prod": "cross-env ACTIVE_ENVIRONMENT=prod npm run build:full",
     "package:prod": "npx electron-builder build --win -c.extraMetadata.environment=prod -c.extraMetadata.prodStripeSecretKey=$PROD_STRIPE_SECRET_KEY -c.extraMetadata.prodStripePriceId=$PROD_STRIPE_PRICE_ID",
     "release": "npm run build:prod && npm run package:prod",
+    "build:test": "cross-env ACTIVE_ENVIRONMENT=test npm run build:full",
+    "package:test": "npx electron-builder build --win -c.extraMetadata.environment=test",
+    "release:test": "npm run build:test && npm run package:test",
     "test": "jest"
   },
   "author": "",
@@ -52,6 +56,7 @@
     "electron-store": "^8.1.0",
     "electron-updater": "^6.1.7",
     "node-machine-id": "^1.1.12",
+    "posthog-js": "^1.250.2",
     "posthog-node": "^4.18.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -68,7 +73,9 @@
       "dist/**/*",
       "node_modules/**/*"
     ],
+    "icon": "src/assets/logo 256.png",
     "win": {
+      "icon": "src/assets/logo 256.png",
       "target": [
         "nsis"
       ]

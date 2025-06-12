@@ -141,22 +141,22 @@ export class LicenseManager {
 
   private async initializeAsync(): Promise<void> {
     try {
-      console.log("🔄 [LicenseManager] Starte Async-Initialisierung...");
       await this.loadPrivacyConsentFromDatabase();
       this.isReady = true;
-      console.log("✅ [LicenseManager] Async-Initialisierung abgeschlossen");
     } catch (error) {
       console.error(
-        "❌ [LicenseManager] Fehler bei Async-Initialisierung:",
+        "[LicenseManager] Fehler bei Async-Initialisierung:",
         error
       );
       this.isReady = true; // Set ready even on error to prevent hanging
     }
   }
 
+  /**
+   * Wartet, bis der LicenseManager vollständig initialisiert ist
+   */
   public async waitUntilReady(): Promise<void> {
     while (!this.isReady) {
-      console.log("⏳ [LicenseManager] Warte auf Initialisierung...");
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -236,7 +236,6 @@ export class LicenseManager {
       // Immer zuerst die Edge Function aufrufen, um den Lizenzstatus zu überprüfen
       // unabhängig davon, ob lokal eine Lizenz gespeichert ist
       try {
-        console.log("Rufe checkLicenseStatus Edge Function auf...");
         const response = await axios.post(
           `${SUPABASE_API_URL}/checkLicenseStatus`,
           {
@@ -251,7 +250,6 @@ export class LicenseManager {
           }
         );
 
-        console.log("Edge Function Antwort erhalten:", response.status);
         const data = response.data;
         // Debug: Edge Function Response Data
 
@@ -299,8 +297,6 @@ export class LicenseManager {
             data.success &&
             (data.cancelled_at || data.cancels_at_period_end)
           ) {
-            console.log("Gecancelte Subscription gefunden, speichere Daten...");
-
             // Lokale Lizenzinformationen mit Cancellation-Daten aktualisieren
             const existingLicenseInfo = this.getLicenseInfo();
 
@@ -327,26 +323,11 @@ export class LicenseManager {
               cancelsAtPeriodEnd: data.cancels_at_period_end,
             };
 
-            console.log("✅ Gecancelte aber noch gültige Subscription-Daten:", {
-              cancelledAt: data.cancelled_at,
-              subscriptionEndDate: data.subscription_end_date,
-              isStillValid,
-              now: now.toISOString(),
-              endDate: endDate?.toISOString(),
-            });
-
-            console.log("🔄 Speichere aktualisierte Lizenz-Daten:", {
-              cancelledAt: updatedLicenseInfo.cancelledAt,
-              cancelsAtPeriodEnd: updatedLicenseInfo.cancelsAtPeriodEnd,
-              isActive: updatedLicenseInfo.isActive,
-            });
-
             this.updateLicenseInfo(updatedLicenseInfo);
           }
 
           // Keine gültige Lizenz gefunden oder Gerät nicht aktiviert
           if (data.success && !data.is_license_valid) {
-            console.log("Keine gültige Lizenz gefunden, prüfe Trial-Status");
             return await this.checkTrialStatus();
           } else if (
             data.success &&
@@ -354,7 +335,6 @@ export class LicenseManager {
             !data.is_device_activated
           ) {
             // Lizenz gefunden, aber Gerät nicht aktiviert
-            console.log("Lizenz gefunden, aber Gerät nicht aktiviert");
             if (data.license_key) {
               const activated = await this.activateDevice(data.license_key);
               return activated;
@@ -405,7 +385,6 @@ export class LicenseManager {
 
       // Versuchen, den Trial-Status online zu verifizieren
       try {
-        console.log("Rufe checkTrialStatus Edge Function auf...");
         const response = await axios.post(
           `${SUPABASE_API_URL}/checkTrialStatus`,
           {
@@ -421,7 +400,6 @@ export class LicenseManager {
           }
         );
 
-        console.log("Edge Function Antwort erhalten:", response.status);
         const data = response.data;
 
         if (data && data.success) {
@@ -1147,23 +1125,10 @@ export class LicenseManager {
    * Gibt den Privacy Consent Status zurück
    */
   public getPrivacyConsentStatus(): boolean {
-    console.log("🔍 [PRIVACY DEBUG] ==> getPrivacyConsentStatus() aufgerufen");
     try {
       const trialInfo = this.getTrialInfo();
-      console.log(
-        "📋 [PRIVACY DEBUG] Trial Info für Consent-Prüfung:",
-        JSON.stringify(trialInfo, null, 2)
-      );
 
       if (trialInfo && trialInfo.privacyConsentGiven !== undefined) {
-        console.log(
-          "✅ [PRIVACY DEBUG] Consent aus Trial Info:",
-          trialInfo.privacyConsentGiven
-        );
-        console.log(
-          "🎯 [PRIVACY DEBUG] ==> Rückgabe:",
-          trialInfo.privacyConsentGiven
-        );
         return trialInfo.privacyConsentGiven;
       }
 
@@ -1171,17 +1136,13 @@ export class LicenseManager {
       const consentStatus = secureStore.get("privacyConsentGiven") as
         | boolean
         | undefined;
-      console.log("💾 [PRIVACY DEBUG] Consent aus secureStore:", consentStatus);
       const finalStatus = consentStatus ?? false;
-      console.log("🔒 [PRIVACY DEBUG] Finaler Consent Status:", finalStatus);
-      console.log("🎯 [PRIVACY DEBUG] ==> Rückgabe:", finalStatus);
       return finalStatus;
     } catch (error) {
       console.error(
-        "💥 [PRIVACY DEBUG] Fehler beim Abrufen des Privacy Consent Status:",
+        "[LicenseManager] Fehler beim Abrufen des Privacy Consent Status:",
         error
       );
-      console.log("🎯 [PRIVACY DEBUG] ==> Rückgabe (Error):", false);
       return false;
     }
   }
@@ -1190,10 +1151,6 @@ export class LicenseManager {
    * Lädt den Privacy Consent Status aus der Datenbank
    */
   public async loadPrivacyConsentFromDatabase(): Promise<boolean> {
-    console.log(
-      "🌐 [PRIVACY DB] ==> loadPrivacyConsentFromDatabase() gestartet"
-    );
-    console.log("🌐 [PRIVACY DB] Device ID:", this.deviceInfo.deviceId);
     try {
       const response = await axios.post(
         `${SUPABASE_API_URL}/checkTrialStatus`,
@@ -1210,50 +1167,20 @@ export class LicenseManager {
       );
 
       const data = response.data;
-      console.log(
-        "📡 [PRIVACY DB] Vollständige DB Response:",
-        JSON.stringify(data, null, 2)
-      );
 
       if (data && data.success && data.privacy_consent_given !== undefined) {
-        console.log(
-          "✅ [PRIVACY DB] Privacy Consent aus DB:",
-          data.privacy_consent_given
-        );
-
         // Lokalen Speicher aktualisieren
-        console.log("💾 [PRIVACY DB] Aktualisiere secureStore...");
         secureStore.set("privacyConsentGiven", data.privacy_consent_given);
-        const verifyStore = secureStore.get("privacyConsentGiven");
-        console.log("💾 [PRIVACY DB] secureStore nach Update:", verifyStore);
 
         // Trial Info aktualisieren falls vorhanden
         const trialInfo = this.getTrialInfo();
-        console.log(
-          "📋 [PRIVACY DB] Aktuelle Trial Info vor Update:",
-          JSON.stringify(trialInfo, null, 2)
-        );
         if (trialInfo) {
           const updatedTrialInfo: TrialInfo = {
             ...trialInfo,
             privacyConsentGiven: data.privacy_consent_given,
           };
-          console.log(
-            "📋 [PRIVACY DB] Neue Trial Info:",
-            JSON.stringify(updatedTrialInfo, null, 2)
-          );
           this.updateTrialInfo(updatedTrialInfo);
-
-          // Verifikation
-          const verifyTrialInfo = this.getTrialInfo();
-          console.log(
-            "📋 [PRIVACY DB] Trial Info nach Update:",
-            JSON.stringify(verifyTrialInfo, null, 2)
-          );
         } else {
-          console.log(
-            "📋 [PRIVACY DB] Keine Trial Info vorhanden, erstelle neue..."
-          );
           // Trial Info erstellen falls nicht vorhanden
           const newTrialInfo: TrialInfo = {
             trialStartDate: new Date().toISOString(),
@@ -1263,30 +1190,17 @@ export class LicenseManager {
             privacyConsentGiven: data.privacy_consent_given,
           };
           this.updateTrialInfo(newTrialInfo);
-          console.log(
-            "📋 [PRIVACY DB] Neue Trial Info erstellt:",
-            JSON.stringify(newTrialInfo, null, 2)
-          );
         }
 
-        console.log(
-          "🎯 [PRIVACY DB] ==> Rückgabe:",
-          data.privacy_consent_given
-        );
         return data.privacy_consent_given;
       }
 
-      console.log(
-        "⚠️ [PRIVACY DB] Kein Privacy Consent in DB Response gefunden"
-      );
-      console.log("🎯 [PRIVACY DB] ==> Rückgabe:", false);
       return false;
     } catch (error) {
       console.error(
-        "💥 [PRIVACY DB] Fehler beim Laden des Privacy Consents aus DB:",
+        "[LicenseManager] Fehler beim Laden des Privacy Consents aus DB:",
         error
       );
-      console.log("🎯 [PRIVACY DB] ==> Rückgabe (Error):", false);
       return false;
     }
   }

@@ -109,9 +109,6 @@ export function trackEvent(
   properties: Record<string, any> = {}
 ) {
   if (!client) {
-    console.warn(
-      "[Analytics] Cannot track event, PostHog client not initialized"
-    );
     return;
   }
 
@@ -135,13 +132,188 @@ export function trackEvent(
       event: eventName,
       properties: enhancedProperties,
     });
-
-    console.log(
-      `[Analytics] Tracked event: ${eventName} for user: ${distinctId}`
-    );
   } catch (error) {
     console.error(`[Analytics] Failed to track event ${eventName}:`, error);
   }
+}
+
+// Capture exceptions and errors
+export function captureException(
+  error: Error,
+  context: Record<string, any> = {},
+  level: "error" | "warning" | "info" = "error"
+) {
+  if (!client) {
+    console.error(
+      "[Analytics] Cannot capture exception - client not initialized:",
+      error.message
+    );
+    return;
+  }
+
+  try {
+    // Use the persistent user ID
+    const distinctId = userId || "anonymous-user";
+
+    // Extract error details
+    const errorProperties = {
+      // Error details
+      error_message: error.message,
+      error_name: error.name,
+      error_stack: error.stack,
+
+      // Context information
+      ...context,
+
+      // Session and system info
+      session_id: sessionId,
+      timestamp: new Date().toISOString(),
+      app_version: process.env.npm_package_version || "0.1.1",
+      os_platform: os.platform(),
+      os_release: os.release(),
+      process_type: "main",
+      error_level: level,
+
+      // Additional debugging info
+      memory_usage: process.memoryUsage(),
+      uptime: process.uptime(),
+    };
+
+    // Track the exception as a special event with PostHog-specific properties
+    client.capture({
+      distinctId,
+      event: "$exception",
+      properties: {
+        ...errorProperties,
+        // PostHog Error Tracking specific properties
+        $exception_message: error.message,
+        $exception_type: error.name,
+        $exception_stack_trace_raw: error.stack,
+        $exception_fingerprint: `${error.name}:${
+          context.function || "unknown"
+        }`,
+        $exception_list: [
+          {
+            type: error.name,
+            value: error.message,
+            stacktrace: {
+              type: "resolved",
+              frames: error.stack
+                ? error.stack
+                    .split("\n")
+                    .slice(1, 10)
+                    .map((line, index) => {
+                      const match =
+                        line.match(/at\s+(.+?)\s*\((.+?):(\d+):(\d+)\)/) ||
+                        line.match(/at\s+(.+?):(\d+):(\d+)/) ||
+                        line.match(/(.+?):(\d+):(\d+)/);
+
+                      if (match) {
+                        const isFileMatch = match.length === 4;
+                        return {
+                          filename: isFileMatch
+                            ? match[1]
+                            : match[2] || "unknown",
+                          function: isFileMatch
+                            ? "anonymous"
+                            : match[1] || "anonymous",
+                          line: parseInt(
+                            isFileMatch ? match[2] : match[3] || "0"
+                          ),
+                          column: parseInt(
+                            isFileMatch ? match[3] : match[4] || "0"
+                          ),
+                          in_app: true,
+                          lang: "node",
+                          resolved: true,
+                        };
+                      }
+
+                      return {
+                        filename: "unknown",
+                        function: "anonymous",
+                        line: 0,
+                        column: 0,
+                        in_app: true,
+                        lang: "node",
+                        resolved: false,
+                      };
+                    })
+                : [],
+            },
+          },
+        ],
+      },
+    });
+
+    console.log(`[Analytics] Exception captured: ${error.message}`);
+  } catch (captureError) {
+    console.error(`[Analytics] Failed to capture exception:`, captureError);
+    console.error(`[Analytics] Original error was:`, error);
+  }
+}
+
+// Capture custom errors with additional context
+export function captureError(
+  message: string,
+  context: Record<string, any> = {},
+  level: "error" | "warning" | "info" = "error"
+) {
+  const syntheticError = new Error(message);
+  captureException(syntheticError, context, level);
+}
+
+// Setup global error handlers for the main process
+export function setupGlobalErrorHandlers() {
+  // Handle uncaught exceptions
+  process.on("uncaughtException", (error) => {
+    console.error("[Global] Uncaught Exception:", error);
+    captureException(error, {
+      error_type: "uncaught_exception",
+      fatal: true,
+    });
+
+    // Don't exit immediately, give PostHog time to send the event
+    setTimeout(() => {
+      process.exit(1);
+    }, 1000);
+  });
+
+  // Handle unhandled promise rejections
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error(
+      "[Global] Unhandled Rejection at:",
+      promise,
+      "reason:",
+      reason
+    );
+
+    // Convert reason to Error if it isn't already
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+
+    captureException(error, {
+      error_type: "unhandled_rejection",
+      promise_details: String(promise),
+      fatal: false,
+    });
+  });
+
+  // Handle warnings
+  process.on("warning", (warning) => {
+    console.warn("[Global] Process Warning:", warning);
+    captureError(
+      warning.message,
+      {
+        error_type: "process_warning",
+        warning_name: warning.name,
+        warning_code: (warning as any).code,
+        fatal: false,
+      },
+      "warning"
+    );
+  });
+
+  console.log("[Analytics] Global error handlers initialized");
 }
 
 // Shutdown analytics when the app is closing
@@ -172,30 +344,19 @@ export async function fetchUsageStats(): Promise<{
   totalEvents: number;
 } | null> {
   if (!userId) {
-    console.warn("[Analytics] Cannot fetch usage stats, user ID not available");
     return null;
   }
-
-  console.log("[Analytics] Querying events for user:", userId);
 
   try {
     // PostHog Personal API Key - this needs to be added to environment variables
     const POSTHOG_PERSONAL_API_KEY = process.env.POSTHOG_PERSONAL_API_KEY;
 
     if (!POSTHOG_PERSONAL_API_KEY) {
-      console.warn(
-        "[Analytics] PostHog Personal API Key not found, using mock data"
-      );
       return getMockUsageStats();
     }
 
-    console.log(
-      "[Analytics] Personal API Key available:",
-      !!POSTHOG_PERSONAL_API_KEY
-    );
-
     // PostHog Project ID - replace with your actual project ID
-    const PROJECT_ID = "69802"; // This should be your actual PostHog project ID
+    const PROJECT_ID = "69802";
 
     // Use PostHog Query API to count events
     const queryData = {
@@ -225,15 +386,10 @@ export async function fetchUsageStats(): Promise<{
 
     const url = `https://eu.posthog.com/api/projects/${PROJECT_ID}/query/`;
 
-    console.log("[Analytics] Making Query API request to:", url);
-    console.log("[Analytics] Query:", queryData.query.query);
-
     const result = await makeHttpsRequest(url, {
       ...options,
       body: JSON.stringify(queryData),
     });
-
-    console.log("[Analytics] Query API response:", result);
 
     if (result.error) {
       console.error("[Analytics] PostHog Query API error:", result.error);
@@ -262,7 +418,6 @@ export async function fetchUsageStats(): Promise<{
       });
     }
 
-    console.log("[Analytics] Parsed usage stats:", stats);
     return stats;
   } catch (error) {
     console.error("[Analytics] Error fetching usage stats:", error);

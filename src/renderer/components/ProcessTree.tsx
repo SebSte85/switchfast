@@ -108,8 +108,12 @@ const ProcessTree: React.FC<ProcessTreeProps> = ({
               )}
 
               {/* Process Name und Title */}
-              <span className="process-name">{process.name}</span>
-              <span className="process-title">{process.title}</span>
+              <span className="process-name" data-posthog-mask>
+                {process.name}
+              </span>
+              <span className="process-title" data-posthog-mask>
+                {process.title}
+              </span>
 
               {/* Drag Handle */}
               <span className="process-drag-handle">
@@ -164,7 +168,9 @@ const ProcessTree: React.FC<ProcessTreeProps> = ({
                           e.currentTarget.classList.remove("dragging");
                         }}
                       >
-                        <span className="window-title">{window.title}</span>
+                        <span className="window-title" data-posthog-mask>
+                          {window.title}
+                        </span>
                         <span className="process-drag-handle">
                           <DragHandle />
                         </span>
