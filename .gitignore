@@ -7,6 +7,14 @@ build/
 release/
 release-new/
 
+# Electron build files
+*.exe
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.snap
+
 # Native addon build files
 build/
 *.node
