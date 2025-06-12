@@ -1529,16 +1529,57 @@ export class LicenseManager {
   }
 
   /**
-   * Löscht den Account (anonymisiert alle Lizenzdaten und Devices)
+   * Löscht den Account (unterschiedliche Logik für Trial vs. bezahlte User)
    */
   public async deleteAccount(): Promise<boolean> {
     try {
+      console.log("🟡 [LicenseManager] deleteAccount: Starting");
       const licenseInfo = this.getLicenseInfo();
-      if (!licenseInfo?.email) return false;
+      console.log("🟡 [LicenseManager] licenseInfo:", licenseInfo);
+
+      // Prüfe zuerst, ob wir eine E-Mail haben (bezahlter User)
+      if (licenseInfo?.email) {
+        console.log(
+          "🟢 [LicenseManager] Found email - using full account deletion"
+        );
+        return await this.deleteAccountWithEmail(licenseInfo.email);
+      }
+
+      // Fallback: E-Mail aus Trial-Informationen prüfen
+      const trialInfo = this.getTrialInfo();
+      console.log("🟡 [LicenseManager] trialInfo:", trialInfo);
+
+      if (trialInfo?.email) {
+        console.log(
+          "🟢 [LicenseManager] Found email in trial info - using full account deletion"
+        );
+        return await this.deleteAccountWithEmail(trialInfo.email);
+      }
+
+      // Kein E-Mail gefunden -> Trial User ohne Stripe-Interaktion
+      console.log(
+        "🟡 [LicenseManager] No email found - using trial-only deletion"
+      );
+      return await this.deleteTrialAccount();
+    } catch (error) {
+      console.error(
+        "🔴 [LicenseManager] Fehler beim Löschen des Accounts:",
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Löscht Account mit E-Mail (vollständige Löschung inkl. Stripe)
+   */
+  private async deleteAccountWithEmail(email: string): Promise<boolean> {
+    try {
+      console.log("🟢 [LicenseManager] Using email-based deletion:", email);
       const response = await axios.post(
         `${SUPABASE_API_URL}/deleteAccount`,
         {
-          email: licenseInfo.email,
+          email: email,
         },
         {
           headers: {
@@ -1546,9 +1587,44 @@ export class LicenseManager {
           },
         }
       );
+      console.log(
+        "🟡 [LicenseManager] Full deletion API response:",
+        response.data
+      );
       return response.data?.success === true;
     } catch (error) {
-      console.error("Fehler beim Löschen des Accounts:", error);
+      console.error(
+        "🔴 [LicenseManager] Fehler bei E-Mail-basierter Löschung:",
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Löscht nur Trial-Account (ohne E-Mail, nur Device-ID basiert)
+   */
+  private async deleteTrialAccount(): Promise<boolean> {
+    try {
+      console.log("🟢 [LicenseManager] Using device-ID based trial deletion");
+      const response = await axios.post(
+        `${SUPABASE_API_URL}/deleteTrialAccount`,
+        {
+          deviceId: this.deviceInfo.deviceId,
+        },
+        {
+          headers: {
+            "x-environment": ACTIVE_ENVIRONMENT,
+          },
+        }
+      );
+      console.log(
+        "🟡 [LicenseManager] Trial deletion API response:",
+        response.data
+      );
+      return response.data?.success === true;
+    } catch (error) {
+      console.error("🔴 [LicenseManager] Fehler bei Trial-Löschung:", error);
       return false;
     }
   }

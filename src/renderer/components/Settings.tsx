@@ -1,6 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { ipcRenderer } from "electron";
 import { useLicense } from "../hooks/useLicense";
+import { trackUIEvent } from "../analytics"; // PostHog Event Tracking
+import posthog from "posthog-js"; // PostHog direkt importieren
+
+// PostHog Type Declaration für Window (nicht mehr benötigt, aber lassen wir drin)
+declare global {
+  interface Window {
+    posthog?: {
+      on: (event: string, callback: () => void) => void;
+      off: (event: string, callback: () => void) => void;
+    };
+  }
+}
 
 interface SettingsProps {
   onClose: () => void;
@@ -79,16 +91,64 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   }, [checkLicenseStatus]);
 
   const handleCancelSubscription = async () => {
-    if (window.confirm("Do you really want to cancel your subscription?")) {
-      const result = await cancelSubscription();
-      if (result) {
-        setActionMessage(
-          "Subscription cancelled successfully. You will retain access until the end of your billing period."
-        );
-      } else {
-        setActionMessage("Failed to cancel subscription.");
+    console.log("🔴 [DEBUG] Cancel Subscription Button geklickt");
+
+    // Track PostHog Event beim Button-Klick für Survey
+    trackUIEvent("cancel_subscription_clicked", {
+      subscription_end_date: subscriptionEndDate,
+      is_subscription: isSubscription,
+      has_cancelled_before: !!cancelledAt,
+      action_source: "settings_page",
+    });
+    console.log(
+      "🔴 [DEBUG] PostHog Event 'cancel_subscription_clicked' gesendet"
+    );
+
+    // Survey Event Listener über window events
+    let surveyHandled = false;
+
+    console.log("🟡 [DEBUG] Setze Survey Event Listeners");
+
+    const handleSurveyComplete = () => {
+      console.log("🟢 [DEBUG] Survey completed Event empfangen");
+      if (!surveyHandled) {
+        surveyHandled = true;
+        startCancellationProcess();
+        // Cleanup
+        window.removeEventListener("survey_completed", handleSurveyComplete);
       }
-    }
+    };
+
+    const startCancellationProcess = () => {
+      console.log("🔵 [DEBUG] Starte Kündigungsprozess direkt (ohne Popup)");
+      cancelSubscription().then((result) => {
+        if (result) {
+          console.log("🟢 [DEBUG] Kündigung erfolgreich");
+          setActionMessage(
+            "Subscription cancelled successfully. You will retain access until the end of your billing period."
+          );
+        } else {
+          console.log("🔴 [DEBUG] Kündigung fehlgeschlagen");
+          setActionMessage("Failed to cancel subscription. Please try again.");
+        }
+      });
+    };
+
+    // Event Listener für Survey-Ende hinzufügen
+    window.addEventListener("survey_completed", handleSurveyComplete);
+
+    // Fallback nach 8 Sekunden - auch hier direkt kündigen
+    setTimeout(() => {
+      console.log("🟠 [DEBUG] 8 Sekunden Fallback erreicht");
+      if (!surveyHandled) {
+        surveyHandled = true;
+        console.log(
+          "🟠 [DEBUG] Survey nicht behandelt - starte Kündigung (Fallback)"
+        );
+        startCancellationProcess();
+        window.removeEventListener("survey_completed", handleSurveyComplete);
+      }
+    }, 8000);
   };
 
   const handleDeleteAccount = async () => {

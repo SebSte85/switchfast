@@ -132,11 +132,14 @@ export function useLicense() {
   // Account löschen
   const deleteAccount = useCallback(async () => {
     try {
+      console.log("🟡 [useLicense] deleteAccount: Starting IPC call");
       const result = await ipcRenderer.invoke("license:deleteAccount");
+      console.log("🟡 [useLicense] deleteAccount: IPC result:", result);
       await fetchLicenseStatus();
+      console.log("🟡 [useLicense] deleteAccount: Returning result:", result);
       return result;
     } catch (error) {
-      console.error("Fehler beim Löschen des Accounts:", error);
+      console.error("🔴 [useLicense] Fehler beim Löschen des Accounts:", error);
       return false;
     }
   }, [fetchLicenseStatus]);
