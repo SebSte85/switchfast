@@ -2720,12 +2720,16 @@ async function getWindows(): Promise<WindowInfo[]> {
  * npm install electron-updater electron-log
  */
 function setupAutoUpdater() {
-  // Konfiguriere den Auto-Updater Logger
-  if (process.env.NODE_ENV === "development") {
-    const log = require("electron-log");
-    autoUpdater.logger = log;
-    log.transports.file.level = "info";
+  // Auto-Updater nur in Production aktivieren
+  if (process.env.NODE_ENV === "development" || !app.isPackaged) {
+    console.log("Auto-Updater deaktiviert für Development/ungepackte App");
+    return;
   }
+
+  // Konfiguriere den Auto-Updater Logger
+  const log = require("electron-log");
+  autoUpdater.logger = log;
+  log.transports.file.level = "info";
 
   // Updater-Events
   autoUpdater.on("checking-for-update", () => {
