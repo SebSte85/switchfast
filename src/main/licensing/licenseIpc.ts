@@ -202,4 +202,74 @@ export function setupLicenseIPC(licenseManager: LicenseManager) {
   ipcMain.handle("license:deleteAccount", async () => {
     return await licenseManager.deleteAccount();
   });
+
+  // Kontaktformular senden
+  ipcMain.handle("contact:sendMessage", async (_, { email, message }) => {
+    try {
+      const deviceId = licenseManager.getDeviceId();
+
+      // Bestimme die Umgebung (test oder prod)
+      const environment =
+        process.env.NODE_ENV === "production" ? "prod" : "test";
+
+      // Supabase URL und Key
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        console.error("❌ [Contact] Supabase configuration missing");
+        return {
+          success: false,
+          error: "Email service not configured",
+        };
+      }
+
+      console.log("🟢 [Contact] Sending contact message:", {
+        email: email || "MISSING",
+        messageLength: message?.length || 0,
+        deviceId: deviceId || "MISSING",
+        environment,
+      });
+
+      // Aufruf der Supabase Edge Function
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/sendContactMessage`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            "x-environment": environment,
+          },
+          body: JSON.stringify({
+            email,
+            message,
+            deviceId,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error("❌ [Contact] Supabase function error:", result);
+        return {
+          success: false,
+          error: result.error || "Failed to send message",
+        };
+      }
+
+      console.log("✅ [Contact] Message sent successfully");
+      return {
+        success: true,
+        message: "Contact message sent successfully",
+      };
+    } catch (error) {
+      console.error("❌ [Contact] Error sending contact message:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  });
 }

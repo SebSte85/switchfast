@@ -3,3 +3,40 @@ description:
 globs:
 alwaysApply: false
 ---
+# switchfast Architecture Rules
+
+## Project Overview
+switchfast is a desktop productivity app that manages application focus through theme-based grouping, built with Electron, React, and TypeScript.
+
+## Core Architecture Patterns
+
+### Electron IPC Communication
+- Use typed IPC handlers defined in `src/types.ts` for all main-renderer communication
+- Always handle IPC errors gracefully with try-catch blocks
+- Use async/await for all IPC calls in renderer process
+- Define IPC channels using the patterns: `get-*`, `set-*`, `toggle-*`, `register-*`
+
+### Type Safety
+- All components must use TypeScript interfaces from `src/types.ts`
+- Never use `any` type - define proper interfaces instead
+- Export interfaces from appropriate type files for reusability
+- Use generics for reusable components where appropriate
+
+### Data Persistence
+- Use electron-store for configuration persistence
+- Store themes and settings in structured JSON format
+- Always provide fallback values for missing configuration
+- Handle data migration between versions gracefully
+
+### Process Management
+- ProcessInfo interface is the core data structure for application tracking
+- Always handle process lifecycle events (start, stop, crash)
+- Use persistent process identifiers for cross-session restoration
+- Implement proper error handling for Windows API calls
+
+## File Organization
+- Main process logic in `src/main/`
+- Renderer components in `src/renderer/components/`
+- Shared types in `src/types/`
+- Native modules in `src/native/`
+- Keep components focused and single-purpose

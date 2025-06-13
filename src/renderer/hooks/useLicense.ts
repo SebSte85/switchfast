@@ -9,6 +9,7 @@ interface LicenseStatus {
   isSubscription?: boolean;
   cancelledAt?: string | null;
   cancelsAtPeriodEnd?: boolean;
+  email?: string | null;
 }
 
 // Electron IPC-Renderer

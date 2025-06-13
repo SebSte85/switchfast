@@ -27,6 +27,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   const [isReactivating, setIsReactivating] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+  const [isSendingContact, setIsSendingContact] = useState(false);
   const {
     subscriptionEndDate,
     isSubscription,
@@ -36,6 +40,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     cancelsAtPeriodEnd,
     checkLicenseStatus,
     openStripeCheckout,
+    email: userEmail,
   } = useLicense();
 
   // Debug: Log subscription data whenever it changes
@@ -207,6 +212,58 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     setShowDeleteModal(false);
   };
 
+  const handleContactClick = () => {
+    setShowContactModal(true);
+  };
+
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactMessage.trim()) return;
+
+    setIsSendingContact(true);
+
+    try {
+      // Use userEmail if available, otherwise use contactEmail from form
+      const emailToUse = userEmail || contactEmail;
+
+      console.log("Contact form submitted:", {
+        email: emailToUse,
+        message: contactMessage,
+      });
+
+      // Call the IPC handler to send the contact message
+      const result = await ipcRenderer.invoke("contact:sendMessage", {
+        email: emailToUse,
+        message: contactMessage,
+      });
+
+      if (result.success) {
+        console.log("✅ Contact message sent successfully");
+        // Close modal and reset form
+        setShowContactModal(false);
+        setContactEmail("");
+        setContactMessage("");
+        // Optional: Show success message to user
+        // You could add a toast notification here
+      } else {
+        console.error("❌ Failed to send contact message:", result.error);
+        // Optional: Show error message to user
+        // You could add an error state here
+      }
+    } catch (error) {
+      console.error("❌ Error sending contact message:", error);
+      // Optional: Show error message to user
+    } finally {
+      setIsSendingContact(false);
+    }
+  };
+
+  const cancelContact = () => {
+    setShowContactModal(false);
+    setContactEmail("");
+    setContactMessage("");
+  };
+
   const handleReactivateSubscription = async () => {
     setIsReactivating(true);
     setActionMessage(null);
@@ -374,6 +431,136 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
                   "Delete Account"
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Modal */}
+      {showContactModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-[#2a2a3e] border border-[#78d97c]/30 rounded-lg p-6 max-w-md mx-4 shadow-2xl">
+            <div className="flex items-start mb-4">
+              <svg
+                className="w-6 h-6 text-[#78d97c] mr-3 mt-0.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-white mb-2">
+                  Contact Support
+                </h3>
+                <p className="text-gray-300 text-sm mb-4">
+                  Send us a message and we'll get back to you as soon as
+                  possible.
+                </p>
+
+                <form onSubmit={handleContactSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-white/80 text-sm mb-1">
+                      Your email address
+                    </label>
+                    {userEmail ? (
+                      // User has email in database - show read-only
+                      <>
+                        <div className="w-full px-3 py-2 rounded-md bg-[#1a1a24] border border-gray-700 text-white/80 text-sm">
+                          {userEmail}
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          We'll use this email to respond to your message
+                        </p>
+                      </>
+                    ) : (
+                      // Trial user without email - show editable field
+                      <>
+                        <input
+                          type="email"
+                          className="w-full px-3 py-2 rounded-md bg-[#232336] border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-[#78d97c] focus:border-transparent transition-colors"
+                          placeholder="e.g. john.doe@email.com"
+                          value={contactEmail}
+                          onChange={(e) => setContactEmail(e.target.value)}
+                          required
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                          Please provide your email so we can respond to you
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="contact-message"
+                      className="block text-white/80 text-sm mb-1"
+                    >
+                      Your message *
+                    </label>
+                    <textarea
+                      id="contact-message"
+                      className="w-full px-3 py-2 rounded-md bg-[#232336] border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-[#78d97c] focus:border-transparent transition-colors resize-none"
+                      placeholder="How can we help you?"
+                      rows={4}
+                      required
+                      value={contactMessage}
+                      onChange={(e) => setContactMessage(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex gap-3 justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={cancelContact}
+                      className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={
+                        isSendingContact ||
+                        !contactMessage.trim() ||
+                        (!userEmail && !contactEmail.trim())
+                      }
+                      className="px-4 py-2 bg-[#78d97c] text-white rounded-lg hover:bg-[#6bc870] transition-colors text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSendingContact ? (
+                        <>
+                          <svg
+                            className="animate-spin w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                          Sending...
+                        </>
+                      ) : (
+                        "Send Message"
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
         </div>
@@ -656,6 +843,27 @@ const Settings: React.FC<SettingsProps> = ({ onClose }) => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* Kontakt & Support Section */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">Contact & Support</h3>
+          <div className="settings-item">
+            <div className="settings-item-info">
+              <div className="settings-item-label">Get in touch</div>
+              <div className="settings-item-description">
+                Have questions, feedback, or need help? Send us a message.
+              </div>
+            </div>
+            <div className="settings-item-control">
+              <button
+                onClick={handleContactClick}
+                className="px-4 py-2 bg-[#78d97c] text-white rounded-lg hover:bg-[#6bc870] transition-colors font-semibold"
+              >
+                Contact
+              </button>
             </div>
           </div>
         </div>

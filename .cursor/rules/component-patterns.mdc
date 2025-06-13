@@ -3,3 +3,147 @@ description:
 globs:
 alwaysApply: false
 ---
+# Component Patterns & Templates
+
+## React Component Guidelines
+
+### Component Structure
+Follow this consistent structure for all React components:
+
+```tsx
+// 1. Imports (external libraries first, then internal)
+import React, { useState, useEffect } from 'react';
+import { ProcessInfo, Theme } from '../types';
+
+// 2. Interface definitions
+interface ComponentProps {
+  // Props with descriptive names and types
+}
+
+// 3. Main component (named export)
+export function ComponentName({ prop1, prop2 }: ComponentProps) {
+  // 4. State declarations
+  const [state, setState] = useState<Type>(defaultValue);
+  
+  // 5. Effects and handlers
+  useEffect(() => {
+    // Effect logic
+  }, [dependencies]);
+  
+  const handleAction = () => {
+    // Handler logic
+  };
+  
+  // 6. Render logic
+  return (
+    <div className="component-container">
+      {/* JSX content */}
+    </div>
+  );
+}
+```
+
+### State Management Patterns
+- Use useState for local component state
+- Use useEffect for side effects and cleanup
+- Pass data down through props, events up through callbacks
+- Implement proper loading and error states
+
+### Event Handling
+- Use descriptive handler names: `handleAddToTheme`, `handleProcessSelect`
+- Implement proper error boundaries for critical operations
+- Debounce expensive operations (search, process polling)
+- Always clean up event listeners and intervals
+
+## Common Component Patterns
+
+### Modal Components
+```tsx
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}
+
+export function Modal({ isOpen, onClose, title, children }: ModalProps) {
+  // Handle escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    
+    if (isOpen) document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <header className="modal-header">
+          <h2>{title}</h2>
+          <button onClick={onClose}>×</button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+### Loading State Components
+```tsx
+interface LoadingStateProps {
+  isLoading: boolean;
+  error?: string | null;
+  children: React.ReactNode;
+}
+
+export function LoadingState({ isLoading, error, children }: LoadingStateProps) {
+  if (isLoading) {
+    return <div className="loading-spinner">Loading...</div>;
+  }
+  
+  if (error) {
+    return <div className="error-message">Error: {error}</div>;
+  }
+  
+  return <>{children}</>;
+}
+```
+
+### Process List Components
+- Always provide unique keys for list items (use process.id)
+- Implement proper memoization with React.memo for performance
+- Handle empty states with informative messages
+- Show process hierarchy visually with indentation
+
+## Styling Guidelines
+
+### Tailwind Usage
+- Use utility classes instead of custom CSS where possible
+- Group related utilities logically: layout, spacing, colors, typography
+- Use responsive modifiers when needed: `sm:`, `md:`, `lg:`
+- Prefer semantic spacing: `p-4`, `m-2`, `gap-3`
+
+### Component-Specific Styles
+- Create CSS modules for complex component-specific styling
+- Use BEM naming convention for custom CSS classes
+- Keep animations subtle and purposeful
+- Maintain consistent spacing and sizing patterns
+
+## Accessibility
+
+### Keyboard Navigation
+- Implement proper tab order with tabIndex when needed
+- Handle Enter and Space keys for custom interactive elements
+- Provide proper focus indicators
+- Support Escape key for closing modals and dropdowns
+
+### Screen Reader Support
+- Use semantic HTML elements (button, nav, main, etc.)
+- Provide descriptive aria-labels for icon buttons
+- Use proper heading hierarchy (h1, h2, h3)
+- Include alt text for informative images

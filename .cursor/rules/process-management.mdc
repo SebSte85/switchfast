@@ -3,3 +3,72 @@ description:
 globs:
 alwaysApply: false
 ---
+# Process Management & Theme Rules
+
+## Core Process Management
+
+### Process Detection & Tracking
+- Use ProcessInfo interface as the single source of truth
+- Implement proper process tree hierarchy with parent-child relationships
+- Track windows separately from processes for browser subprocesses
+- Cache process information to minimize system calls
+
+### Theme Management
+- Each theme must have a unique ID (string)
+- Support both process IDs and window handles in theme applications array
+- Implement persistent process identifiers for session restoration
+- Validate theme data integrity before saving
+
+### Focus Management Patterns
+- Always validate processes exist before attempting focus operations
+- Implement graceful fallbacks when processes are no longer available
+- Use proper window enumeration for multi-window applications
+- Handle elevated permission requirements transparently
+
+## Data Consistency Rules
+
+### State Management
+- Use consistent data sources to prevent layout shifts
+- Implement proper loading states during process enumeration
+- Cache frequently accessed process information
+- Update UI reactively when process state changes
+
+### Modal & Dialog Patterns
+- Use processesToSearch as the primary data source for modals
+- Implement fallback to applications data when processesToSearch unavailable
+- Show loading indicators during IPC operations
+- Position modal content consistently to prevent jumps
+
+### Error Recovery
+- Handle process termination gracefully
+- Provide user feedback for permission-related failures  
+- Implement retry logic for transient process access failures
+- Clean up invalid process references automatically
+
+## Performance Optimization
+
+### Process Polling
+- Use efficient polling intervals (not more frequent than necessary)
+- Implement selective process updates instead of full refreshes
+- Debounce rapid process state changes
+- Cache expensive process metadata lookups
+
+### Memory Management
+- Clean up process watchers on component unmount
+- Avoid memory leaks from retained process references
+- Implement proper disposal of native resources
+- Use weak references where appropriate
+
+## Known Limitations to Handle
+
+### System Restart Recovery
+- Process IDs change after system restart - handle gracefully
+- Restore themes using persistent process identifiers
+- Inform users about post-restart process reassignment needs
+- Implement smart process matching by executable path and name
+
+### Permission Requirements
+- Some applications require elevated privileges for interaction
+- Handle permission requests transparently
+- Provide clear user guidance for permission-related issues
+- Gracefully degrade functionality when permissions unavailable

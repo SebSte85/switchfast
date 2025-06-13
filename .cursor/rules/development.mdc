@@ -3,3 +3,60 @@ description:
 globs:
 alwaysApply: false
 ---
+# switchfast Development Rules
+
+## Development Workflow
+
+### Environment Setup
+- Use `npm run dev` for development with hot reload
+- Use `npm run dev:native` when working with native modules
+- Always test with `npm run build:full` before commits
+- Use proper environment variables for different builds
+
+### Code Quality
+- Follow TypeScript strict mode requirements
+- Use ESLint and Prettier for consistent formatting
+- Write descriptive commit messages
+- Keep functions small and focused (max 50 lines)
+- Use meaningful variable and function names
+
+### Testing Strategy
+- Test critical IPC communication pathways
+- Test process detection and management functions
+- Test theme persistence and restoration
+- Mock electron APIs in unit tests
+- Test keyboard shortcuts and global hotkeys
+
+## Build & Deployment
+
+### Build Process
+- Use `npm run build:prod` for production builds
+- Include native addon with `npm run build:addon`
+- Test packaging with `npm run package` before release
+- Verify auto-updater configuration in package.json
+
+### Release Management
+- Use semantic versioning (MAJOR.MINOR.PATCH)
+- Update version with `npm version [patch|minor|major]`
+- Deploy Supabase functions with `--project-ref foqnvgvtyluvektevlab --no-verify-jwt`
+- Test auto-update functionality before releasing
+
+### Performance Considerations
+- Minimize main process memory usage
+- Use efficient process polling intervals
+- Implement proper cleanup in lifecycle events
+- Optimize React rendering with proper keys and memo
+
+## Security & Privacy
+
+### Data Handling
+- Store sensitive data in electron-store with encryption
+- Implement proper user consent flows
+- Use PostHog for privacy-compliant analytics
+- Handle payment processing securely with Stripe
+
+### Process Access
+- Request minimal required permissions
+- Handle elevated privilege requirements gracefully
+- Validate all process manipulation operations
+- Implement safe process tree traversal

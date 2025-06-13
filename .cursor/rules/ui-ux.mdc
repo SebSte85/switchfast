@@ -3,3 +3,60 @@ description:
 globs:
 alwaysApply: false
 ---
+# switchfast UI/UX Rules
+
+## Language & Content
+- **ALL UI text must be in English** - buttons, labels, dialogs, messages, tooltips
+- Use clear, concise language that explains functionality
+- Prefer action-oriented button labels (e.g., "Add to Theme", "Remove Process")
+
+## Design System
+
+### Colors & Theming
+- Use Tailwind custom colors defined in `tailwind.config.js`:
+  - Primary: `#3b82f6` and `#2563eb` (dark)
+  - Secondary: `#64748b` 
+  - Accent: `#10b981` and `#059669` (dark)
+- Maintain consistent color usage across components
+- Use semantic color names, not hex values in components
+
+### Typography
+- Use Inter font family as defined in Tailwind config
+- Maintain consistent text sizing hierarchy
+- Use proper semantic HTML elements (h1, h2, etc.)
+
+## UX Motion Principles
+Follow the 12 UX Motion Principles for better usability:
+
+### Key Principles to Implement
+1. **Easing** - Use smooth transitions instead of linear animations
+2. **Offset & Delay** - Stagger animations for related elements 
+3. **Transformation** - Provide smooth state transitions to maintain continuity
+4. **Value Change** - Animate numerical changes and state updates
+5. **Overlay** - Use proper layering for modals and popups
+
+### Implementation Guidelines
+- Add subtle transitions for hover states and button interactions
+- Use loading states with smooth animations
+- Implement proper focus management for accessibility
+- Avoid jarring layout shifts during data loading
+
+## Component Patterns
+
+### Modal Management
+- Use consistent modal patterns like ProcessDetailsModal
+- Implement proper escape key handling
+- Maintain proper z-index layering
+- Provide clear close actions
+
+### Loading States
+- Always show loading indicators for async operations
+- Use skeleton screens for complex data loading
+- Maintain consistent loading spinner design
+- Prevent layout shifts during loading
+
+### Error Handling
+- Show user-friendly error messages
+- Provide recovery actions where possible
+- Use consistent error styling
+- Log technical errors while showing simple messages to users
