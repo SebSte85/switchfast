@@ -254,21 +254,6 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     return () => clearInterval(intervalId);
   }, [fetchApplications]);
 
-  // Speichern der Themes bei Änderungen
-  useEffect(() => {
-    const saveThemes = async () => {
-      try {
-        await ipcRenderer.invoke("save-themes", themes);
-      } catch (error) {
-        console.error("Fehler beim Speichern der Themes:", error);
-      }
-    };
-
-    if (themes.length > 0) {
-      saveThemes();
-    }
-  }, [themes]);
-
   // Theme hinzufügen mit useCallback
   const handleAddTheme = useCallback(async (newTheme: Theme) => {
     const themeToAdd: Theme = {
@@ -554,12 +539,31 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   );
 
   // Theme aktualisieren
-  const handleUpdateTheme = useCallback((updatedTheme: Theme) => {
+  const handleUpdateTheme = useCallback(async (updatedTheme: Theme) => {
+    // Zuerst den lokalen State aktualisieren für sofortiges UI-Feedback
     setThemes((prevThemes) =>
       prevThemes.map((theme) =>
         theme.id === updatedTheme.id ? updatedTheme : theme
       )
     );
+
+    // Dann das Backend aktualisieren um die Änderungen zu persistieren
+    try {
+      await ipcRenderer.invoke("update-theme", updatedTheme.id, updatedTheme);
+      console.log(`[UI] Theme ${updatedTheme.id} erfolgreich aktualisiert`);
+    } catch (error) {
+      console.error(
+        `[UI] Fehler beim Aktualisieren des Themes ${updatedTheme.id}:`,
+        error
+      );
+      // Bei Fehler: Theme-Daten neu laden um Konsistenz sicherzustellen
+      try {
+        const themes = await ipcRenderer.invoke("get-themes");
+        setThemes(themes);
+      } catch (reloadError) {
+        console.error("[UI] Fehler beim Neuladen der Themes:", reloadError);
+      }
+    }
   }, []);
 
   // Toggle theme activation (add to or remove from active themes)

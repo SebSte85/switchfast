@@ -45,7 +45,7 @@ export interface ApplicationListProps {
   activeThemes?: string[];
   onAddToTheme?: (themeId: string, appId: number | string) => void;
   onRemoveFromTheme?: (themeId: string, appId: number | string) => void;
-  onUpdateTheme?: (theme: Theme) => void;
+  onUpdateTheme?: (theme: Theme) => Promise<void> | void;
   onToggleActiveTheme?: (themeId: string) => void;
   compactMode?: boolean; // Kompakt-Modus-Flag
   showOnlyShortcuts?: boolean; // Flag, um nur Shortcuts anzuzeigen, keine Namen

@@ -297,6 +297,25 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         return;
       }
 
+      console.log(
+        `[DEBUG-SHORTCUT] ===== SHORTCUT GEDRÜCKT für Theme ${theme.name} =====`
+      );
+      console.log(
+        `[DEBUG-SHORTCUT] Theme VORHER:`,
+        JSON.stringify(
+          {
+            id: theme.id,
+            name: theme.name,
+            processes: theme.processes,
+            persistentProcesses: theme.persistentProcesses?.map(
+              (p: PersistentProcessIdentifier) => p.executableName
+            ),
+          },
+          null,
+          2
+        )
+      );
+
       trackEvent("shortcut_used", {
         themeId: themeId,
         theme_name: theme.name || "unknown",
@@ -318,15 +337,46 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         );
 
       setTimeout(() => {
+        console.log(
+          `[DEBUG-SHORTCUT] Starte updateThemeProcessIds für Theme ${theme.name}`
+        );
         updateThemeProcessIds(theme)
           .then(() => {
             console.log(
-              `[Shortcut] PIDs für Theme ${themeId} im Hintergrund aktualisiert`
+              `[DEBUG-SHORTCUT] updateThemeProcessIds FERTIG für Theme ${theme.name}`
+            );
+
+            // WICHTIG: Bereinige konflikthafte Prozess-IDs nach dem Update
+            console.log(
+              `[DEBUG-SHORTCUT] Starte cleanupConflictingProcessIds...`
+            );
+            dataStore.cleanupConflictingProcessIds();
+            console.log(`[DEBUG-SHORTCUT] cleanupConflictingProcessIds FERTIG`);
+
+            // Theme nach Update nochmal laden und anzeigen
+            const updatedTheme = dataStore.getTheme(themeId);
+            console.log(
+              `[DEBUG-SHORTCUT] Theme NACHHER:`,
+              JSON.stringify(
+                {
+                  id: updatedTheme?.id,
+                  name: updatedTheme?.name,
+                  processes: updatedTheme?.processes,
+                  persistentProcesses: updatedTheme?.persistentProcesses?.map(
+                    (p: PersistentProcessIdentifier) => p.executableName
+                  ),
+                },
+                null,
+                2
+              )
+            );
+            console.log(
+              `[DEBUG-SHORTCUT] ===== SHORTCUT ENDE für Theme ${theme.name} =====`
             );
           })
           .catch((err) => {
             console.error(
-              `[Shortcut] Fehler beim Aktualisieren der PIDs für Theme ${themeId} im Hintergrund:`,
+              `[DEBUG-SHORTCUT] Fehler beim Aktualisieren der PIDs für Theme ${themeId} im Hintergrund:`,
               err
             );
           });
@@ -2091,11 +2141,29 @@ app.on("will-quit", () => {
 async function updateThemeProcessIds(theme: any): Promise<void> {
   try {
     console.log(
-      `[updateThemeProcessIds] Aktualisiere PIDs für Theme ${theme.id}`
+      `[DEBUG-UPDATE] ===== updateThemeProcessIds START für Theme ${theme.name} =====`
+    );
+    console.log(
+      `[DEBUG-UPDATE] Theme Input:`,
+      JSON.stringify(
+        {
+          id: theme.id,
+          name: theme.name,
+          processes: theme.processes,
+          persistentProcesses: theme.persistentProcesses?.map(
+            (p: PersistentProcessIdentifier) => p.executableName
+          ),
+        },
+        null,
+        2
+      )
     );
 
     // Hole aktuelle laufende Prozesse
     const runningProcesses = await getRunningApplications();
+    console.log(
+      `[DEBUG-UPDATE] Gefundene laufende Prozesse: ${runningProcesses.length}`
+    );
 
     // Sammle valide persistente Prozesse und neue Prozess-IDs
     const validPersistentProcesses: PersistentProcessIdentifier[] = [];
@@ -2104,15 +2172,25 @@ async function updateThemeProcessIds(theme: any): Promise<void> {
     // Wenn keine persistenten Prozesse vorhanden sind, leere das processes-Array
     if (!theme.persistentProcesses || theme.persistentProcesses.length === 0) {
       console.log(
-        `[updateThemeProcessIds] Theme ${theme.id} hat keine persistenten Prozesse - lösche alle Prozess-IDs`
+        `[DEBUG-UPDATE] Theme ${theme.id} hat keine persistenten Prozesse - lösche alle Prozess-IDs`
       );
       theme.processes = [];
       dataStore.updateTheme(theme.id, theme);
+      console.log(
+        `[DEBUG-UPDATE] ===== updateThemeProcessIds ENDE (keine persistenten Prozesse) =====`
+      );
       return;
     }
 
+    console.log(
+      `[DEBUG-UPDATE] Verarbeite ${theme.persistentProcesses.length} persistente Prozesse`
+    );
+
     // Für jeden persistenten Prozess prüfen
     for (const persistentProcess of theme.persistentProcesses) {
+      console.log(
+        `[DEBUG-UPDATE] Suche Prozess für: ${persistentProcess.executableName}`
+      );
       const matchingProcess = findMatchingProcess(
         runningProcesses,
         persistentProcess
@@ -2120,13 +2198,13 @@ async function updateThemeProcessIds(theme: any): Promise<void> {
 
       if (matchingProcess) {
         console.log(
-          `[updateThemeProcessIds] Gefunden: ${matchingProcess.name} (${matchingProcess.id})`
+          `[DEBUG-UPDATE] ✓ Gefunden: ${matchingProcess.name} (${matchingProcess.id})`
         );
         newProcessIds.push(matchingProcess.id);
         validPersistentProcesses.push(persistentProcess);
       } else {
         console.log(
-          `[updateThemeProcessIds] Kein laufender Prozess gefunden für: ${persistentProcess.executableName}`
+          `[DEBUG-UPDATE] ✗ Kein laufender Prozess gefunden für: ${persistentProcess.executableName}`
         );
 
         // Prüfe, ob die Anwendung startbar ist (Pfad existiert)
@@ -2134,17 +2212,17 @@ async function updateThemeProcessIds(theme: any): Promise<void> {
           try {
             if (fs.existsSync(persistentProcess.executablePath)) {
               console.log(
-                `[updateThemeProcessIds] Anwendung ${persistentProcess.executableName} ist startbar - behalte persistenten Prozess bei`
+                `[DEBUG-UPDATE] Anwendung ${persistentProcess.executableName} ist startbar - behalte persistenten Prozess bei`
               );
               validPersistentProcesses.push(persistentProcess);
             } else {
               console.log(
-                `[updateThemeProcessIds] Anwendung ${persistentProcess.executableName} ist nicht startbar (Pfad nicht gefunden) - entferne persistenten Prozess`
+                `[DEBUG-UPDATE] Anwendung ${persistentProcess.executableName} ist nicht startbar (Pfad nicht gefunden) - entferne persistenten Prozess`
               );
             }
           } catch (error) {
             console.warn(
-              `[updateThemeProcessIds] Fehler beim Prüfen des Pfads für ${persistentProcess.executableName}:`,
+              `[DEBUG-UPDATE] Fehler beim Prüfen des Pfads für ${persistentProcess.executableName}:`,
               error
             );
             // Im Zweifel behalten wir den persistenten Prozess bei
@@ -2152,11 +2230,20 @@ async function updateThemeProcessIds(theme: any): Promise<void> {
           }
         } else {
           console.log(
-            `[updateThemeProcessIds] Kein Pfad für ${persistentProcess.executableName} vorhanden - entferne persistenten Prozess`
+            `[DEBUG-UPDATE] Kein Pfad für ${persistentProcess.executableName} vorhanden - entferne persistenten Prozess`
           );
         }
       }
     }
+
+    console.log(
+      `[DEBUG-UPDATE] Neue Prozess-IDs: [${newProcessIds.join(", ")}]`
+    );
+    console.log(
+      `[DEBUG-UPDATE] Alte Prozess-IDs: [${
+        theme.processes?.join(", ") || "keine"
+      }]`
+    );
 
     // Prüfe, ob sich etwas geändert hat
     const processesChanged =
@@ -2164,31 +2251,41 @@ async function updateThemeProcessIds(theme: any): Promise<void> {
     const persistentProcessesChanged =
       theme.persistentProcesses.length !== validPersistentProcesses.length;
 
+    console.log(
+      `[DEBUG-UPDATE] Prozesse geändert: ${processesChanged}, Persistente geändert: ${persistentProcessesChanged}`
+    );
+
     if (processesChanged || persistentProcessesChanged) {
-      console.log(`[updateThemeProcessIds] Aktualisiere Theme ${theme.id}:`);
+      console.log(`[DEBUG-UPDATE] Aktualisiere Theme ${theme.id}:`);
       console.log(
-        `[updateThemeProcessIds] - Aktive Prozesse: ${
-          newProcessIds.length
-        } (vorher: ${theme.processes?.length || 0})`
+        `[DEBUG-UPDATE] - Aktive Prozesse: ${newProcessIds.length} (vorher: ${
+          theme.processes?.length || 0
+        })`
       );
       console.log(
-        `[updateThemeProcessIds] - Persistente Prozesse: ${validPersistentProcesses.length} (vorher: ${theme.persistentProcesses.length})`
+        `[DEBUG-UPDATE] - Persistente Prozesse: ${validPersistentProcesses.length} (vorher: ${theme.persistentProcesses.length})`
       );
 
       // Aktualisiere beide Arrays
       theme.processes = newProcessIds;
       theme.persistentProcesses = validPersistentProcesses;
 
+      console.log(`[DEBUG-UPDATE] Rufe dataStore.updateTheme auf...`);
       // Theme in der Datenbank aktualisieren
       dataStore.updateTheme(theme.id, theme);
+      console.log(`[DEBUG-UPDATE] dataStore.updateTheme fertig`);
     } else {
       console.log(
-        `[updateThemeProcessIds] Keine Änderungen für Theme ${theme.id} erforderlich`
+        `[DEBUG-UPDATE] Keine Änderungen für Theme ${theme.id} erforderlich`
       );
     }
+
+    console.log(
+      `[DEBUG-UPDATE] ===== updateThemeProcessIds ENDE für Theme ${theme.name} =====`
+    );
   } catch (error) {
     console.error(
-      `[updateThemeProcessIds] Fehler beim Aktualisieren der PIDs für Theme ${theme.id}:`,
+      `[DEBUG-UPDATE] Fehler beim Aktualisieren der PIDs für Theme ${theme.id}:`,
       error
     );
   }
@@ -2850,6 +2947,13 @@ async function restoreProcessAssociations() {
   // Window-Handles für Browser-Subprozesse wiederherstellen
   await restoreWindowHandles(themes, currentProcesses);
 
+  // WICHTIG: Nach Window-Handle-Wiederherstellung Cleanup durchführen
+  console.log(
+    "[Restore] Starte cleanupConflictingProcessIds nach Window-Handle-Wiederherstellung..."
+  );
+  dataStore.cleanupConflictingProcessIds();
+  console.log("[Restore] cleanupConflictingProcessIds abgeschlossen");
+
   // Liste der zu startenden Anwendungen
   const applicationsToStart: PersistentProcessIdentifier[] = [];
 
@@ -2903,6 +3007,14 @@ async function restoreProcessAssociations() {
 
     // Aktualisiere die Prozesszuordnungen mit den neu gestarteten Anwendungen
     await updateProcessAssociations();
+
+    // WICHTIG: Bereinige konflikthafte Prozess-IDs nach der Aktualisierung
+    // Browser-Prozesse können zu mehreren Themes hinzugefügt werden, aber sollten nur via Window-Handles verwaltet werden
+    console.log(
+      "[App] Starte cleanupConflictingProcessIds nach updateProcessAssociations..."
+    );
+    dataStore.cleanupConflictingProcessIds();
+    console.log("[App] cleanupConflictingProcessIds abgeschlossen");
 
     // WICHTIG: Zweiter Restore-Durchlauf für Window-Handles nach dem Browser-Start
     setTimeout(async () => {
@@ -3279,6 +3391,10 @@ async function updateProcessAssociations(): Promise<void> {
       }
     }
   }
+
+  // WICHTIG: Bereinige konflikthafte Prozess-IDs nach der Aktualisierung
+  // Browser-Prozesse können zu mehreren Themes hinzugefügt werden, aber sollten nur via Window-Handles verwaltet werden
+  dataStore.cleanupConflictingProcessIds();
 }
 
 /**

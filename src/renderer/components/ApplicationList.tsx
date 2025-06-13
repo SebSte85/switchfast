@@ -344,17 +344,22 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
     setCurrentShortcut(theme?.shortcut || "");
   };
 
-  const handleShortcutSave = (themeId: string, currentShortcut: string) => {
+  const handleShortcutSave = async (
+    themeId: string,
+    currentShortcut: string
+  ) => {
     const theme = themes.find((t) => t.id === themeId);
     if (theme && onUpdateTheme) {
-      onUpdateTheme({
+      await onUpdateTheme({
         ...theme,
         shortcut: currentShortcut,
       });
     }
   };
 
-  const handleShortcutKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleShortcutKeyDown = async (
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
     // Verarbeite Tastenkombinationen für alle Tasten außer Enter (das wird nur zum Bestätigen verwendet)
     if (e.key !== "Enter") {
       e.preventDefault();
@@ -388,7 +393,7 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
       if (onUpdateTheme) {
         const theme = themes.find((t) => t.id === editingShortcut);
         if (theme) {
-          onUpdateTheme({
+          await onUpdateTheme({
             ...theme,
             shortcut: currentShortcut,
           });
@@ -397,10 +402,19 @@ const ApplicationList: React.FC<ApplicationListProps> = ({
 
       // Registriere den Shortcut sofort beim Main-Prozess
       if (editingShortcut && currentShortcut) {
-        ipcRenderer.invoke("register-shortcut", {
-          themeId: editingShortcut,
-          shortcut: currentShortcut,
-        });
+        try {
+          const success = await ipcRenderer.invoke("register-shortcut", {
+            themeId: editingShortcut,
+            shortcut: currentShortcut,
+          });
+          console.log(
+            `[UI] Shortcut-Registrierung für Theme ${editingShortcut}: ${
+              success ? "erfolgreich" : "fehlgeschlagen"
+            }`
+          );
+        } catch (error) {
+          console.error(`[UI] Fehler bei Shortcut-Registrierung:`, error);
+        }
       }
 
       // Warte kurz mit dem Beenden des Edit-Modus

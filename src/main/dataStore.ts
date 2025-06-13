@@ -191,6 +191,7 @@ export class DataStore {
       if (existingTheme) {
         return {
           ...newTheme,
+          shortcut: existingTheme.shortcut || newTheme.shortcut || "",
           processes: Array.isArray(existingTheme.processes)
             ? existingTheme.processes
             : Array.isArray(newTheme.processes)
@@ -211,6 +212,7 @@ export class DataStore {
 
       return {
         ...newTheme,
+        shortcut: newTheme.shortcut || "",
         processes: Array.isArray(newTheme.processes) ? newTheme.processes : [],
         persistentProcesses: Array.isArray(newTheme.persistentProcesses)
           ? newTheme.persistentProcesses
@@ -265,6 +267,26 @@ export class DataStore {
   }
 
   updateTheme(themeId: string, updatedTheme: Theme): void {
+    console.log(
+      `[DEBUG-DATASTORE] ===== updateTheme START für ${themeId} =====`
+    );
+    console.log(
+      `[DEBUG-DATASTORE] Input Theme:`,
+      JSON.stringify(
+        {
+          id: updatedTheme.id,
+          name: updatedTheme.name,
+          shortcut: updatedTheme.shortcut,
+          processes: (updatedTheme as any).processes,
+          persistentProcesses: (updatedTheme as any).persistentProcesses?.map(
+            (p: any) => p.executableName
+          ),
+        },
+        null,
+        2
+      )
+    );
+
     const index = this.themes.findIndex((theme) => theme.id === themeId);
     if (index === -1) {
       console.error(`[DataStore] Theme mit ID ${themeId} nicht gefunden`);
@@ -275,20 +297,55 @@ export class DataStore {
     const currentThemes = JSON.parse(JSON.stringify(this.themes)); // Tiefe Kopie erstellen
     const oldTheme = this.themes[index];
 
+    console.log(
+      `[DEBUG-DATASTORE] Altes Theme:`,
+      JSON.stringify(
+        {
+          id: oldTheme.id,
+          name: oldTheme.name,
+          shortcut: oldTheme.shortcut,
+          processes: (oldTheme as any).processes,
+          persistentProcesses: (oldTheme as any).persistentProcesses?.map(
+            (p: any) => p.executableName
+          ),
+        },
+        null,
+        2
+      )
+    );
+
+    // WICHTIG: Behalte Shortcut bei, falls nicht explizit überschrieben
+    const shortcut =
+      updatedTheme.shortcut !== undefined
+        ? updatedTheme.shortcut
+        : oldTheme.shortcut || "";
+
     // Wenn es persistentProcesses im Original gibt, behalte sie bei
-    const persistentProcesses = Array.isArray(oldTheme.persistentProcesses)
-      ? oldTheme.persistentProcesses
+    const persistentProcesses = Array.isArray(
+      (oldTheme as any).persistentProcesses
+    )
+      ? (oldTheme as any).persistentProcesses
       : [];
 
     // Wenn es processes im Original gibt, behalte sie bei
-    const processes = Array.isArray(oldTheme.processes)
-      ? oldTheme.processes
+    const processes = Array.isArray((oldTheme as any).processes)
+      ? (oldTheme as any).processes
       : [];
+
+    console.log(
+      `[DEBUG-DATASTORE] Behalte bei - shortcut: "${shortcut}", processes: [${processes.join(
+        ", "
+      )}], persistentProcesses: [${persistentProcesses
+        .map((p: any) => p.executableName)
+        .join(", ")}]`
+    );
 
     // Kombiniere die vorhandenen applications mit den neuen
     const combinedApplications = [
       ...new Set([
-        ...(Array.isArray(oldTheme.applications) ? oldTheme.applications : []),
+        ...((oldTheme as any).applications
+          ? (oldTheme as any).applications
+          : []),
         ...(Array.isArray(updatedTheme.applications)
           ? updatedTheme.applications
           : []),
@@ -296,7 +353,7 @@ export class DataStore {
     ];
 
     // Analytics: App zu Theme hinzugefügt
-    const oldAppCount = oldTheme.applications?.length || 0;
+    const oldAppCount = (oldTheme as any).applications?.length || 0;
     const newAppCount = combinedApplications.length;
 
     if (newAppCount > oldAppCount) {
@@ -314,22 +371,34 @@ export class DataStore {
     // Aktualisiertes Thema mit allen wichtigen Daten
     this.themes[index] = {
       ...updatedTheme,
+      shortcut: shortcut, // WICHTIG: Verwende den erhaltenen Shortcut
       applications: combinedApplications,
       persistentProcesses: persistentProcesses,
       processes: processes,
-    };
+    } as Theme;
 
-    try {
-      this.saveThemes();
-    } catch (error) {
-      // Bei einem Fehler stellen wir den vorherigen Zustand wieder her
-      console.error(
-        `[DataStore] Fehler beim Speichern nach Aktualisieren des Themes:`,
-        error
-      );
-      this.themes = currentThemes;
-      throw error;
-    }
+    console.log(
+      `[DEBUG-DATASTORE] Neues Theme:`,
+      JSON.stringify(
+        {
+          id: this.themes[index].id,
+          name: this.themes[index].name,
+          shortcut: this.themes[index].shortcut,
+          processes: (this.themes[index] as any).processes,
+          persistentProcesses: (
+            this.themes[index] as any
+          ).persistentProcesses?.map((p: any) => p.executableName),
+        },
+        null,
+        2
+      )
+    );
+
+    // Speichern
+    this.saveThemes();
+    console.log(
+      `[DEBUG-DATASTORE] ===== updateTheme ENDE für ${themeId} =====`
+    );
   }
 
   // Methode zum Löschen eines Themes anhand seiner ID
@@ -730,27 +799,47 @@ export class DataStore {
    * Entfernt Prozess-IDs aus Themes, die bereits Window-Handles haben
    */
   cleanupConflictingProcessIds(): void {
+    console.log(
+      `[DEBUG-CLEANUP] ===== cleanupConflictingProcessIds START =====`
+    );
     let hasChanges = false;
 
     // Erste Durchgang: Sammle alle Prozess-IDs und ihre Theme-Zugehörigkeiten
     const processIdToThemeIds = new Map<number, string[]>();
 
     this.themes.forEach((theme) => {
-      theme.processes.forEach((processId) => {
-        if (!processIdToThemeIds.has(processId)) {
-          processIdToThemeIds.set(processId, []);
-        }
-        processIdToThemeIds.get(processId)!.push(theme.id);
-      });
+      console.log(
+        `[DEBUG-CLEANUP] Theme ${theme.name}: processes = [${
+          (theme as any).processes?.join(", ") || "keine"
+        }]`
+      );
+      if ((theme as any).processes) {
+        (theme as any).processes.forEach((processId: number) => {
+          if (!processIdToThemeIds.has(processId)) {
+            processIdToThemeIds.set(processId, []);
+          }
+          processIdToThemeIds.get(processId)!.push(theme.id);
+        });
+      }
     });
 
-    // Finde Prozess-IDs die in mehreren Themes vorkommen
+    console.log(
+      `[DEBUG-CLEANUP] Prozess-zu-Theme Mapping:`,
+      Array.from(processIdToThemeIds.entries())
+    );
+
+    // VERBESSERTE LOGIK: Finde Prozess-IDs die in mehreren Themes vorkommen
     const conflictingProcessIds = new Map<number, string[]>();
     processIdToThemeIds.forEach((themeIds, processId) => {
       if (themeIds.length > 1) {
         conflictingProcessIds.set(processId, themeIds);
       }
     });
+
+    console.log(
+      `[DEBUG-CLEANUP] Konflikthafte Prozess-IDs:`,
+      Array.from(conflictingProcessIds.entries())
+    );
 
     if (conflictingProcessIds.size > 0) {
       console.log(
@@ -760,31 +849,68 @@ export class DataStore {
 
       // Für jede konflikthafte Prozess-ID, entferne sie aus Themes die Window-Handles haben
       conflictingProcessIds.forEach((themeIds, processId) => {
+        console.log(
+          `[DEBUG-CLEANUP] Verarbeite konflikthafte Prozess-ID ${processId} in Themes: [${themeIds.join(
+            ", "
+          )}]`
+        );
+
+        // Sammle Themes mit und ohne Window-Handles
+        const themesWithWindows: string[] = [];
+        const themesWithoutWindows: string[] = [];
+
         themeIds.forEach((themeId) => {
           const theme = this.themes.find((t) => t.id === themeId);
-          if (theme && theme.windows && theme.windows.length > 0) {
-            // Dieses Theme hat Window-Handles, entferne die Prozess-ID
-            const index = theme.processes.indexOf(processId);
-            if (index > -1) {
-              theme.processes.splice(index, 1);
-              hasChanges = true;
-              console.log(
-                `[DataStore] Entfernt Prozess-ID ${processId} aus Theme "${theme.name}" da Window-Handles vorhanden sind`
-              );
-            }
+          if (
+            theme &&
+            (theme as any).windows &&
+            (theme as any).windows.length > 0
+          ) {
+            themesWithWindows.push(themeId);
+          } else {
+            themesWithoutWindows.push(themeId);
           }
         });
+
+        console.log(
+          `[DEBUG-CLEANUP] Prozess ${processId}: Themes mit Windows [${themesWithWindows.join(
+            ", "
+          )}], ohne Windows [${themesWithoutWindows.join(", ")}]`
+        );
+
+        // Wenn mindestens ein Theme Window-Handles hat, entferne die Prozess-ID aus ALLEN anderen Themes
+        if (themesWithWindows.length > 0) {
+          themeIds.forEach((themeId) => {
+            const theme = this.themes.find((t) => t.id === themeId);
+            if (theme) {
+              // Entferne die Prozess-ID aus diesem Theme (egal ob es Windows hat oder nicht)
+              // Browser-Prozesse sollen nur über Window-Handles verwaltet werden
+              const index = (theme as any).processes.indexOf(processId);
+              if (index > -1) {
+                (theme as any).processes.splice(index, 1);
+                hasChanges = true;
+                console.log(
+                  `[DataStore] Entfernt Prozess-ID ${processId} aus Theme "${theme.name}" da Browser-Prozesse über Window-Handles verwaltet werden`
+                );
+              }
+            }
+          });
+        }
       });
     }
 
     if (hasChanges) {
       console.log("[DataStore] Speichere bereinigte Theme-Daten...");
       this.saveThemes();
+      console.log(`[DEBUG-CLEANUP] Themes nach Bereinigung gespeichert`);
     } else {
       console.log(
         "[DataStore] Keine konflikthafte Prozess-IDs gefunden, keine Bereinigung nötig"
       );
     }
+    console.log(
+      `[DEBUG-CLEANUP] ===== cleanupConflictingProcessIds ENDE =====`
+    );
   }
 
   /**
