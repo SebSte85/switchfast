@@ -11,6 +11,22 @@ const AWS_REGION = "eu-west-1";
 const AWS_ACCESS_KEY_ID = Deno.env.get("AWS_ACCESS_KEY_ID");
 const AWS_SECRET_ACCESS_KEY = Deno.env.get("AWS_SECRET_ACCESS_KEY");
 
+// Generate random ID for contact requests
+function generateContactId(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let result = "";
+  for (let i = 0; i < 8; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Company footer for emails
+const COMPANY_FOOTER = `
+
+---
+DigITup GmbH - Königsallee 27 - 40212 Düsseldorf - Germany`;
+
 // AWS Signature V4 implementation
 async function createAwsSignature(
   method: string,
@@ -239,11 +255,15 @@ serve(async (req) => {
       );
     }
 
-    // Prepare email content
-    const emailSubject = `Contact Form - SwitchFast Support`;
-    const emailBody = `
+    // Generate unique contact ID
+    const contactId = generateContactId();
+
+    // Prepare email content for support team
+    const supportEmailSubject = `Contact Form - switchfast Support [${contactId}]`;
+    const supportEmailBody = `
 New contact form submission from switchfast:
 
+Contact ID: ${contactId}
 From: ${email}
 Device ID: ${deviceId}
 Timestamp: ${new Date().toISOString()}
@@ -252,24 +272,57 @@ Message:
 ${message}
 
 ---
-This message was sent via the switchfast contact form.
+This message was sent via the switchfast contact form.${COMPANY_FOOTER}
     `.trim();
 
-    // Send email via AWS SES
-    console.log("🟢 Sending email via AWS SES...");
-    const result = await sendEmailViaSES(
+    // Prepare confirmation email for user
+    const confirmationSubject = `Your message has been received - switchfast Support [${contactId}]`;
+    const confirmationBody = `
+Hello,
+
+Thank you for contacting switchfast support. I have received your message and will get back to you as soon as possible.
+
+Your contact reference: ${contactId}
+
+Your message:
+${message}
+
+I typically respond within 24 hours during business days.
+
+Best regards,
+Sebastian${COMPANY_FOOTER}
+    `.trim();
+
+    // Send email to support team
+    console.log("🟢 Sending support email via AWS SES...");
+    const supportResult = await sendEmailViaSES(
       "noreply@switchfast.io",
       "mail@switchfast.io",
-      emailSubject,
-      emailBody
+      supportEmailSubject,
+      supportEmailBody
     );
 
-    console.log("✅ Contact email sent successfully:", result);
+    // Send confirmation email to user
+    console.log("🟢 Sending confirmation email to user...");
+    const confirmationResult = await sendEmailViaSES(
+      "noreply@switchfast.io",
+      email,
+      confirmationSubject,
+      confirmationBody
+    );
+
+    console.log("✅ Contact emails sent successfully:", {
+      support: supportResult,
+      confirmation: confirmationResult,
+      contactId: contactId,
+    });
+
     return new Response(
       JSON.stringify({
         success: true,
         message: "Contact message sent successfully",
-        messageId: result.messageId,
+        contactId: contactId,
+        messageId: supportResult.messageId,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
