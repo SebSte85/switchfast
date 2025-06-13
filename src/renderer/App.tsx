@@ -18,6 +18,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   const [focusModeActive, setFocusModeActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingPhase, setLoadingPhase] = useState(0);
+  const [loadingStep, setLoadingStep] = useState<string>("Initializing...");
   const [shortcutsRegistered, setShortcutsRegistered] = useState(false);
   const [compactMode, setCompactMode] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -27,15 +28,6 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   // Loading Screen Startzeitpunkt für Analytics
   const [loadingStartTime] = useState(() => Date.now());
   const startupEventTracked = useRef<boolean>(false);
-
-  // Ladephasen mit angepassten Texten
-  const loadingPhaseTexts = [
-    initialLoadingText || "Searching for active licence...", // Phase 0: Lizenzprüfung
-    "Initializing workspace...", // Phase 1: Initialer Ladevorgang
-    "Starting your applications...", // Phase 2: Anwendungen werden gestartet
-    "Registering shortcuts...", // Phase 3: Shortcuts werden registriert
-    "Saving your settings...", // Phase 4: Einstellungen werden gespeichert
-  ];
 
   // Refresh-Funktion mit useCallback
   const fetchApplications = useCallback(async () => {
@@ -105,147 +97,124 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     }
   }, []); // Keine Abhängigkeit von themes mehr
 
-  // Initial loading of applications
+  // Sichere App-Initialisierung mit Backend-Synchronisation
   useEffect(() => {
     // Starte mit der Lizenzprüfung (Phase 0)
     setLoadingPhase(0);
+    setLoadingStep(initialLoadingText || "Searching for active licence...");
 
     // Nach 2 Sekunden zur nächsten Phase (Workspace-Initialisierung) wechseln
     const licenseCheckTimer = setTimeout(() => {
       setLoadingPhase(1);
+      setLoadingStep("Initializing workspace...");
 
-      // Jetzt die eigentliche Initialisierung starten
-      const loadInitialData = async () => {
-        try {
-          const apps = await ipcRenderer.invoke("get-running-applications");
-
-          setApplications(apps || []);
-
-          // Wechsle zur Phase 2 (Anwendungen starten)
-
-          setLoadingPhase(2);
-
-          // Lade gespeicherte Themes
-          const savedThemes = await ipcRenderer.invoke("get-themes");
-          if (savedThemes && savedThemes.length > 0) {
-            setThemes(savedThemes);
-          }
-
-          // Prüfe, ob es persistente Anwendungen gibt, die gestartet werden müssen
-          const hasPersistentApps =
-            savedThemes &&
-            savedThemes.some(
-              (theme: Theme) =>
-                theme.persistentProcesses &&
-                theme.persistentProcesses.length > 0
-            );
-
-          // Wechsle zur Phase 3 (Shortcuts registrieren)
-
-          setLoadingPhase(3);
-
-          // Wenn keine persistenten Anwendungen vorhanden sind, beenden wir den Ladezustand sofort
-          // Andernfalls wird der Ladezustand durch die IPC-Events gesteuert
-          if (!hasPersistentApps) {
-            // Kurze Verzögerung, damit der Benutzer die letzte Phase sehen kann
-            setTimeout(() => {
-              // Track app startup completion nur einmal
-              if (!startupEventTracked.current) {
-                startupEventTracked.current = true;
-                const loadingDuration = Date.now() - loadingStartTime;
-                ipcRenderer.invoke("track-app-startup-complete", {
-                  startup_duration_ms: loadingDuration,
-                  theme_count: savedThemes?.length || 0,
-                });
-              }
-              setLoading(false);
-            }, 1000);
-          } else {
-            // Ladezustand bleibt aktiv, bis apps-started Event empfangen wird
-          }
-        } catch (error) {
-          console.error("Error loading initial data:", error);
-          // Bei Fehlern den Ladezustand beenden, um die Anwendung nicht zu blockieren
-          setLoading(false);
-        }
-      };
-
-      loadInitialData();
-    }, 2000); // 2 Sekunden für die Lizenzprüfung
+      // Backend-Initialisierung ist bereits gestartet, warten auf Events
+    }, 2000);
 
     return () => clearTimeout(licenseCheckTimer);
   }, []);
 
-  // Wir entfernen den Timer-Effekt und steuern stattdessen die Phasen durch die IPC-Events
-
-  // Listener für das Starten von Anwendungen und Shortcut-Registrierung
+  // Backend-Initialisierung Events - SICHERE SYNCHRONISATION
   useEffect(() => {
+    const handleInitializationStep = (_: any, step: string) => {
+      console.log("[Frontend] Backend initialization step:", step);
+      setLoadingStep(step);
+
+      // Phasen basierend auf Backend-Schritten setzen
+      if (step.includes("theme data")) {
+        setLoadingPhase(2);
+      } else if (step.includes("identifier")) {
+        setLoadingPhase(2);
+      } else if (step.includes("association")) {
+        setLoadingPhase(3);
+      } else if (step.includes("process ID")) {
+        setLoadingPhase(3);
+      } else if (step.includes("shortcut")) {
+        setLoadingPhase(4);
+      }
+    };
+
+    const handleInitializationComplete = async () => {
+      console.log(
+        "[Frontend] Backend initialization complete - loading themes and apps"
+      );
+
+      try {
+        // Jetzt erst laden wir die finalen Daten
+        const [apps, savedThemes] = await Promise.all([
+          ipcRenderer.invoke("get-running-applications"),
+          ipcRenderer.invoke("get-themes"),
+        ]);
+
+        setApplications(apps || []);
+        if (savedThemes && savedThemes.length > 0) {
+          setThemes(savedThemes);
+        }
+
+        // Track app startup completion
+        if (!startupEventTracked.current) {
+          startupEventTracked.current = true;
+          const loadingDuration = Date.now() - loadingStartTime;
+          ipcRenderer.invoke("track-app-startup-complete", {
+            startup_duration_ms: loadingDuration,
+            theme_count: savedThemes?.length || 0,
+          });
+        }
+
+        // Kurze Verzögerung für UX, dann UI freigeben
+        setTimeout(() => {
+          setLoading(false);
+        }, 500);
+      } catch (error) {
+        console.error("[Frontend] Error loading final data:", error);
+        // Bei Fehlern trotzdem UI freigeben
+        setLoading(false);
+      }
+    };
+
+    // Legacy Events für Rückwärtskompatibilität
     const handleAppStarting = () => {
-      setLoading(true);
-      // Setze die Phase auf 1 (zweiter Text), wenn der Ladevorgang beginnt
-      setLoadingPhase(1);
+      setLoadingStep("Starting applications...");
+      setLoadingPhase(2);
     };
 
     const handleAppsStarted = () => {
-      // Lade die Anwendungen neu, aber behalte den Ladezustand bei
-      // bis die Anwendungen vollständig geladen sind und Shortcuts registriert sind
-      const updateApps = async () => {
-        try {
-          const apps = await ipcRenderer.invoke("get-running-applications");
-          setApplications(apps || []);
-
-          // Setze die Phase auf 2 (dritter Text), für die Shortcut-Registrierung
-          setLoadingPhase(2);
-
-          // Wenn bereits Shortcuts registriert wurden, können wir den Ladezustand beenden
-          if (shortcutsRegistered) {
-            setLoading(false);
-          }
-        } catch (error) {
-          setLoading(false);
-        }
-      };
-
-      updateApps();
+      setLoadingStep("Applications started");
+      setLoadingPhase(3);
     };
 
     const handleShortcutsRegistered = () => {
       setShortcutsRegistered(true);
-      // Wechsle zur letzten Phase (DataStore-Prozess)
+      setLoadingStep("Shortcuts registered");
       setLoadingPhase(4);
-      // Wir beenden den Ladezustand nicht hier, sondern warten auf das themes-saved Event
     };
 
-    const handleThemesSaved = () => {
-      // Track app startup completion nur einmal - exakt die Zeit die der Loading Screen zu sehen war
-      if (!startupEventTracked.current) {
-        startupEventTracked.current = true;
-        const loadingDuration = Date.now() - loadingStartTime;
-        ipcRenderer.invoke("track-app-startup-complete", {
-          startup_duration_ms: loadingDuration,
-          theme_count: themes.length,
-        });
-      }
+    // Neue sichere Events
+    ipcRenderer.on("initialization-step", handleInitializationStep);
+    ipcRenderer.on("app-initialization-complete", handleInitializationComplete);
 
-      // Jetzt erst den Ladezustand beenden, nachdem die Themes gespeichert wurden
-      setLoading(false);
-    };
-
+    // Legacy Events
     ipcRenderer.on("apps-starting", handleAppStarting);
     ipcRenderer.on("apps-started", handleAppsStarted);
     ipcRenderer.on("shortcuts-registered", handleShortcutsRegistered);
-    ipcRenderer.on("themes-saved", handleThemesSaved);
 
     return () => {
+      ipcRenderer.removeListener(
+        "initialization-step",
+        handleInitializationStep
+      );
+      ipcRenderer.removeListener(
+        "app-initialization-complete",
+        handleInitializationComplete
+      );
       ipcRenderer.removeListener("apps-starting", handleAppStarting);
       ipcRenderer.removeListener("apps-started", handleAppsStarted);
       ipcRenderer.removeListener(
         "shortcuts-registered",
         handleShortcutsRegistered
       );
-      ipcRenderer.removeListener("themes-saved", handleThemesSaved);
     };
-  }, [shortcutsRegistered]);
+  }, [loadingStartTime, startupEventTracked]);
 
   // Laden der laufenden Anwendungen und Refresh-Intervall
   useEffect(() => {
@@ -456,6 +425,12 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   // Anwendung zum Theme hinzufügen
   const handleAddToTheme = useCallback(
     (themeId: string, appId: number | string) => {
+      // SICHERHEIT: Verhindere Interaktionen während der Initialisierung
+      if (loading) {
+        console.warn("[UX] Blocked user interaction during initialization");
+        return;
+      }
+
       // Zuerst den lokalen State aktualisieren
       setThemes((prevThemes) =>
         prevThemes.map((theme) =>
@@ -492,12 +467,18 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
           });
       }
     },
-    []
+    [loading]
   );
 
   // Anwendung aus Theme entfernen
   const handleRemoveFromTheme = useCallback(
     (themeId: string, appId: number | string) => {
+      // SICHERHEIT: Verhindere Interaktionen während der Initialisierung
+      if (loading) {
+        console.warn("[UX] Blocked user interaction during initialization");
+        return;
+      }
+
       // Zuerst den lokalen State aktualisieren
       setThemes((prevThemes) =>
         prevThemes.map((theme) =>
@@ -535,36 +516,45 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
           });
       }
     },
-    []
+    [loading]
   );
 
   // Theme aktualisieren
-  const handleUpdateTheme = useCallback(async (updatedTheme: Theme) => {
-    // Zuerst den lokalen State aktualisieren für sofortiges UI-Feedback
-    setThemes((prevThemes) =>
-      prevThemes.map((theme) =>
-        theme.id === updatedTheme.id ? updatedTheme : theme
-      )
-    );
-
-    // Dann das Backend aktualisieren um die Änderungen zu persistieren
-    try {
-      await ipcRenderer.invoke("update-theme", updatedTheme.id, updatedTheme);
-      console.log(`[UI] Theme ${updatedTheme.id} erfolgreich aktualisiert`);
-    } catch (error) {
-      console.error(
-        `[UI] Fehler beim Aktualisieren des Themes ${updatedTheme.id}:`,
-        error
-      );
-      // Bei Fehler: Theme-Daten neu laden um Konsistenz sicherzustellen
-      try {
-        const themes = await ipcRenderer.invoke("get-themes");
-        setThemes(themes);
-      } catch (reloadError) {
-        console.error("[UI] Fehler beim Neuladen der Themes:", reloadError);
+  const handleUpdateTheme = useCallback(
+    async (updatedTheme: Theme) => {
+      // SICHERHEIT: Verhindere Interaktionen während der Initialisierung
+      if (loading) {
+        console.warn("[UX] Blocked theme update during initialization");
+        return;
       }
-    }
-  }, []);
+
+      // Zuerst den lokalen State aktualisieren für sofortiges UI-Feedback
+      setThemes((prevThemes) =>
+        prevThemes.map((theme) =>
+          theme.id === updatedTheme.id ? updatedTheme : theme
+        )
+      );
+
+      // Dann das Backend aktualisieren um die Änderungen zu persistieren
+      try {
+        await ipcRenderer.invoke("update-theme", updatedTheme.id, updatedTheme);
+        console.log(`[UI] Theme ${updatedTheme.id} erfolgreich aktualisiert`);
+      } catch (error) {
+        console.error(
+          `[UI] Fehler beim Aktualisieren des Themes ${updatedTheme.id}:`,
+          error
+        );
+        // Bei Fehler: Theme-Daten neu laden um Konsistenz sicherzustellen
+        try {
+          const themes = await ipcRenderer.invoke("get-themes");
+          setThemes(themes);
+        } catch (reloadError) {
+          console.error("[UI] Fehler beim Neuladen der Themes:", reloadError);
+        }
+      }
+    },
+    [loading]
+  );
 
   // Toggle theme activation (add to or remove from active themes)
   const toggleActiveTheme = (themeId: string) => {
@@ -987,8 +977,11 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         <Settings onClose={() => setShowSettings(false)} />
       ) : loading ? (
         <div className="loading-animation">
-          <div className="loading-text">{loadingPhaseTexts[loadingPhase]}</div>
+          <div className="loading-text">{loadingStep}</div>
           <div className="loading-process-item"></div>
+          <div className="loading-footer">
+            Please wait - initialization must complete before using the app
+          </div>
         </div>
       ) : (
         <ApplicationList

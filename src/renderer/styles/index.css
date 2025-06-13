@@ -1283,8 +1283,13 @@
   }
 
   .loading-text {
-    @apply text-lg font-medium mb-4 text-[#78d97c];
+    @apply text-xl font-medium mb-4 text-[#78d97c];
     animation: pulse 1.5s infinite;
+  }
+
+  .loading-footer {
+    @apply text-xs text-white/50 mt-6 text-center;
+    font-style: italic;
   }
 
   /* Neue Prozess-ähnliche Ladeanimation */

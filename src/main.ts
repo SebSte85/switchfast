@@ -81,6 +81,9 @@ interface ProcessInfo {
 const registeredShortcuts: Map<string, string> = new Map();
 let compactMode = false; // Zustand für den Kompaktmodus
 
+// Backend-Initialisierungsstatus für Shortcut-Sicherheit
+let isAppInitialized = false;
+
 function createWindow() {
   const windowCreateStart = Date.now();
 
@@ -291,14 +294,23 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         return;
       }
 
+      // 🛡️ SICHERHEIT: Shortcut nur ausführen wenn App vollständig initialisiert
+      if (!isAppInitialized) {
+        console.warn(
+          `[Shortcut] ⚠️ BLOCKIERT: Theme ${themeId} Shortcut ignoriert - App noch nicht initialisiert`
+        );
+        return;
+      }
+
       const theme = dataStore.getTheme(themeId);
       if (!theme) {
         console.error(`[Shortcut] Theme ${themeId} nicht gefunden`);
         return;
       }
 
+      const shortcutTimestamp = Date.now();
       console.log(
-        `[DEBUG-SHORTCUT] ===== SHORTCUT GEDRÜCKT für Theme ${theme.name} =====`
+        `[DEBUG-SHORTCUT] ===== SHORTCUT GEDRÜCKT für Theme ${theme.name} [${shortcutTimestamp}] =====`
       );
       console.log(
         `[DEBUG-SHORTCUT] Theme VORHER:`,
@@ -337,13 +349,23 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
         );
 
       setTimeout(() => {
+        const updateStartTime = Date.now();
         console.log(
-          `[DEBUG-SHORTCUT] Starte updateThemeProcessIds für Theme ${theme.name}`
+          `[DEBUG-SHORTCUT] Starte updateThemeProcessIds für Theme ${
+            theme.name
+          } [${updateStartTime}] - Delay: ${
+            updateStartTime - shortcutTimestamp
+          }ms`
         );
         updateThemeProcessIds(theme)
           .then(() => {
+            const updateEndTime = Date.now();
             console.log(
-              `[DEBUG-SHORTCUT] updateThemeProcessIds FERTIG für Theme ${theme.name}`
+              `[DEBUG-SHORTCUT] updateThemeProcessIds FERTIG für Theme ${
+                theme.name
+              } [${updateEndTime}] - Duration: ${
+                updateEndTime - updateStartTime
+              }ms`
             );
 
             // WICHTIG: Bereinige konflikthafte Prozess-IDs nach dem Update
@@ -370,8 +392,13 @@ function registerThemeShortcut(themeId: string, shortcut: string): boolean {
                 2
               )
             );
+            const shortcutEndTime = Date.now();
             console.log(
-              `[DEBUG-SHORTCUT] ===== SHORTCUT ENDE für Theme ${theme.name} =====`
+              `[DEBUG-SHORTCUT] ===== SHORTCUT ENDE für Theme ${
+                theme.name
+              } [${shortcutEndTime}] - Total: ${
+                shortcutEndTime - shortcutTimestamp
+              }ms =====`
             );
           })
           .catch((err) => {
@@ -2614,35 +2641,72 @@ app.whenReady().then(async () => {
   // Auto-Updater einrichten
   setupAutoUpdater();
 
-  // Theme-Daten korrigieren
-  await fixThemeData();
-
-  // Bestehende Themen mit persistenten Prozessidentifikatoren aktualisieren
-  await updateExistingThemesWithPersistentIdentifiers();
-
-  // Prozesszuordnungen wiederherstellen
-  await restoreProcessAssociations();
-
-  // Alle Themes mit aktuellen PIDs aktualisieren
-  const themes = dataStore.getThemes();
-  console.log(`[App] Aktualisiere PIDs für ${themes.length} Themes`);
-
-  for (const theme of themes) {
-    await updateThemeProcessIds(theme);
-  }
-
-  // Shortcuts erst nach der Wiederherstellung der Prozesse registrieren
-  registerSavedShortcuts();
-
-  // Register global shortcut to open DevTools
-  globalShortcut.register("CommandOrControl+Shift+I", () => {
-    if (mainWindow && !mainWindow.webContents.isDevToolsOpened()) {
-      mainWindow.webContents.openDevTools();
+  // Sende Initialisierungs-Events an das Frontend
+  const sendInitEvent = (step: string) => {
+    if (mainWindow) {
+      mainWindow.webContents.send("initialization-step", step);
     }
-  });
+  };
 
-  // Startup-Zeit wird jetzt im Frontend getrackt wenn Loading Screen verschwindet
-  console.log(`[App] Initialisierung abgeschlossen`);
+  try {
+    // Phase 1: Theme-Daten korrigieren
+    sendInitEvent("Correcting theme data...");
+    await fixThemeData();
+
+    // Phase 2: Persistente Identifikatoren aktualisieren
+    sendInitEvent("Updating persistent identifiers...");
+    await updateExistingThemesWithPersistentIdentifiers();
+
+    // Phase 3: Prozesszuordnungen wiederherstellen
+    sendInitEvent("Restoring process associations...");
+    await restoreProcessAssociations();
+
+    // Phase 4: PIDs aktualisieren
+    sendInitEvent("Updating process IDs...");
+    const themes = dataStore.getThemes();
+    console.log(`[App] Aktualisiere PIDs für ${themes.length} Themes`);
+
+    for (const theme of themes) {
+      await updateThemeProcessIds(theme);
+    }
+
+    // Phase 5: Shortcuts registrieren
+    sendInitEvent("Registering shortcuts...");
+    registerSavedShortcuts();
+
+    // Register global shortcut to open DevTools
+    globalShortcut.register("CommandOrControl+Shift+I", () => {
+      if (mainWindow && !mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.openDevTools();
+      }
+    });
+
+    // Startup-Zeit wird jetzt im Frontend getrackt wenn Loading Screen verschwindet
+    console.log(`[App] Initialisierung abgeschlossen`);
+
+    // 🚀 INITIALISIERUNG ABGESCHLOSSEN - Shortcuts jetzt sicher verwendbar
+    isAppInitialized = true;
+    console.log(
+      `[App] Backend-Initialisierung ABGESCHLOSSEN - Shortcuts sind jetzt sicher`
+    );
+
+    // Sende finales Event - App ist bereit für Benutzerinteraktion
+    if (mainWindow) {
+      mainWindow.webContents.send("app-initialization-complete");
+    }
+  } catch (error) {
+    console.error("[App] Fehler während der Initialisierung:", error);
+    // Bei Fehlern trotzdem Shortcuts freigeben, um UI nicht zu blockieren
+    isAppInitialized = true;
+    console.log(
+      `[App] Backend-Initialisierung trotz Fehler ABGESCHLOSSEN - Shortcuts freigegeben`
+    );
+
+    // Bei Fehlern trotzdem das Complete-Event senden, um UI nicht zu blockieren
+    if (mainWindow) {
+      mainWindow.webContents.send("app-initialization-complete");
+    }
+  }
 
   // PostHog Error Tracking is now working correctly with proper structure
 
