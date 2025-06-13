@@ -115,6 +115,9 @@ serve(async (req) => {
 
     console.log(`🟢 Found ${licenses?.length || 0} licenses for user`);
 
+    // Variable für Device-Namen (für Email)
+    let deviceNames: string[] = [];
+
     let gdprNotice = {
       stripe_data_notice:
         "⚠️ GDPR Notice: Due to financial regulations (AML/KYC), Stripe retains transaction history, payment intents, and charges for legal compliance. These records are anonymized but not deleted.",
@@ -228,7 +231,22 @@ serve(async (req) => {
         }
       }
 
-      // 3. Alle Device Activations löschen (DSGVO: Geräte-IDs sind personenbezogene Daten)
+      // 3. Device-Namen sammeln BEVOR wir die Activations löschen (für Email)
+      if (licenses && licenses.length > 0) {
+        const licenseIds = licenses.map((l: any) => l.id);
+        const { data: deviceActivations } = await supabaseClient
+          .from("device_activations")
+          .select("device_name")
+          .in("license_id", licenseIds);
+
+        if (deviceActivations && deviceActivations.length > 0) {
+          deviceNames = deviceActivations
+            .map((d) => d.device_name)
+            .filter((name) => name && name.trim() !== "");
+        }
+      }
+
+      // 4. Alle Device Activations löschen (DSGVO: Geräte-IDs sind personenbezogene Daten)
       const licenseIds = licenses.map((l: any) => l.id);
       console.log(
         `🗑️ [DELETE ACCOUNT] Deleting device activations for ${licenseIds.length} licenses`
@@ -258,7 +276,7 @@ serve(async (req) => {
       console.log(`✅ [DELETE ACCOUNT] Device activations deleted`);
     }
 
-    // 4. Trial Blocks löschen (DSGVO: Device-ID und Privacy Consent sind personenbezogene Daten)
+    // 5. Trial Blocks löschen (DSGVO: Device-ID und Privacy Consent sind personenbezogene Daten)
     if (licenses && licenses.length > 0) {
       // Erst alle Device-IDs sammeln die zu diesem User gehören
       const { data: userDevices, error: deviceQueryError } =
@@ -292,7 +310,7 @@ serve(async (req) => {
       }
     }
 
-    // 5. Lizenzen anonymisieren/löschen (DSGVO: E-Mail ist personenbezogener Daten)
+    // 6. Lizenzen anonymisieren/löschen (DSGVO: E-Mail ist personenbezogener Daten)
     console.log(`🗑️ [DELETE ACCOUNT] Anonymizing licenses`);
     const { error: updateError } = await supabaseClient
       .from("licenses")
@@ -325,6 +343,36 @@ serve(async (req) => {
     console.log(
       `✅ [DELETE ACCOUNT] GDPR-compliant account deletion completed for email: ${email}`
     );
+
+    // 7. Send account deletion confirmation email
+    try {
+      console.log("🟢 Sending account deletion confirmation email...");
+      const deletionEmailResponse = await fetch(
+        `${Deno.env.get("SUPABASE_URL")}/functions/v1/sendAccountDeletionEmail`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email,
+            deviceName: deviceNames.length > 0 ? deviceNames[0] : undefined,
+          }),
+        }
+      );
+
+      if (deletionEmailResponse.ok) {
+        console.log("✅ Account deletion email sent successfully");
+      } else {
+        console.log(
+          "🔴 Failed to send account deletion email:",
+          await deletionEmailResponse.text()
+        );
+      }
+    } catch (emailError) {
+      console.log("🔴 Error sending account deletion email:", emailError);
+      // Continue with account deletion even if email fails
+    }
 
     return new Response(
       JSON.stringify({

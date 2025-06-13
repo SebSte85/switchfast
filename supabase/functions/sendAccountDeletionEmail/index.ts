@@ -11,16 +11,6 @@ const AWS_REGION = "eu-west-1";
 const AWS_ACCESS_KEY_ID = Deno.env.get("AWS_ACCESS_KEY_ID");
 const AWS_SECRET_ACCESS_KEY = Deno.env.get("AWS_SECRET_ACCESS_KEY");
 
-// Generate random ID for contact requests
-function generateContactId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
 // Company footer for emails
 const COMPANY_FOOTER = `
 
@@ -234,20 +224,19 @@ serve(async (req) => {
   }
 
   try {
-    const { email, message, deviceId } = await req.json();
+    const { email, deviceName } = await req.json();
 
-    console.log("🟢 Contact form submission:", {
+    console.log("🟢 Account deletion email request:", {
       email: email || "MISSING",
-      messageLength: message?.length || 0,
-      deviceId: deviceId || "MISSING",
+      deviceName: deviceName || "MISSING",
     });
 
     // Validation
-    if (!email || !message || !deviceId) {
+    if (!email) {
       return new Response(
         JSON.stringify({
           error: "Missing required fields",
-          details: "Email, message, and deviceId are required",
+          details: "Email is required",
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -256,81 +245,53 @@ serve(async (req) => {
       );
     }
 
-    // Generate unique contact ID
-    const contactId = generateContactId();
+    // Prepare account deletion confirmation email content
+    const deletionSubject = `Your switchfast account has been deleted`;
+    const deletionBody = `
+Hey there,
 
-    // Prepare email content for support team
-    const supportEmailSubject = `Contact Form - switchfast Support [${contactId}]`;
-    const supportEmailBody = `
-New contact form submission from switchfast:
+Your switchfast account and all associated data have been successfully deleted.
 
-Contact ID: ${contactId}
-From: ${email}
-Device ID: ${deviceId}
-Timestamp: ${new Date().toISOString()}
+Here's what happened:
+• Your license has been deactivated
+• All personal data has been removed from our systems
+• Your Stripe subscription (if any) has been cancelled
+${deviceName ? `• Device "${deviceName}" has been unregistered` : ""}
 
-Message:
-${message}
+This action is permanent and cannot be undone.
 
----
-This message was sent via the switchfast contact form.${COMPANY_FOOTER}
-    `.trim();
+If you decide to use switchfast again in the future, you'll need to create a new account and purchase a new license.
 
-    // Prepare confirmation email for user
-    const confirmationSubject = `Your message has been received - switchfast Support [${contactId}]`;
-    const confirmationBody = `
-Hello,
-
-Thank you for contacting switchfast support. I have received your message and will get back to you as soon as possible.
-
-Your contact reference: ${contactId}
-
-Your message:
-${message}
-
-I typically respond within 24 hours during business days.
+Thanks for giving switchfast a try! If you have any feedback about why you decided to leave, I'd love to hear it - just reply to this email.
 
 Best regards,
-Sebastian${COMPANY_FOOTER}
+Sebastian
+
+P.S. Sorry to see you go. Hope our paths cross again someday! 👋${COMPANY_FOOTER}
     `.trim();
 
-    // Send email to support team
-    console.log("🟢 Sending support email via AWS SES...");
-    const supportResult = await sendEmailViaSES(
-      "noreply@switchfast.io",
-      "mail@switchfast.io",
-      supportEmailSubject,
-      supportEmailBody
-    );
-
-    // Send confirmation email to user
-    console.log("🟢 Sending confirmation email to user...");
-    const confirmationResult = await sendEmailViaSES(
+    // Send account deletion confirmation email
+    console.log("🟢 Sending account deletion email via AWS SES...");
+    const result = await sendEmailViaSES(
       "noreply@switchfast.io",
       email,
-      confirmationSubject,
-      confirmationBody
+      deletionSubject,
+      deletionBody
     );
 
-    console.log("✅ Contact emails sent successfully:", {
-      support: supportResult,
-      confirmation: confirmationResult,
-      contactId: contactId,
-    });
-
+    console.log("✅ Account deletion email sent successfully:", result);
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Contact message sent successfully",
-        contactId: contactId,
-        messageId: supportResult.messageId,
+        message: "Account deletion email sent successfully",
+        messageId: result.messageId,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   } catch (error) {
-    console.error("🔴 Contact form error:", error);
+    console.error("🔴 Account deletion email error:", error);
     return new Response(
       JSON.stringify({
         error: "Internal server error",

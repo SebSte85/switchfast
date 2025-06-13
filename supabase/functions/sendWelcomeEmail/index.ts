@@ -11,16 +11,6 @@ const AWS_REGION = "eu-west-1";
 const AWS_ACCESS_KEY_ID = Deno.env.get("AWS_ACCESS_KEY_ID");
 const AWS_SECRET_ACCESS_KEY = Deno.env.get("AWS_SECRET_ACCESS_KEY");
 
-// Generate random ID for contact requests
-function generateContactId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
 // Company footer for emails
 const COMPANY_FOOTER = `
 
@@ -234,20 +224,20 @@ serve(async (req) => {
   }
 
   try {
-    const { email, message, deviceId } = await req.json();
+    const { email, licenseKey, deviceName } = await req.json();
 
-    console.log("🟢 Contact form submission:", {
+    console.log("🟢 Welcome email request:", {
       email: email || "MISSING",
-      messageLength: message?.length || 0,
-      deviceId: deviceId || "MISSING",
+      licenseKey: licenseKey || "MISSING",
+      deviceName: deviceName || "MISSING",
     });
 
     // Validation
-    if (!email || !message || !deviceId) {
+    if (!email || !licenseKey) {
       return new Response(
         JSON.stringify({
           error: "Missing required fields",
-          details: "Email, message, and deviceId are required",
+          details: "Email and licenseKey are required",
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -256,81 +246,55 @@ serve(async (req) => {
       );
     }
 
-    // Generate unique contact ID
-    const contactId = generateContactId();
+    // Prepare welcome email content
+    const welcomeSubject = `Welcome to switchfast! Your license is ready 🚀`;
+    const welcomeBody = `
+Hey there!
 
-    // Prepare email content for support team
-    const supportEmailSubject = `Contact Form - switchfast Support [${contactId}]`;
-    const supportEmailBody = `
-New contact form submission from switchfast:
+Welcome to switchfast! 🎉 I'm excited to have you on board.
 
-Contact ID: ${contactId}
-From: ${email}
-Device ID: ${deviceId}
-Timestamp: ${new Date().toISOString()}
+Your license has been successfully activated. Here's what you need to know:
 
-Message:
-${message}
+🔑 License Key: ${licenseKey}
+💻 Device: ${deviceName || "Your device"}
+✅ Status: Active and ready to use
 
----
-This message was sent via the switchfast contact form.${COMPANY_FOOTER}
-    `.trim();
+What's next?
+• IMPORTANT: Restart your switchfast app to activate the new license
+• Start hitting those shortcuts!
 
-    // Prepare confirmation email for user
-    const confirmationSubject = `Your message has been received - switchfast Support [${contactId}]`;
-    const confirmationBody = `
-Hello,
+Got questions? Just hit reply to this email - I'm here to help.
 
-Thank you for contacting switchfast support. I have received your message and will get back to you as soon as possible.
-
-Your contact reference: ${contactId}
-
-Your message:
-${message}
-
-I typically respond within 24 hours during business days.
+Welcome to the switchfast family! 🚀
 
 Best regards,
-Sebastian${COMPANY_FOOTER}
+Sebastian
+
+P.S. Please let me know if you like or hate this app. I'm always looking for feedback to improve it.${COMPANY_FOOTER}
     `.trim();
 
-    // Send email to support team
-    console.log("🟢 Sending support email via AWS SES...");
-    const supportResult = await sendEmailViaSES(
-      "noreply@switchfast.io",
-      "mail@switchfast.io",
-      supportEmailSubject,
-      supportEmailBody
-    );
-
-    // Send confirmation email to user
-    console.log("🟢 Sending confirmation email to user...");
-    const confirmationResult = await sendEmailViaSES(
+    // Send welcome email
+    console.log("🟢 Sending welcome email via AWS SES...");
+    const result = await sendEmailViaSES(
       "noreply@switchfast.io",
       email,
-      confirmationSubject,
-      confirmationBody
+      welcomeSubject,
+      welcomeBody
     );
 
-    console.log("✅ Contact emails sent successfully:", {
-      support: supportResult,
-      confirmation: confirmationResult,
-      contactId: contactId,
-    });
-
+    console.log("✅ Welcome email sent successfully:", result);
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Contact message sent successfully",
-        contactId: contactId,
-        messageId: supportResult.messageId,
+        message: "Welcome email sent successfully",
+        messageId: result.messageId,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   } catch (error) {
-    console.error("🔴 Contact form error:", error);
+    console.error("🔴 Welcome email error:", error);
     return new Response(
       JSON.stringify({
         error: "Internal server error",

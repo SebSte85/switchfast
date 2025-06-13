@@ -410,6 +410,37 @@ serve(async (req) => {
             `✅ Lizenz erfolgreich erstellt für ${email} mit Gerät ${deviceId} (${deviceName})`
           );
           console.log(`✅ Lizenzschlüssel: ${licenseKey}`);
+
+          // Send welcome email
+          try {
+            console.log("🟢 Sending welcome email...");
+            const welcomeEmailResponse = await fetch(
+              `${Deno.env.get("SUPABASE_URL")}/functions/v1/sendWelcomeEmail`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  email: email,
+                  licenseKey: licenseKey,
+                  deviceName: deviceName,
+                }),
+              }
+            );
+
+            if (welcomeEmailResponse.ok) {
+              console.log("✅ Welcome email sent successfully");
+            } else {
+              console.error(
+                "⚠️ Welcome email failed:",
+                await welcomeEmailResponse.text()
+              );
+            }
+          } catch (emailError) {
+            console.error("⚠️ Welcome email error (non-critical):", emailError);
+            // Don't fail the webhook if email fails
+          }
         } else {
           console.log(
             `Zahlung noch nicht abgeschlossen. Status: ${session.payment_status}`
