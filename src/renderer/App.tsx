@@ -19,6 +19,9 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
   const [loading, setLoading] = useState(true);
   const [loadingPhase, setLoadingPhase] = useState(0);
   const [loadingStep, setLoadingStep] = useState<string>("Initializing...");
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [canWorkOffline, setCanWorkOffline] = useState(false);
   const [shortcutsRegistered, setShortcutsRegistered] = useState(false);
   const [compactMode, setCompactMode] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -108,7 +111,15 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
       setLoadingPhase(1);
       setLoadingStep("Initializing workspace...");
 
-      // Backend-Initialisierung ist bereits gestartet, warten auf Events
+      // CRITICAL FIX: Frontend startet Backend-Initialisierung aktiv
+      // Das verhindert Race Condition wo Events gesendet werden bevor Listener bereit sind
+      ipcRenderer.invoke("start-app-initialization").catch((error) => {
+        console.error(
+          "[Frontend] Failed to start backend initialization:",
+          error
+        );
+        setLoadingError("Failed to start initialization: " + error.message);
+      });
     }, 2000);
 
     return () => clearTimeout(licenseCheckTimer);
@@ -119,6 +130,7 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     const handleInitializationStep = (_: any, step: string) => {
       console.log("[Frontend] Backend initialization step:", step);
       setLoadingStep(step);
+      setLoadingError(null); // Clear any previous errors
 
       // Phasen basierend auf Backend-Schritten setzen
       if (step.includes("theme data")) {
@@ -131,6 +143,33 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         setLoadingPhase(3);
       } else if (step.includes("shortcut")) {
         setLoadingPhase(4);
+      }
+    };
+
+    const handleInitializationError = (_: any, error: string) => {
+      console.error("[Frontend] Backend initialization error:", error);
+      setLoadingError(error);
+
+      // Check if we can work offline
+      if (
+        error.includes("network") ||
+        error.includes("timeout") ||
+        error.includes("connection")
+      ) {
+        setCanWorkOffline(true);
+        setLoadingStep("Network error - checking offline options...");
+      }
+    };
+
+    const handleOfflineMode = (_: any, canContinue: boolean) => {
+      if (canContinue) {
+        setCanWorkOffline(true);
+        setLoadingStep("Working in offline mode...");
+        setLoadingError("Network unavailable - using local data");
+      } else {
+        setLoadingError(
+          "Network required for initial setup - please check your connection"
+        );
       }
     };
 
@@ -191,6 +230,8 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
 
     // Neue sichere Events
     ipcRenderer.on("initialization-step", handleInitializationStep);
+    ipcRenderer.on("initialization-error", handleInitializationError);
+    ipcRenderer.on("offline-mode", handleOfflineMode);
     ipcRenderer.on("app-initialization-complete", handleInitializationComplete);
 
     // Legacy Events
@@ -203,6 +244,11 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         "initialization-step",
         handleInitializationStep
       );
+      ipcRenderer.removeListener(
+        "initialization-error",
+        handleInitializationError
+      );
+      ipcRenderer.removeListener("offline-mode", handleOfflineMode);
       ipcRenderer.removeListener(
         "app-initialization-complete",
         handleInitializationComplete
@@ -841,6 +887,28 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
     };
   }, []);
 
+  // Retry initialization
+  const handleRetry = () => {
+    setRetryCount((prev) => prev + 1);
+    setLoadingError(null);
+    setCanWorkOffline(false);
+    setLoadingStep("Retrying initialization...");
+    ipcRenderer.invoke("retry-initialization");
+  };
+
+  // Continue in offline mode
+  const handleOfflineMode = () => {
+    setLoadingError(null);
+    setLoadingStep("Starting in offline mode...");
+    ipcRenderer.invoke("continue-offline");
+  };
+
+  // Check network connection
+  const handleCheckConnection = () => {
+    setLoadingStep("Checking network connection...");
+    ipcRenderer.invoke("check-network-connection");
+  };
+
   return (
     <div className={`app ${compactMode ? "compact-mode" : ""}`}>
       {/* Update-Benachrichtigung */}
@@ -979,8 +1047,60 @@ const AppContent: React.FC<{ initialLoadingText?: string }> = ({
         <div className="loading-animation">
           <div className="loading-text">{loadingStep}</div>
           <div className="loading-process-item"></div>
+
+          {loadingError && (
+            <div className="loading-error">
+              <div className="error-icon">⚠️</div>
+              <div className="error-message">{loadingError}</div>
+
+              <div className="error-actions">
+                {retryCount < 3 && (
+                  <button
+                    className="retry-button"
+                    onClick={handleRetry}
+                    disabled={retryCount >= 3}
+                  >
+                    Retry Connection ({3 - retryCount} attempts left)
+                  </button>
+                )}
+
+                <button
+                  className="check-connection-button"
+                  onClick={handleCheckConnection}
+                >
+                  Check Network
+                </button>
+
+                {canWorkOffline && (
+                  <button
+                    className="offline-button"
+                    onClick={handleOfflineMode}
+                  >
+                    Continue Offline
+                  </button>
+                )}
+              </div>
+
+              <div className="error-help">
+                <details>
+                  <summary>Need help?</summary>
+                  <p>
+                    • Check your internet connection
+                    <br />
+                    • Verify firewall settings
+                    <br />
+                    • Try again in a few minutes
+                    <br />• Contact support if the problem persists
+                  </p>
+                </details>
+              </div>
+            </div>
+          )}
+
           <div className="loading-footer">
-            Please wait - initialization must complete before using the app
+            {loadingError
+              ? "Connection issue detected - see options above"
+              : "Please wait - initialization must complete before using the app"}
           </div>
         </div>
       ) : (

@@ -1796,4 +1796,72 @@
   .window-item:hover::after {
     opacity: 1;
   }
+
+  @keyframes pulse {
+    0% {
+      opacity: 0.7;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.7;
+    }
+  }
+
+  .loading-error {
+    @apply bg-red-900/30 border border-red-500/50 rounded-lg p-6 mt-6 mx-auto;
+    max-width: 500px;
+    width: 80%;
+    backdrop-filter: blur(8px);
+  }
+
+  .error-icon {
+    @apply text-2xl text-center mb-3;
+  }
+
+  .error-message {
+    @apply text-red-200 text-center mb-4 font-medium;
+  }
+
+  .error-actions {
+    @apply flex flex-col gap-3 mb-4;
+  }
+
+  .retry-button,
+  .check-connection-button,
+  .offline-button {
+    @apply px-4 py-2 rounded-md font-medium transition-all duration-200;
+    @apply bg-blue-600 hover:bg-blue-700 text-white;
+    @apply border border-blue-500 hover:border-blue-400;
+  }
+
+  .retry-button:disabled {
+    @apply bg-gray-600 text-gray-400 cursor-not-allowed;
+    @apply border-gray-500 hover:bg-gray-600 hover:border-gray-500;
+  }
+
+  .check-connection-button {
+    @apply bg-yellow-600 hover:bg-yellow-700 border-yellow-500 hover:border-yellow-400;
+  }
+
+  .offline-button {
+    @apply bg-green-600 hover:bg-green-700 border-green-500 hover:border-green-400;
+  }
+
+  .error-help {
+    @apply mt-4 text-sm;
+  }
+
+  .error-help details {
+    @apply text-gray-300;
+  }
+
+  .error-help summary {
+    @apply cursor-pointer text-blue-400 hover:text-blue-300 mb-2;
+  }
+
+  .error-help p {
+    @apply text-gray-400 leading-relaxed pl-4;
+  }
 }

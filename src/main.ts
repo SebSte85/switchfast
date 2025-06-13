@@ -147,6 +147,11 @@ function createWindow() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
     }
+
+    // READY: Window loaded - frontend will start initialization when ready
+    console.log(
+      "[Window] Window loaded - ready for frontend initialization request"
+    );
   });
 
   // Öffne Developer Tools nur in der Entwicklung
@@ -608,8 +613,41 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
       }
     `;
 
-    // PowerShell-Befehl ausführen und Ausgabe verarbeiten
-    const stdout = await runPowerShellCommand(command);
+    // PowerShell-Befehl ausführen und Ausgabe verarbeiten - with timeout and error handling
+    let stdout: string;
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("PowerShell timeout for process query")),
+          15000
+        );
+      });
+
+      stdout = await Promise.race([
+        runPowerShellCommand(command),
+        timeoutPromise,
+      ]);
+    } catch (error) {
+      console.warn(
+        "[getRunningApplications] PowerShell command failed:",
+        error
+      );
+
+      // Track PowerShell error for debugging
+      if (mainWindow) {
+        mainWindow.webContents.send(
+          "track-event",
+          "powershell_process_query_failed",
+          {
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          }
+        );
+      }
+
+      // Return empty array as fallback when PowerShell fails
+      return [];
+    }
 
     if (!stdout || stdout.trim() === "") {
       return [];
@@ -648,6 +686,19 @@ async function getRunningApplications(): Promise<ProcessInfo[]> {
     return processes;
   } catch (error) {
     console.error("[getRunningApplications] Error:", error);
+
+    // Track general error for debugging
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "get_running_applications_failed",
+        {
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
     captureEnhancedException(error as Error, {
       function: "getRunningApplications",
       error_category: "system",
@@ -1308,8 +1359,38 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
       }
     `;
 
-    // Hole die Fenster
-    const windowsOutput = await runPowerShellCommand(command);
+    // Hole die Fenster - with timeout and error handling
+    let windowsOutput: string;
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("PowerShell timeout")), 10000);
+      });
+
+      windowsOutput = await Promise.race([
+        runPowerShellCommand(command),
+        timeoutPromise,
+      ]);
+    } catch (error) {
+      console.warn(
+        "[getProcessesWithWindows] PowerShell command failed:",
+        error
+      );
+
+      // Track PowerShell error for debugging
+      if (mainWindow) {
+        mainWindow.webContents.send(
+          "track-event",
+          "powershell_windows_query_failed",
+          {
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          }
+        );
+      }
+
+      // Return basic processes without windows as fallback
+      return processes.map((process) => ({ ...process, windows: [] }));
+    }
 
     if (!windowsOutput || windowsOutput.trim() === "") {
       return [];
@@ -1374,17 +1455,42 @@ async function getProcessesWithWindows(): Promise<ProcessInfo[]> {
     return result;
   } catch (error) {
     console.error("[getProcessesWithWindows] Error:", error);
+
+    // Track general error for debugging
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "get_processes_with_windows_failed",
+        {
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
     captureException(error as Error, {
       function: "getProcessesWithWindows",
       context: "Failed to retrieve processes with windows",
     });
-    return [];
+
+    // Fallback: return basic running applications without windows
+    try {
+      const basicProcesses = await getRunningApplications();
+      return basicProcesses.map((process) => ({ ...process, windows: [] }));
+    } catch (fallbackError) {
+      console.error(
+        "[getProcessesWithWindows] Fallback also failed:",
+        fallbackError
+      );
+      return [];
+    }
   }
 }
 
 // Zentrale Funktion zum Einrichten der IPC-Handler
 function setupIpcHandlers() {
   // Entferne alle existierenden Handler
+  ipcMain.removeHandler("start-app-initialization");
   ipcMain.removeHandler("get-running-applications");
   ipcMain.removeHandler("get-themes");
   ipcMain.removeHandler("save-themes");
@@ -1398,6 +1504,21 @@ function setupIpcHandlers() {
   ipcMain.removeHandler("unregister-shortcut");
   ipcMain.removeHandler("add-windows-to-theme");
   ipcMain.removeHandler("remove-windows-from-theme");
+
+  // CRITICAL: Handler für Frontend-gesteuerte Initialisierung
+  ipcMain.handle("start-app-initialization", async () => {
+    console.log("[IPC] Frontend requests app initialization start");
+    try {
+      await startAppInitialization();
+      return { success: true };
+    } catch (error) {
+      console.error("[IPC] App initialization failed:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
 
   // Registriere die Handler neu
   ipcMain.handle("get-running-applications", async () => {
@@ -2153,6 +2274,137 @@ function setupIpcHandlers() {
       return null;
     }
   });
+
+  // Network and initialization handlers
+  ipcMain.handle("retry-initialization", async () => {
+    try {
+      const licenseManager = getLicenseManager();
+
+      // Reset and retry license check
+      console.log("[IPC] Retrying license initialization...");
+      const result = await licenseManager.checkLicenseStatus();
+
+      if (result) {
+        if (mainWindow) {
+          mainWindow.webContents.send(
+            "initialization-step",
+            "License verification successful"
+          );
+          mainWindow.webContents.send("app-initialization-complete");
+        }
+      } else {
+        if (mainWindow) {
+          mainWindow.webContents.send(
+            "initialization-error",
+            "License verification failed after retry"
+          );
+        }
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error("[IPC] Retry initialization failed:", error);
+      if (mainWindow) {
+        mainWindow.webContents.send(
+          "initialization-error",
+          "Retry failed: " + (error?.message || "Unknown error")
+        );
+      }
+      return false;
+    }
+  });
+
+  ipcMain.handle("continue-offline", async () => {
+    try {
+      console.log("[IPC] Continuing in offline mode...");
+
+      const licenseManager = getLicenseManager();
+      const canWorkOffline =
+        licenseManager.isLicensed() || licenseManager.isInTrial();
+
+      if (canWorkOffline) {
+        if (mainWindow) {
+          mainWindow.webContents.send(
+            "initialization-step",
+            "Working in offline mode"
+          );
+          mainWindow.webContents.send("app-initialization-complete");
+        }
+        return true;
+      } else {
+        if (mainWindow) {
+          mainWindow.webContents.send(
+            "initialization-error",
+            "No valid license or trial found for offline mode"
+          );
+        }
+        return false;
+      }
+    } catch (error) {
+      console.error("[IPC] Continue offline failed:", error);
+      return false;
+    }
+  });
+
+  ipcMain.handle("check-network-connection", async () => {
+    try {
+      console.log("[IPC] Checking network connection...");
+
+      // Simple network check
+      const dns = require("dns");
+      return new Promise((resolve) => {
+        dns.lookup("google.com", (err: any) => {
+          const isOnline = !err;
+
+          if (mainWindow) {
+            if (isOnline) {
+              mainWindow.webContents.send(
+                "initialization-step",
+                "Network connection OK - retrying license check..."
+              );
+              // Automatically retry license check if network is available
+              setTimeout(() => {
+                const licenseManager = getLicenseManager();
+                licenseManager
+                  .checkLicenseStatus()
+                  .then((result) => {
+                    if (result && mainWindow) {
+                      mainWindow.webContents.send(
+                        "app-initialization-complete"
+                      );
+                    }
+                  })
+                  .catch((error) => {
+                    if (mainWindow) {
+                      mainWindow.webContents.send(
+                        "initialization-error",
+                        "License check failed despite network connection"
+                      );
+                    }
+                  });
+              }, 1000);
+            } else {
+              mainWindow.webContents.send(
+                "initialization-error",
+                "No network connection detected"
+              );
+            }
+          }
+
+          resolve(isOnline);
+        });
+      });
+    } catch (error: any) {
+      console.error("[IPC] Network check failed:", error);
+      if (mainWindow) {
+        mainWindow.webContents.send(
+          "initialization-error",
+          "Network check failed: " + (error?.message || "Unknown error")
+        );
+      }
+      return false;
+    }
+  });
 }
 
 // Beim Beenden der App alle Shortcuts entfernen
@@ -2641,71 +2893,20 @@ app.whenReady().then(async () => {
   // Auto-Updater einrichten
   setupAutoUpdater();
 
-  // Sende Initialisierungs-Events an das Frontend
-  const sendInitEvent = (step: string) => {
-    if (mainWindow) {
-      mainWindow.webContents.send("initialization-step", step);
-    }
-  };
-
-  try {
-    // Phase 1: Theme-Daten korrigieren
-    sendInitEvent("Correcting theme data...");
-    await fixThemeData();
-
-    // Phase 2: Persistente Identifikatoren aktualisieren
-    sendInitEvent("Updating persistent identifiers...");
-    await updateExistingThemesWithPersistentIdentifiers();
-
-    // Phase 3: Prozesszuordnungen wiederherstellen
-    sendInitEvent("Restoring process associations...");
-    await restoreProcessAssociations();
-
-    // Phase 4: PIDs aktualisieren
-    sendInitEvent("Updating process IDs...");
-    const themes = dataStore.getThemes();
-    console.log(`[App] Aktualisiere PIDs für ${themes.length} Themes`);
-
-    for (const theme of themes) {
-      await updateThemeProcessIds(theme);
-    }
-
-    // Phase 5: Shortcuts registrieren
-    sendInitEvent("Registering shortcuts...");
-    registerSavedShortcuts();
-
-    // Register global shortcut to open DevTools
-    globalShortcut.register("CommandOrControl+Shift+I", () => {
-      if (mainWindow && !mainWindow.webContents.isDevToolsOpened()) {
-        mainWindow.webContents.openDevTools();
-      }
+  // IMMEDIATE TEST - Track that we reached the app.whenReady point
+  console.log("[TEST] App.whenReady() reached - about to start initialization");
+  if (mainWindow) {
+    mainWindow.webContents.send("track-event", "app_when_ready_reached", {
+      timestamp: new Date().toISOString(),
     });
+  }
 
-    // Startup-Zeit wird jetzt im Frontend getrackt wenn Loading Screen verschwindet
-    console.log(`[App] Initialisierung abgeschlossen`);
-
-    // 🚀 INITIALISIERUNG ABGESCHLOSSEN - Shortcuts jetzt sicher verwendbar
-    isAppInitialized = true;
-    console.log(
-      `[App] Backend-Initialisierung ABGESCHLOSSEN - Shortcuts sind jetzt sicher`
-    );
-
-    // Sende finales Event - App ist bereit für Benutzerinteraktion
-    if (mainWindow) {
-      mainWindow.webContents.send("app-initialization-complete");
-    }
-  } catch (error) {
-    console.error("[App] Fehler während der Initialisierung:", error);
-    // Bei Fehlern trotzdem Shortcuts freigeben, um UI nicht zu blockieren
-    isAppInitialized = true;
-    console.log(
-      `[App] Backend-Initialisierung trotz Fehler ABGESCHLOSSEN - Shortcuts freigegeben`
-    );
-
-    // Bei Fehlern trotzdem das Complete-Event senden, um UI nicht zu blockieren
-    if (mainWindow) {
-      mainWindow.webContents.send("app-initialization-complete");
-    }
+  // READY: App is ready, but initialization will be started by frontend
+  console.log("[App] App ready - waiting for frontend to start initialization");
+  if (mainWindow) {
+    mainWindow.webContents.send("track-event", "app_when_ready_reached", {
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // PostHog Error Tracking is now working correctly with proper structure
@@ -2773,45 +2974,12 @@ async function getWindows(): Promise<WindowInfo[]> {
                                 var builder = new StringBuilder(256);
                                 uint processId = 0;
 
-                                if (GetWindowThreadProcessId(hWnd, out processId) != 0) {
-                                    Process process;
-                                    if (!processCache.TryGetValue(processId, out process)) {
-                                        try {
-                                            process = Process.GetProcessById((int)processId);
-                                            processCache[processId] = process;
-                                        } catch {
-                                            return true;
-                                        }
-                                    }
-
-                                    if (GetWindowText(hWnd, builder, 256) > 0) {
-                                        string title = builder.ToString().Trim();
-                                        
-                                        if (!string.IsNullOrEmpty(title) && 
-                                            !title.EndsWith(".exe") &&
-                                            !title.Contains("Program Manager") &&
-                                            !title.Contains("Windows Input Experience") &&
-                                            !title.Contains("Microsoft Text Input Application") &&
-                                            !title.Contains("Settings") &&
-                                            !title.Contains("Windows Shell Experience Host")) {
-                                            
-                                            var classNameBuilder = new StringBuilder(256);
-                                            GetClassName(hWnd, classNameBuilder, 256);
-                                            string className = classNameBuilder.ToString();
-
-                                            bool isBrowserWindow = 
-                                                className.Contains("Chrome") || 
-                                                className.Contains("Mozilla") || 
-                                                className.Contains("Brave") ||
-                                                process.ProcessName.ToLower().Contains("brave") ||
-                                                process.ProcessName.ToLower().Contains("chrome") ||
-                                                process.ProcessName.ToLower().Contains("firefox");
-
-                                            IntPtr parentHwnd = GetParent(hWnd);
-                                            if (isBrowserWindow || parentHwnd == IntPtr.Zero) {
-                                                windows.Add(string.Format("{0}|{1}|{2}", hWnd, processId, title));
-                                            }
-                                        }
+                                if (GetWindowThreadProcessId(hWnd, out processId) != 0 && 
+                                    GetWindowText(hWnd, builder, 256) > 0) {
+                                    
+                                    string title = builder.ToString().Trim();
+                                    if (!string.IsNullOrEmpty(title)) {
+                                        windows.Add(string.Format("{0}|{1}|{2}", hWnd, processId, title));
                                     }
                                 }
                             }
@@ -2943,12 +3111,18 @@ function setupAutoUpdater() {
       });
   });
 
-  // Nach Updates suchen
-  autoUpdater.checkForUpdatesAndNotify();
+  // Nach Updates suchen - NON-BLOCKING to prevent app initialization hang
+  setTimeout(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+      console.warn("[AutoUpdater] Update check failed:", error);
+    });
+  }, 5000); // Wait 5 seconds after app initialization
 
   // Periodisch nach Updates suchen (z.B. alle 60 Minuten)
   setInterval(() => {
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+      console.warn("[AutoUpdater] Periodic update check failed:", error);
+    });
   }, 60 * 60 * 1000);
 }
 
@@ -2999,14 +3173,61 @@ function findMatchingProcess(
  * Stellt Prozesszuordnungen nach einem Neustart wieder her und startet fehlende Anwendungen
  */
 async function restoreProcessAssociations() {
+  // Track that we've reached restore process associations
+  if (mainWindow) {
+    mainWindow.webContents.send(
+      "track-event",
+      "restore_process_associations_started",
+      {
+        timestamp: new Date().toISOString(),
+      }
+    );
+  }
+
   // Bereinige zuerst konflikthafte Prozess-IDs (für Browser-Subprozesse)
   dataStore.cleanupConflictingProcessIds();
 
   // Alle gespeicherten Themen abrufen
   const themes = dataStore.getThemes();
 
+  // Bei komplettem Neustart ohne Themes -> sofort beenden
+  if (!themes || themes.length === 0) {
+    console.log(
+      "[Restore] Keine Themes gefunden - überspringe Restore-Prozess"
+    );
+
+    // Track that we skipped restore process due to no themes
+    if (mainWindow) {
+      mainWindow.webContents.send("track-event", "restore_process_skipped", {
+        reason: "no_themes_found",
+        timestamp: new Date().toISOString(),
+      });
+      mainWindow.webContents.send("apps-started");
+    }
+    return;
+  }
+
+  // Track before getting processes with windows (this is where PowerShell fails)
+  if (mainWindow) {
+    mainWindow.webContents.send(
+      "track-event",
+      "getting_processes_with_windows",
+      {
+        timestamp: new Date().toISOString(),
+      }
+    );
+  }
+
   // Aktuelle Prozesse MIT Windows abrufen (wichtig für restoreWindowHandles)
   const currentProcesses = await getProcessesWithWindows();
+
+  // Track after getting processes with windows
+  if (mainWindow) {
+    mainWindow.webContents.send("track-event", "got_processes_with_windows", {
+      process_count: currentProcesses.length,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   // Window-Handles für Browser-Subprozesse wiederherstellen
   await restoreWindowHandles(themes, currentProcesses);
@@ -3573,5 +3794,206 @@ async function updateExistingThemesWithPersistentIdentifiers(): Promise<void> {
       "[Init] Fehler bei der Aktualisierung der Themen mit persistenten Prozessidentifikatoren:",
       error
     );
+  }
+}
+
+/**
+ * Startet die App-Initialisierung - wird vom Frontend aufgerufen
+ */
+async function startAppInitialization(): Promise<void> {
+  // Track that we've reached the initialization point
+  if (mainWindow) {
+    mainWindow.webContents.send(
+      "track-event",
+      "reached_app_initialization_point",
+      {
+        timestamp: new Date().toISOString(),
+        environment: process.env.ACTIVE_ENVIRONMENT || "unknown",
+      }
+    );
+  }
+
+  // Sende Initialisierungs-Events an das Frontend
+  const sendInitEvent = (step: string) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[DEBUG INIT] ${timestamp} - ${step}`);
+    if (mainWindow) {
+      mainWindow.webContents.send("initialization-step", step);
+    }
+  };
+
+  const startTime = Date.now();
+  try {
+    console.log("[DEBUG INIT] Starting initialization sequence...");
+
+    // Track initialization start
+    if (mainWindow) {
+      mainWindow.webContents.send("track-event", "app_initialization_started", {
+        timestamp: new Date().toISOString(),
+        environment: process.env.ACTIVE_ENVIRONMENT || "unknown",
+      });
+    }
+
+    // Phase 1: Theme-Daten korrigieren
+    sendInitEvent("Correcting theme data...");
+    console.log("[DEBUG INIT] About to call fixThemeData()...");
+    await fixThemeData();
+    console.log("[DEBUG INIT] fixThemeData() completed successfully");
+
+    // Track Phase 1 completion
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "initialization_phase_1_complete",
+        {
+          phase: "fix_theme_data",
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    // Phase 2: Persistente Identifikatoren aktualisieren
+    sendInitEvent("Updating persistent identifiers...");
+    console.log(
+      "[DEBUG INIT] About to call updateExistingThemesWithPersistentIdentifiers()..."
+    );
+    await updateExistingThemesWithPersistentIdentifiers();
+    console.log(
+      "[DEBUG INIT] updateExistingThemesWithPersistentIdentifiers() completed successfully"
+    );
+
+    // Track Phase 2 completion
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "initialization_phase_2_complete",
+        {
+          phase: "update_persistent_identifiers",
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    // Phase 3: Prozesszuordnungen wiederherstellen
+    sendInitEvent("Restoring process associations...");
+    console.log("[DEBUG INIT] About to call restoreProcessAssociations()...");
+    await restoreProcessAssociations();
+    console.log(
+      "[DEBUG INIT] restoreProcessAssociations() completed successfully"
+    );
+
+    // Track Phase 3 completion
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "initialization_phase_3_complete",
+        {
+          phase: "restore_process_associations",
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    // Phase 4: PIDs aktualisieren
+    sendInitEvent("Updating process IDs...");
+    console.log("[DEBUG INIT] About to update process IDs...");
+    const themes = dataStore.getThemes();
+    console.log(
+      `[DEBUG INIT] Found ${themes.length} themes to update PIDs for`
+    );
+
+    for (const theme of themes) {
+      console.log(`[DEBUG INIT] Updating PIDs for theme: ${theme.name}`);
+      await updateThemeProcessIds(theme);
+      console.log(`[DEBUG INIT] PIDs updated for theme: ${theme.name}`);
+    }
+    console.log("[DEBUG INIT] All theme PID updates completed");
+
+    // Track Phase 4 completion
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "initialization_phase_4_complete",
+        {
+          phase: "update_process_ids",
+          theme_count: themes.length,
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    // Phase 5: Shortcuts registrieren
+    sendInitEvent("Registering shortcuts...");
+    console.log("[DEBUG INIT] About to register shortcuts...");
+    registerSavedShortcuts();
+    console.log("[DEBUG INIT] Shortcuts registration completed");
+
+    // Track Phase 5 completion
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "initialization_phase_5_complete",
+        {
+          phase: "register_shortcuts",
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    // Register global shortcut to open DevTools
+    globalShortcut.register("CommandOrControl+Shift+I", () => {
+      if (mainWindow && !mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.openDevTools();
+      }
+    });
+
+    // Startup-Zeit wird jetzt im Frontend getrackt wenn Loading Screen verschwindet
+    console.log(`[App] Initialisierung abgeschlossen`);
+
+    // 🚀 INITIALISIERUNG ABGESCHLOSSEN - Shortcuts jetzt sicher verwendbar
+    isAppInitialized = true;
+    console.log(
+      `[App] Backend-Initialisierung ABGESCHLOSSEN - Shortcuts sind jetzt sicher`
+    );
+
+    // Track successful completion
+    if (mainWindow) {
+      mainWindow.webContents.send(
+        "track-event",
+        "app_initialization_complete_success",
+        {
+          timestamp: new Date().toISOString(),
+          duration_ms: Date.now() - startTime,
+        }
+      );
+    }
+
+    // Sende finales Event - App ist bereit für Benutzerinteraktion
+    if (mainWindow) {
+      mainWindow.webContents.send("app-initialization-complete");
+    }
+  } catch (error) {
+    console.error("[App] Fehler während der Initialisierung:", error);
+
+    // Track initialization error
+    if (mainWindow) {
+      mainWindow.webContents.send("track-event", "app_initialization_error", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString(),
+        duration_ms: Date.now() - startTime,
+      });
+    }
+
+    // Bei Fehlern trotzdem Shortcuts freigeben, um UI nicht zu blockieren
+    isAppInitialized = true;
+    console.log(
+      `[App] Backend-Initialisierung trotz Fehler ABGESCHLOSSEN - Shortcuts freigegeben`
+    );
+
+    // Bei Fehlern trotzdem das Complete-Event senden, um UI nicht zu blockieren
+    if (mainWindow) {
+      mainWindow.webContents.send("app-initialization-complete");
+    }
   }
 }

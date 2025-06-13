@@ -141,15 +141,91 @@ export class LicenseManager {
 
   private async initializeAsync(): Promise<void> {
     try {
-      await this.loadPrivacyConsentFromDatabase();
+      // Load privacy consent with shorter timeout to prevent app hanging
+      // But still preserve license logic - if this fails, we fall back to local data
+      const timeout = new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error("Privacy consent loading timeout")),
+          5000
+        ); // 5 seconds timeout
+      });
+
+      await Promise.race([this.loadPrivacyConsentFromDatabase(), timeout]);
+
       this.isReady = true;
+      console.log("[LicenseManager] Initialization completed successfully");
     } catch (error) {
-      console.error(
-        "[LicenseManager] Fehler bei Async-Initialisierung:",
+      console.warn(
+        "[LicenseManager] Privacy consent loading failed, falling back to local data:",
         error
       );
-      this.isReady = true; // Set ready even on error to prevent hanging
+
+      // Send error to frontend with specific error type
+      this.sendErrorToFrontend(error);
+
+      // Still mark as ready - the license/trial checks will work with local data
+      // The app will still enforce proper license/trial restrictions
+      this.isReady = true;
     }
+  }
+
+  private sendErrorToFrontend(error: any): void {
+    try {
+      const { BrowserWindow } = require("electron");
+      const mainWindow =
+        BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+
+      if (mainWindow) {
+        let errorMessage = "Unknown initialization error";
+        let canWorkOffline = false;
+
+        if (
+          error.message.includes("timeout") ||
+          error.message.includes("network") ||
+          error.code === "ENOTFOUND"
+        ) {
+          errorMessage =
+            "Network connection timeout - unable to verify license online";
+          canWorkOffline = this.hasLocalLicenseOrTrial();
+        } else if (error.code === "ECONNREFUSED") {
+          errorMessage = "License server unavailable - working with local data";
+          canWorkOffline = this.hasLocalLicenseOrTrial();
+        } else {
+          errorMessage = error.message || "License verification failed";
+          canWorkOffline = this.hasLocalLicenseOrTrial();
+        }
+
+        mainWindow.webContents.send("initialization-error", errorMessage);
+
+        if (canWorkOffline) {
+          mainWindow.webContents.send("offline-mode", true);
+        }
+      }
+    } catch (e) {
+      console.error("[LicenseManager] Failed to send error to frontend:", e);
+    }
+  }
+
+  private hasLocalLicenseOrTrial(): boolean {
+    const licenseInfo = this.getLicenseInfo();
+    const trialInfo = this.getTrialInfo();
+
+    // Check if we have valid local license data
+    if (licenseInfo && licenseInfo.isActive) {
+      const lastVerified = new Date(licenseInfo.lastVerified).getTime();
+      const now = new Date().getTime();
+      // If verified within grace period, we can work offline
+      if (now - lastVerified < OFFLINE_GRACE_PERIOD) {
+        return true;
+      }
+    }
+
+    // Check if we have valid local trial data
+    if (trialInfo && trialInfo.isTrialActive && trialInfo.remainingDays > 0) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -213,19 +289,35 @@ export class LicenseManager {
    * Richtet regelmäßige Lizenzprüfungen ein
    */
   private setupLicenseChecks() {
-    // Sofortige Prüfung beim Start
-    this.checkLicenseStatus();
+    // Delay initial license check to prevent blocking app startup
+    // But still ensure license validation happens
+    setTimeout(() => {
+      this.checkLicenseStatus().catch((error) => {
+        console.warn(
+          "[LicenseManager] Initial license check failed (non-blocking):",
+          error
+        );
+      });
+    }, 2000); // 2 second delay
 
     // Regelmäßige Prüfungen
     this.licenseCheckTimer = setInterval(() => {
-      this.checkLicenseStatus();
+      this.checkLicenseStatus().catch((error) => {
+        console.warn("[LicenseManager] Periodic license check failed:", error);
+      });
     }, LICENSE_CHECK_INTERVAL);
 
     // Zusätzliche Prüfung, wenn der Computer aus dem Ruhezustand erwacht
-    const powerMonitor = require("electron").powerMonitor;
-    powerMonitor.on("resume", () => {
-      this.checkLicenseStatus();
-    });
+    try {
+      const powerMonitor = require("electron").powerMonitor;
+      powerMonitor.on("resume", () => {
+        this.checkLicenseStatus().catch((error) => {
+          console.warn("[LicenseManager] Resume license check failed:", error);
+        });
+      });
+    } catch (error) {
+      console.warn("[LicenseManager] PowerMonitor setup failed:", error);
+    }
   }
 
   /**
