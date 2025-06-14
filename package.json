@@ -1,6 +1,6 @@
 {
   "name": "switchfast",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "description": "Desktop app to manage application focus by grouping them under themes",
   "main": "dist/main.js",
   "scripts": {
@@ -31,7 +31,9 @@
     "test:e2e:ui": "playwright test --ui",
     "test:all": "npm run test:unit && npm run test:e2e",
     "test:watch": "vitest",
-    "playwright:install": "playwright install"
+    "playwright:install": "playwright install",
+    "version:bump": "node scripts/version-bump.js",
+    "release:deploy": "npm run version:bump && npm run build:prod:ci && npm run package:prod"
   },
   "author": "",
   "license": "MIT",
@@ -93,10 +95,29 @@
     "win": {
       "icon": "src/assets/logo 256.png",
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "publisherName": "switchfast"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "switchfast"
     },
     "publish": [
+      {
+        "provider": "s3",
+        "bucket": "switchfast-prod",
+        "region": "eu-west-1",
+        "path": "/latest"
+      },
       {
         "provider": "github",
         "owner": "SebSte85",
