@@ -298,6 +298,10 @@ jobs:
     needs: [unit-tests, integration-tests, security-tests, windows-build-test]
     if: github.ref == 'refs/heads/main' && needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' && needs.security-tests.result == 'success' && needs.windows-build-test.result == 'success'
 
+    permissions:
+      contents: read
+      actions: read
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -318,6 +322,7 @@ jobs:
         run: npx semantic-release --dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     outputs:
       new-release-published: ${{ steps.get-next-version.outputs.new-release-published }}
@@ -383,6 +388,7 @@ jobs:
         run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify deployment success
         run: |
