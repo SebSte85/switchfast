@@ -34,4 +34,7 @@ build/
 
 # OS specific files
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Coverage reports  
+coverage/ 

@@ -291,12 +291,44 @@ jobs:
         env:
           NODE_ENV: test
 
-  # Production deployment - only on main branch after all tests pass
+  # Get next version from semantic-release (dry-run)
+  get-next-version:
+    name: 📋 Get Next Version
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, security-tests, windows-build-test]
+    if: github.ref == 'refs/heads/main' && needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' && needs.security-tests.result == 'success' && needs.windows-build-test.result == 'success'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get next version (dry-run)
+        id: get-next-version
+        run: npx semantic-release --dry-run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    outputs:
+      new-release-published: ${{ steps.get-next-version.outputs.new-release-published }}
+      new-release-version: ${{ steps.get-next-version.outputs.new-release-version }}
+
+  # Production deployment - only if new release is available
   production-deploy:
     name: 🚀 Production Deploy
     runs-on: windows-latest
-    needs: [unit-tests, integration-tests, security-tests, windows-build-test]
-    if: github.ref == 'refs/heads/main' && needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' && needs.security-tests.result == 'success' && needs.windows-build-test.result == 'success'
+    needs: [get-next-version]
+    if: needs.get-next-version.outputs.new-release-published == 'true'
 
     permissions:
       contents: write
@@ -317,13 +349,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Get current version
-        id: version
-        run: |
-          $VERSION = node -p "require('./package.json').version"
-          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $env:GITHUB_OUTPUT
-          echo "Building switchfast version v$VERSION"
+      - name: Show next version
+        run: echo "🚀 Deploying switchfast v${{ needs.get-next-version.outputs.new-release-version }}"
 
       - name: Build production application
         run: npm run build:prod:ci
@@ -349,45 +376,21 @@ jobs:
 
       - name: Upload to S3 - Versioned Release
         run: |
-          echo "Uploading versioned release ${{ steps.version.outputs.tag }}..."
-          aws s3 cp release/ s3://switchfast-prod/releases/${{ steps.version.outputs.tag }}/ --recursive
+          echo "Uploading versioned release v${{ needs.get-next-version.outputs.new-release-version }}..."
+          aws s3 cp release/ s3://switchfast-prod/releases/v${{ needs.get-next-version.outputs.new-release-version }}/ --recursive
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: switchfast ${{ steps.version.outputs.tag }}
-          body: |
-            ## 🚀 switchfast ${{ steps.version.outputs.tag }}
-
-            ### 📦 Download
-            - **Windows Installer**: Available via auto-update or manual download from S3
-
-            ### ✅ Quality Gates Passed
-            - Unit Tests: ✅ 33/33 passed
-            - Integration Tests: ✅ Supabase backend verified
-            - Security Tests: ✅ No vulnerabilities
-            - Windows Build: ✅ Native addons compiled
-
-            ### 🔄 Auto-Update
-            Existing users will receive this update automatically via electron-updater.
-
-            Built from commit: ${{ github.sha }}
-          files: |
-            release/*.exe
-            release/*.yml
-          draft: false
-          prerelease: false
+      - name: Create version tag and GitHub release
+        run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify deployment success
         run: |
           echo "🎉 Production deployment successful!"
-          echo "Version: ${{ steps.version.outputs.tag }}"
+          echo "Version: v${{ needs.get-next-version.outputs.new-release-version }}"
           echo "S3 Bucket: switchfast-prod"
           echo "Latest: https://switchfast-prod.s3.eu-west-1.amazonaws.com/latest/"
-          echo "Release: https://switchfast-prod.s3.eu-west-1.amazonaws.com/releases/${{ steps.version.outputs.tag }}/"
+          echo "Release: https://switchfast-prod.s3.eu-west-1.amazonaws.com/releases/v${{ needs.get-next-version.outputs.new-release-version }}/"
 
   # Separate workflow for nightly tests
   nightly-tests:
