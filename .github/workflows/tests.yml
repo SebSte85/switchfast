@@ -298,6 +298,10 @@ jobs:
     needs: [unit-tests, integration-tests, security-tests, windows-build-test]
     if: github.ref == 'refs/heads/main' && needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' && needs.security-tests.result == 'success' && needs.windows-build-test.result == 'success'
 
+    permissions:
+      contents: write
+      actions: read
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -315,15 +319,25 @@ jobs:
 
       - name: Get next version
         id: version
-        uses: mathieudutour/github-tag-action@v6.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch
-          custom_tag: ${{ github.event.inputs.version }}
+        run: |
+          # Einfache Auto-Versioning basierend auf package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+
+          # Patch bump (0.1.0 -> 0.1.1)
+          NEW_VERSION=$(node -e "
+            const semver = '$CURRENT_VERSION'.split('.');
+            semver[2] = parseInt(semver[2]) + 1;
+            console.log(semver.join('.'));
+          ")
+
+          echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Update package.json version
         run: |
-          npm version ${{ steps.version.outputs.new_tag }} --no-git-tag-version
+          npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
           echo "Building switchfast version ${{ steps.version.outputs.new_tag }}"
 
       - name: Build production application
