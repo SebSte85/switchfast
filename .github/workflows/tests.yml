@@ -317,28 +317,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Get next version
+      - name: Get current version
         id: version
         run: |
-          # Einfache Auto-Versioning basierend auf package.json
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          echo "Current version: $CURRENT_VERSION"
-
-          # Patch bump (0.1.0 -> 0.1.1)
-          NEW_VERSION=$(node -e "
-            const semver = '$CURRENT_VERSION'.split('.');
-            semver[2] = parseInt(semver[2]) + 1;
-            console.log(semver.join('.'));
-          ")
-
-          echo "New version: $NEW_VERSION"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Update package.json version
-        run: |
-          npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
-          echo "Building switchfast version ${{ steps.version.outputs.new_tag }}"
+          $VERSION = node -p "require('./package.json').version"
+          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $env:GITHUB_OUTPUT
+          echo "Building switchfast version v$VERSION"
 
       - name: Build production application
         run: npm run build:prod:ci
@@ -364,16 +349,16 @@ jobs:
 
       - name: Upload to S3 - Versioned Release
         run: |
-          echo "Uploading versioned release ${{ steps.version.outputs.new_tag }}..."
-          aws s3 cp release/ s3://switchfast-prod/releases/${{ steps.version.outputs.new_tag }}/ --recursive
+          echo "Uploading versioned release ${{ steps.version.outputs.tag }}..."
+          aws s3 cp release/ s3://switchfast-prod/releases/${{ steps.version.outputs.tag }}/ --recursive
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.new_tag }}
-          name: switchfast ${{ steps.version.outputs.new_tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: switchfast ${{ steps.version.outputs.tag }}
           body: |
-            ## 🚀 switchfast ${{ steps.version.outputs.new_tag }}
+            ## 🚀 switchfast ${{ steps.version.outputs.tag }}
 
             ### 📦 Download
             - **Windows Installer**: Available via auto-update or manual download from S3
@@ -399,10 +384,10 @@ jobs:
       - name: Notify deployment success
         run: |
           echo "🎉 Production deployment successful!"
-          echo "Version: ${{ steps.version.outputs.new_tag }}"
+          echo "Version: ${{ steps.version.outputs.tag }}"
           echo "S3 Bucket: switchfast-prod"
           echo "Latest: https://switchfast-prod.s3.eu-west-1.amazonaws.com/latest/"
-          echo "Release: https://switchfast-prod.s3.eu-west-1.amazonaws.com/releases/${{ steps.version.outputs.new_tag }}/"
+          echo "Release: https://switchfast-prod.s3.eu-west-1.amazonaws.com/releases/${{ steps.version.outputs.tag }}/"
 
   # Separate workflow for nightly tests
   nightly-tests:
