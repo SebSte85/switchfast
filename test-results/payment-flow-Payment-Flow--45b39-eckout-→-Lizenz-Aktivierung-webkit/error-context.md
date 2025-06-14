@@ -1,0 +1,132 @@
+# Page snapshot
+
+```yaml
+- main:
+  - navigation:
+    - img "SwitchFast logo"
+    - text: switchfast
+    - link "Features":
+      - /url: "#features"
+    - link "Pricing":
+      - /url: "#pricing"
+    - link "Testimonials":
+      - /url: "#testimonials"
+    - link "FAQ":
+      - /url: "#faq"
+    - link "Start Free Trial":
+      - /url: https://switchfast-prod.s3.eu-west-1.amazonaws.com/switchfast+Setup+0.1.0-beta.1.exe
+  - heading "Organize your desktop apps with one shortcut" [level=1]
+  - paragraph: Build for Windows power users — Instantly minimize distractions and bring back your personal or work setup.
+  - link "Start Free Trial":
+    - /url: https://switchfast-prod.s3.eu-west-1.amazonaws.com/switchfast+Setup+0.1.0-beta.1.exe
+  - text: switchfast demo
+  - img
+  - paragraph: Video wird geladen...
+  - heading "Let's be honest — your desktop is probably a mess. And Windows isn't helping." [level=2]
+  - 'heading "Windows treats all your apps equally (spoiler: they''re not)." [level=3]'
+  - paragraph: Your work stuff mixed with your weekend browsing? Classic.
+  - heading "Monday morning? Time for the great app hunt." [level=3]
+  - paragraph: "\"Where's my code editor? Did I close Slack? Why is Spotify in my work browser?\""
+  - heading "Your taskbar looks like a digital yard sale." [level=3]
+  - paragraph: 20 apps open, and you're using maybe 3 of them right now.
+  - heading "Here’s how switchfast relieves you from this unbearable frustration" [level=2]
+  - text: "1"
+  - img "Define your workflows"
+  - text: Groups
+  - heading "Define your groups once" [level=3]
+  - paragraph: Set up your "Work", "Gaming", or "Weekend" groups once. Then forget about manually organizing your apps. Just define them and let switchfast do the heavy lifting for you.
+  - link "Start Free Trial":
+    - /url: https://switchfast-prod.s3.eu-west-1.amazonaws.com/switchfast+Setup+0.1.0-beta.1.exe
+  - text: "2"
+  - img "Switch between setups"
+  - text: Switching
+  - heading "Switch between groups instantly" [level=3]
+  - paragraph: One shortcut to hide the mess and show only what you need right now. No more hunting through your taskbar. Clean workspace, instant focus – it's that simple.
+  - link "Start Free Trial":
+    - /url: https://switchfast-prod.s3.eu-west-1.amazonaws.com/switchfast+Setup+0.1.0-beta.1.exe
+  - text: "3"
+  - img "Restore your setup"
+  - text: Restore
+  - heading "Restore your groups after reboot" [level=3]
+  - paragraph: Your computer rebooted? No problem. Switchfast brings back all your groups exactly as they were. Windows updates won't disrupt your perfectly organized workflow anymore.
+  - link "Start Free Trial":
+    - /url: https://switchfast-prod.s3.eu-west-1.amazonaws.com/switchfast+Setup+0.1.0-beta.1.exe
+  - heading "What people are saying (at least in my imagination)" [level=2]
+  - button "Previous testimonial":
+    - img
+  - button "Next testimonial":
+    - img
+  - paragraph: "\"Finally, someone built this. My Monday mornings are way less annoying now.\""
+  - text: AJ
+  - paragraph: Alex Johnson
+  - paragraph: Software Developer
+  - paragraph: "\"It's a simple tool that does exactly what it says. My desktop doesn't look like chaos anymore.\""
+  - text: MG
+  - paragraph: Maria Garcia
+  - paragraph: UX Designer
+  - paragraph: "\"It's like having separate desktops for work and fun. Pretty neat, actually.\""
+  - text: TW
+  - paragraph: Thomas Weber
+  - paragraph: Product Manager
+  - paragraph: "\"Remembers all my apps after restart. €5 well spent for not having to do it manually.\""
+  - text: SC
+  - paragraph: Sarah Chen
+  - paragraph: Data Scientist
+  - paragraph: "\"Small tool, big impact. It just works and doesn't get in the way.\""
+  - text: MB
+  - paragraph: Michael Brown
+  - paragraph: Frontend Developer
+  - heading "Your questions - my answers" [level=2]
+  - paragraph: I've gathered the most frequently asked questions from users. If you don't find what you're looking for, let me know, and I'll be happy to assist you.
+  - heading "How does the 7-day free trial work?" [level=3]
+  - paragraph: Try it free for a week, then it's €5 per year. That's less than a fancy coffee.
+  - heading "Which Windows versions are supported?" [level=3]
+  - paragraph: switchfast is compatible with Windows 10 and Windows 11. Older Windows versions are currently not supported.
+  - heading "Can I use my license on multiple computers?" [level=3]
+  - paragraph: Your license is valid for one computer. For additional devices, you'll need separate licenses.
+  - heading "Are my data stored in the cloud?" [level=3]
+  - paragraph: Your app groups and configurations are stored locally on your computer. Only minimal data is transmitted for licensing purposes.
+  - heading "How fast is the switching between groups?" [level=3]
+  - paragraph: "Fast enough that you'll wonder if it actually did anything. Spoiler: it did."
+  - heading "How many apps can I add to a group?" [level=3]
+  - paragraph: There's no limit to the number of apps you can add to a group. Create as many groups as you need for your different work contexts.
+  - img "Founder"
+  - text: 👋
+  - heading "Hey, you made it to the end! Impressive." [level=2]
+  - paragraph: I'm Sebastian, the guy behind switchfast. Built this because my own desktop was driving me nuts — and apparently I'm not the only one with this problem. Turns out, you can organize your desktop chaos in milliseconds. Who would've thought?
+  - link "Let's organize this chaos":
+    - /url: https://switchfast-prod.s3.eu-west-1.amazonaws.com/switchfast+Setup+0.1.0-beta.1.exe
+  - paragraph: Windows 10/11 • 7 days free • Then just €5 yearly
+  - img "SwitchFast logo"
+  - text: switchfast
+  - paragraph: Organize your desktop apps in milliseconds
+  - paragraph: Copyright 2025 - All rights reserved
+  - heading "Links" [level=3]
+  - list:
+    - listitem:
+      - link "Features":
+        - /url: "#features"
+    - listitem:
+      - link "Pricing":
+        - /url: "#pricing"
+    - listitem:
+      - link "Testimonials":
+        - /url: "#testimonials"
+    - listitem:
+      - link "FAQ":
+        - /url: "#faq"
+    - listitem:
+      - link "Download":
+        - /url: "#download"
+  - heading "Legal" [level=3]
+  - list:
+    - listitem:
+      - link "Terms of services":
+        - /url: /terms
+    - listitem:
+      - link "Privacy policy":
+        - /url: /privacy
+- alert
+- button "Open Next.js Dev Tools":
+  - img
+```
