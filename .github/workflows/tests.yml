@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    # Läuft jeden Tag um 3:00 UTC (Nightly Tests)
+    - cron: "0 3 * * *"
 
 jobs:
   unit-tests:
@@ -23,6 +26,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          npm_config_build_from_source: true
+
+      - name: Build application (CI - skip native addons)
+        run: npm run build:ci
+        env:
+          NODE_ENV: test
 
       - name: Run unit tests
         run: npm run test:unit
@@ -35,7 +45,7 @@ jobs:
           NODE_ENV: test
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           file: ./coverage/lcov.info
           flags: unittests
@@ -58,12 +68,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          npm_config_build_from_source: true
 
       - name: Install Playwright browsers
         run: npm run playwright:install
 
-      - name: Build application
-        run: npm run build
+      - name: Build application (CI - skip native addons)
+        run: npm run build:test:ci
         env:
           NODE_ENV: test
 
@@ -73,7 +85,7 @@ jobs:
           NODE_ENV: test
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report
@@ -110,6 +122,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          npm_config_build_from_source: true
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
@@ -123,6 +137,11 @@ jobs:
 
       - name: Run database migrations
         run: supabase db push --local
+
+      - name: Build application (CI - skip native addons)
+        run: npm run build:ci
+        env:
+          NODE_ENV: test
 
       - name: Run integration tests
         run: npm run test:unit -- --run --reporter=verbose
@@ -142,11 +161,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_build_from_source: true
+
       - name: Run security audit
         run: npm audit --audit-level=high
 
       - name: Check for vulnerable dependencies
-        uses: actions/dependency-review-action@v3
+        uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
 
   test-summary:
@@ -195,9 +225,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          npm_config_build_from_source: true
 
       - name: Build for preview
-        run: npm run build:test
+        run: npm run build:test:ci
         env:
           ACTIVE_ENVIRONMENT: test
 
@@ -208,7 +240,7 @@ jobs:
           # Hier würde der tatsächliche Deployment-Code stehen
 
       - name: Comment preview URL
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             github.rest.issues.createComment({
@@ -228,6 +260,34 @@ jobs:
               
               The preview will be automatically updated when you push new commits.`
             })
+
+  # Windows-specific build test (with native addons)
+  windows-build-test:
+    name: Windows Build Test (Native Addons)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build with native addons
+        run: npm run build:full
+        env:
+          NODE_ENV: test
+
+      - name: Run unit tests on Windows
+        run: npm run test:unit
+        env:
+          NODE_ENV: test
 
   # Separate workflow for nightly tests
   nightly-tests:
@@ -251,9 +311,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          npm_config_build_from_source: true
 
       - name: Install Playwright browsers
         run: npm run playwright:install
+
+      - name: Build application
+        run: npm run build:ci
+        env:
+          NODE_ENV: ${{ matrix.environment }}
 
       - name: Run comprehensive test suite
         run: |
@@ -269,7 +336,7 @@ jobs:
         with:
           status: ${{ job.status }}
           channel: "#dev-alerts"
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
           text: |
             🚨 Nightly tests failed for switchfast (${{ matrix.environment }})
 

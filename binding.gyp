@@ -13,6 +13,9 @@
       "conditions": [
         ["OS=='win'", {
           "libraries": [ "user32.lib" ]
+        }],
+        ["OS!='win'", {
+          "type": "none"
         }]
       ]
     }

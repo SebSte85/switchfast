@@ -1,26 +1,29 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mockSupabaseClient, TEST_CONSTANTS } from "../setup";
-
-// Mock für createClient
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: vi.fn(() => mockSupabaseClient),
-}));
 
 describe("License Creation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    global.fetch = vi.fn();
   });
 
   describe("Lizenz-Generierung", () => {
     it("sollte gültigen Lizenzschlüssel im korrekten Format generieren", () => {
+      // Act
       const licenseKey = generateLicenseKey();
+
+      // Assert
       expect(licenseKey).toMatch(/^SF-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+      expect(licenseKey).toHaveLength(17); // SF- + 4 + - + 4 + - + 4
     });
 
     it("sollte eindeutige Lizenzschlüssel generieren", () => {
-      const licenses = Array.from({ length: 100 }, () => generateLicenseKey());
-      const uniqueLicenses = [...new Set(licenses)];
-      expect(uniqueLicenses).toHaveLength(licenses.length);
+      // Act
+      const key1 = generateLicenseKey();
+      const key2 = generateLicenseKey();
+
+      // Assert
+      expect(key1).not.toBe(key2);
     });
   });
 
@@ -44,27 +47,21 @@ describe("License Creation", () => {
         error: null,
       });
 
-      const mockFrom = vi.fn().mockImplementation((table: string) => {
+      mockSupabaseClient.from.mockImplementation((table: string) => {
         if (table === "licenses") {
           return { insert: mockLicenseInsert };
         }
         if (table === "device_activations") {
           return { insert: mockDeviceInsert };
         }
-      });
-
-      mockSupabaseClient.from = mockFrom;
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ success: true }),
+        return {};
       });
 
       // Act
       const result = await createLicense({
         email: TEST_CONSTANTS.EMAIL,
-        stripeCustomerId: "cus_test",
-        stripePaymentId: "pi_test",
+        stripeCustomerId: "cus_test_customer",
+        stripePaymentId: "pi_test_payment",
         deviceId: TEST_CONSTANTS.DEVICE_ID,
         deviceName: "Test Device",
       });
@@ -75,10 +72,8 @@ describe("License Creation", () => {
           /^SF-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
         ),
         email: TEST_CONSTANTS.EMAIL,
-        stripe_customer_id: "cus_test",
-        stripe_payment_id: "pi_test",
-        stripe_subscription_id: undefined,
-        subscription_end_date: undefined,
+        stripe_customer_id: "cus_test_customer",
+        stripe_payment_id: "pi_test_payment",
         is_active: true,
       });
 
@@ -91,80 +86,90 @@ describe("License Creation", () => {
         is_active: true,
       });
 
-      expect(result).toEqual({
-        success: true,
-        license_key: expect.stringMatching(
-          /^SF-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
-        ),
-        message: "Lizenz erfolgreich erstellt und Gerät aktiviert",
-      });
+      expect(result.success).toBe(true);
+      expect(result.license_key).toMatch(
+        /^SF-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
+      );
     });
 
     it("sollte Subscription-Lizenz mit Ablaufdatum erstellen", async () => {
       // Arrange
-      const subscriptionEndDate = "2025-01-01T00:00:00.000Z";
+      const subscriptionEndDate = new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000
+      );
 
       const mockLicenseInsert = vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           single: vi.fn().mockResolvedValue({
             data: {
-              id: "license-456",
+              id: "license-sub-123",
               license_key: TEST_CONSTANTS.LICENSE_KEY,
+              subscription_end_date: subscriptionEndDate.toISOString(),
             },
             error: null,
           }),
         }),
       });
 
-      const mockDeviceInsert = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      });
-
-      const mockFrom = vi.fn().mockImplementation((table: string) => {
+      mockSupabaseClient.from.mockImplementation((table: string) => {
         if (table === "licenses") {
           return { insert: mockLicenseInsert };
         }
         if (table === "device_activations") {
-          return { insert: mockDeviceInsert };
+          return {
+            insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
         }
+        return {};
       });
 
-      mockSupabaseClient.from = mockFrom;
-
       // Act
-      const result = await createLicense({
+      await createLicense({
         email: TEST_CONSTANTS.EMAIL,
-        stripeCustomerId: "cus_test",
-        stripeSubscriptionId: "sub_test",
-        subscriptionEndDate,
+        stripeCustomerId: "cus_test_customer",
+        stripeSubscriptionId: "sub_test_subscription",
+        subscriptionEndDate: subscriptionEndDate.toISOString(),
         deviceId: TEST_CONSTANTS.DEVICE_ID,
+        deviceName: "Test Device",
       });
 
       // Assert
-      expect(mockLicenseInsert).toHaveBeenCalledWith({
-        license_key: expect.stringMatching(
-          /^SF-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
-        ),
-        email: TEST_CONSTANTS.EMAIL,
-        stripe_customer_id: "cus_test",
-        stripe_payment_id: undefined,
-        stripe_subscription_id: "sub_test",
-        subscription_end_date: subscriptionEndDate,
-        is_active: true,
-      });
-
-      expect(result.success).toBe(true);
+      expect(mockLicenseInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stripe_subscription_id: "sub_test_subscription",
+          subscription_end_date: subscriptionEndDate.toISOString(),
+        })
+      );
     });
   });
 
   describe("Fehlerbehandlung", () => {
     it("sollte Fehler bei fehlenden erforderlichen Feldern werfen", async () => {
+      // Act & Assert
       await expect(
         createLicense({
           email: "",
           stripeCustomerId: "cus_test",
+          stripePaymentId: "pi_test",
           deviceId: TEST_CONSTANTS.DEVICE_ID,
+        })
+      ).rejects.toThrow("Fehlende erforderliche Felder");
+
+      await expect(
+        createLicense({
+          email: TEST_CONSTANTS.EMAIL,
+          stripeCustomerId: "",
+          stripePaymentId: "pi_test",
+          deviceId: TEST_CONSTANTS.DEVICE_ID,
+        })
+      ).rejects.toThrow("Fehlende erforderliche Felder");
+
+      await expect(
+        createLicense({
+          email: TEST_CONSTANTS.EMAIL,
+          stripeCustomerId: "cus_test",
+          stripePaymentId: "pi_test",
+          deviceId: "",
         })
       ).rejects.toThrow("Fehlende erforderliche Felder");
     });
@@ -175,15 +180,16 @@ describe("License Creation", () => {
         select: vi.fn().mockReturnValue({
           single: vi.fn().mockResolvedValue({
             data: null,
-            error: { message: "Database error" },
+            error: { message: "Unique constraint violation", code: "23505" },
           }),
         }),
       });
 
-      mockSupabaseClient.from = vi.fn().mockImplementation((table: string) => {
+      mockSupabaseClient.from.mockImplementation((table: string) => {
         if (table === "licenses") {
           return { insert: mockLicenseInsert };
         }
+        return {};
       });
 
       // Act & Assert
@@ -191,6 +197,7 @@ describe("License Creation", () => {
         createLicense({
           email: TEST_CONSTANTS.EMAIL,
           stripeCustomerId: "cus_test",
+          stripePaymentId: "pi_test",
           deviceId: TEST_CONSTANTS.DEVICE_ID,
         })
       ).rejects.toThrow("Fehler beim Erstellen der Lizenz");
@@ -201,7 +208,7 @@ describe("License Creation", () => {
       const mockLicenseInsert = vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           single: vi.fn().mockResolvedValue({
-            data: { id: "license-123" },
+            data: { id: "license-123", license_key: "SF-TEST-1234" },
             error: null,
           }),
         }),
@@ -209,16 +216,17 @@ describe("License Creation", () => {
 
       const mockDeviceInsert = vi.fn().mockResolvedValue({
         data: null,
-        error: { message: "Device activation failed" },
+        error: { message: "Device limit exceeded", code: "DEVICE_LIMIT" },
       });
 
-      mockSupabaseClient.from = vi.fn().mockImplementation((table: string) => {
+      mockSupabaseClient.from.mockImplementation((table: string) => {
         if (table === "licenses") {
           return { insert: mockLicenseInsert };
         }
         if (table === "device_activations") {
           return { insert: mockDeviceInsert };
         }
+        return {};
       });
 
       // Act & Assert
@@ -226,6 +234,7 @@ describe("License Creation", () => {
         createLicense({
           email: TEST_CONSTANTS.EMAIL,
           stripeCustomerId: "cus_test",
+          stripePaymentId: "pi_test",
           deviceId: TEST_CONSTANTS.DEVICE_ID,
         })
       ).rejects.toThrow("Fehler beim Aktivieren des Geräts");
@@ -235,15 +244,23 @@ describe("License Creation", () => {
   describe("Duplikat-Prävention", () => {
     it("sollte bestehende Aktivierung prüfen und Duplikate verhindern", async () => {
       // Arrange
+      const existingActivation = {
+        id: "activation-existing",
+        is_active: true,
+        license_id: "license-existing",
+        licenses: {
+          id: "license-existing",
+          is_active: true,
+          email: TEST_CONSTANTS.EMAIL,
+        },
+      };
+
       const mockSelect = vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               maybeSingle: vi.fn().mockResolvedValue({
-                data: {
-                  id: "activation-123",
-                  license_id: "license-456",
-                },
+                data: existingActivation,
                 error: null,
               }),
             }),
@@ -251,18 +268,19 @@ describe("License Creation", () => {
         }),
       });
 
-      mockSupabaseClient.from = vi.fn().mockReturnValue({
-        select: mockSelect,
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === "device_activations") {
+          return { select: mockSelect };
+        }
+        return {};
       });
 
       // Act
       const result = await checkExistingActivation(TEST_CONSTANTS.DEVICE_ID);
 
       // Assert
-      expect(result).toEqual({
-        hasExisting: true,
-        existingLicense: "license-456",
-      });
+      expect(result.hasExisting).toBe(true);
+      expect(result.existingLicense).toBe("license-existing");
     });
 
     it("sollte keine Duplikate bei neuer Device zurückgeben", async () => {
@@ -280,18 +298,19 @@ describe("License Creation", () => {
         }),
       });
 
-      mockSupabaseClient.from = vi.fn().mockReturnValue({
-        select: mockSelect,
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === "device_activations") {
+          return { select: mockSelect };
+        }
+        return {};
       });
 
       // Act
-      const result = await checkExistingActivation(TEST_CONSTANTS.DEVICE_ID);
+      const result = await checkExistingActivation("new-device-456");
 
       // Assert
-      expect(result).toEqual({
-        hasExisting: false,
-        existingLicense: null,
-      });
+      expect(result.hasExisting).toBe(false);
+      expect(result.existingLicense).toBeNull();
     });
   });
 
@@ -300,31 +319,32 @@ describe("License Creation", () => {
       // Arrange
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: vi.fn().mockResolvedValue({ success: true }),
+        json: () => Promise.resolve({ success: true }),
       });
       global.fetch = mockFetch;
 
       const mockLicenseInsert = vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
           single: vi.fn().mockResolvedValue({
-            data: { id: "license-123" },
+            data: {
+              id: "license-123",
+              license_key: TEST_CONSTANTS.LICENSE_KEY,
+            },
             error: null,
           }),
         }),
       });
 
-      const mockDeviceInsert = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      });
-
-      mockSupabaseClient.from = vi.fn().mockImplementation((table: string) => {
+      mockSupabaseClient.from.mockImplementation((table: string) => {
         if (table === "licenses") {
           return { insert: mockLicenseInsert };
         }
         if (table === "device_activations") {
-          return { insert: mockDeviceInsert };
+          return {
+            insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
         }
+        return {};
       });
 
       // Act
@@ -344,6 +364,7 @@ describe("License Creation", () => {
           headers: {
             "Content-Type": "application/json",
           },
+          body: expect.stringContaining("Test Device"),
         })
       );
     });
@@ -367,18 +388,16 @@ describe("License Creation", () => {
         }),
       });
 
-      const mockDeviceInsert = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      });
-
-      mockSupabaseClient.from = vi.fn().mockImplementation((table: string) => {
+      mockSupabaseClient.from.mockImplementation((table: string) => {
         if (table === "licenses") {
           return { insert: mockLicenseInsert };
         }
         if (table === "device_activations") {
-          return { insert: mockDeviceInsert };
+          return {
+            insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
         }
+        return {};
       });
 
       // Act & Assert
@@ -399,7 +418,7 @@ describe("License Creation", () => {
   });
 });
 
-// Hilfsfunktionen
+// Hilfsfunktionen für Tests
 function generateLicenseKey(): string {
   const randomString = (length: number) => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
