@@ -8,7 +8,8 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.ts"],
     coverage: {
-      reporter: ["text", "json", "html"],
+      provider: "v8",
+      reporter: ["text", "json", "html", "lcov"],
       exclude: [
         "node_modules/",
         "tests/",
@@ -17,6 +18,15 @@ export default defineConfig({
         "**/*.config.*",
         "**/*.d.ts",
       ],
+      // Thresholds nur für CI aktivieren, nicht für Test-Hilfsfunktionen
+      thresholds: process.env.CI
+        ? {
+            statements: 50,
+            branches: 40,
+            functions: 50,
+            lines: 50,
+          }
+        : {},
     },
     testTimeout: 30000,
   },
