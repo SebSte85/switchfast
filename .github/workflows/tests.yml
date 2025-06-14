@@ -317,19 +317,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate GitHub App Token
-        id: generate_token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.RELEASER_APP_ID }}
-          private-key: ${{ secrets.RELEASER_APP_PRIVATE_KEY }}
+      - name: Configure Git credentials
+        run: |
+          git config --global credential.helper store
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get next version (dry-run)
         id: get-next-version
         run: npx semantic-release --dry-run
         env:
-          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
-          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     outputs:
       new-release-published: ${{ steps.get-next-version.outputs.new-release-published }}
@@ -391,18 +391,18 @@ jobs:
           echo "Uploading versioned release v${{ needs.get-next-version.outputs.new-release-version }}..."
           aws s3 cp release/ s3://switchfast-prod/releases/v${{ needs.get-next-version.outputs.new-release-version }}/ --recursive
 
-      - name: Generate GitHub App Token for Release
-        id: generate_release_token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.RELEASER_APP_ID }}
-          private-key: ${{ secrets.RELEASER_APP_PRIVATE_KEY }}
+      - name: Configure Git credentials for release
+        run: |
+          git config --global credential.helper store
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create version tag and GitHub release
         run: npx semantic-release
         env:
-          GITHUB_TOKEN: ${{ steps.generate_release_token.outputs.token }}
-          GH_TOKEN: ${{ steps.generate_release_token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify deployment success
         run: |
