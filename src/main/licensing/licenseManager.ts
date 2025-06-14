@@ -5,6 +5,7 @@ import * as os from "os";
 import * as crypto from "crypto";
 import axios from "axios";
 import path from "path";
+import console, { error } from "console";
 
 // Typdefinitionen
 interface LicenseInfo {
@@ -82,8 +83,9 @@ const ACTIVE_ENVIRONMENT = (() => {
   }
 })();
 
-const LICENSE_CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 Stunden
-const OFFLINE_GRACE_PERIOD = 7 * 24 * 60 * 60 * 1000; // 7 Tage
+const LICENSE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 Minuten (vorher 4 Stunden)
+const OFFLINE_GRACE_PERIOD = 7 * 24 * 60 * 60 * 1000; // 7 Tage in Millisekunden
+const TRIAL_CHECK_INTERVAL = 15 * 60 * 1000; // 15 Minuten für Trial-Checks
 const APP_SALT =
   process.env.DEVICE_ID_SALT || "72a491de66fd8e66ea4eff96cd299dbc";
 
@@ -103,6 +105,7 @@ export class LicenseManager {
   private isDevelopmentMode: boolean;
   private isReady: boolean = false;
   private licenseCheckTimer: NodeJS.Timeout | null = null;
+  private trialCheckTimer: NodeJS.Timeout | null = null; // Neuer Timer für Trial-Checks
   private deviceInfo: DeviceInfo;
 
   private constructor() {
@@ -307,6 +310,13 @@ export class LicenseManager {
       });
     }, LICENSE_CHECK_INTERVAL);
 
+    // Separater Timer für Trial-Checks (häufiger)
+    this.trialCheckTimer = setInterval(() => {
+      this.performTrialCheck().catch((error) => {
+        console.warn("[LicenseManager] Periodic trial check failed:", error);
+      });
+    }, TRIAL_CHECK_INTERVAL);
+
     // Zusätzliche Prüfung, wenn der Computer aus dem Ruhezustand erwacht
     try {
       const powerMonitor = require("electron").powerMonitor;
@@ -465,6 +475,58 @@ export class LicenseManager {
     }
 
     return false;
+  }
+
+  /**
+   * Führt eine periodische Trial-Überprüfung durch
+   * Diese Methode wird von einem Timer aufgerufen und beendet die App wenn der Trial abgelaufen ist
+   */
+  private async performTrialCheck(): Promise<void> {
+    try {
+      // Nur Trial-Check wenn keine aktive Lizenz vorhanden ist
+      if (this.isLicensed()) {
+        return; // Lizenz vorhanden, Trial-Check nicht nötig
+      }
+
+      console.log(
+        "[LicenseManager] 🔍 Periodic trial check - prüfe Trial-Status..."
+      );
+
+      const isTrialValid = await this.checkTrialStatus();
+
+      if (!isTrialValid) {
+        console.log("[LicenseManager] ⚠️ Trial abgelaufen - App wird beendet");
+
+        // Zeige Benachrichtigung und beende die App
+        const { dialog, app } = require("electron");
+
+        const response = await dialog.showMessageBox({
+          type: "warning",
+          title: "Trial-Version abgelaufen",
+          message: "Ihre 7-tägige Testversion ist abgelaufen.",
+          detail:
+            "Die Anwendung wird jetzt beendet. Bitte erwerben Sie eine Lizenz, um SwitchFast weiterhin zu verwenden.",
+          buttons: ["Lizenz kaufen", "App beenden"],
+          defaultId: 0,
+          cancelId: 1,
+        });
+
+        if (response.response === 0) {
+          // Benutzer möchte Lizenz kaufen
+          await this.openStripeCheckout();
+        }
+
+        // App beenden nach 3 Sekunden (Zeit für Stripe-Checkout-Öffnung)
+        setTimeout(() => {
+          app.quit();
+        }, 3000);
+      }
+    } catch (error) {
+      console.error(
+        "[LicenseManager] Fehler bei periodischer Trial-Prüfung:",
+        error
+      );
+    }
   }
 
   /**
@@ -743,101 +805,10 @@ export class LicenseManager {
       console.log("[License] Umgebungsvariablen:");
       console.log(`- ACTIVE_ENVIRONMENT: ${ACTIVE_ENVIRONMENT}`);
 
-      // Stripe API-Schlüssel und Preis-ID basierend auf der aktiven Umgebung auswählen
-      const isProd = ACTIVE_ENVIRONMENT === "prod";
-      console.log(`[License] isProd: ${isProd}`);
-
-      // Stripe-Keys aus package.json lesen (zur Build-Zeit injiziert)
-      let prodKey, prodPriceId, testKey, testPriceId;
-
-      try {
-        console.log("[License] Versuche package.json zu lesen...");
-        const packageJson = require("../../../package.json");
-        prodKey = packageJson.prodStripeSecretKey;
-        prodPriceId = packageJson.prodStripePriceId;
-
-        console.log("[License] Stripe-Keys aus package.json:");
-        console.log(
-          `- prodStripeSecretKey: ${prodKey ? "vorhanden" : "fehlt"}`
-        );
-        console.log(
-          `- prodStripePriceId: ${prodPriceId ? "vorhanden" : "fehlt"}`
-        );
-        console.log(`- environment field: ${packageJson.environment}`);
-      } catch (error) {
-        console.log("[License] Fehler beim Lesen der package.json:", error);
-      }
-
-      // Fallback auf Environment-Variablen (für Development)
-      if (!prodKey) {
-        console.log("[License] Fallback auf Environment-Variable für prodKey");
-        prodKey = process.env.PROD_STRIPE_SECRET_KEY;
-      }
-      if (!prodPriceId) {
-        console.log(
-          "[License] Fallback auf Environment-Variable für prodPriceId"
-        );
-        prodPriceId = process.env.PROD_STRIPE_PRICE_ID;
-      }
-
-      testKey = process.env.TEST_STRIPE_SECRET_KEY;
-      testPriceId = process.env.TEST_STRIPE_PRICE_ID;
-
-      console.log(`[License] Verfügbare Schlüssel:`);
-      console.log(`- PROD_KEY: ${prodKey ? "vorhanden" : "fehlt"}`);
-      console.log(`- TEST_KEY: ${testKey ? "vorhanden" : "fehlt"}`);
-      console.log(`- PROD_PRICE_ID: ${prodPriceId ? "vorhanden" : "fehlt"}`);
-      console.log(`- TEST_PRICE_ID: ${testPriceId ? "vorhanden" : "fehlt"}`);
-
-      const stripeSecretKey = isProd ? prodKey : testKey;
-      const stripePriceId = isProd ? prodPriceId : testPriceId;
-
-      console.log(`[License] Gewählte Keys für ${isProd ? "PROD" : "TEST"}:`);
       console.log(
-        `- stripeSecretKey: ${stripeSecretKey ? "vorhanden" : "fehlt"}`
+        `[License] 🔒 Verwende sichere Server-Side Checkout über Edge Function`
       );
-      console.log(`- stripePriceId: ${stripePriceId ? "vorhanden" : "fehlt"}`);
-
-      // Verwende HTTPS-URLs für Stripe
-      // Basis-URLs für Erfolg und Abbruch
-      const baseSuccessUrl = isProd
-        ? "https://www.switchfast.io/success"
-        : "https://www.switchfast.io/success";
-
-      const baseCancelUrl = isProd
-        ? "https://www.switchfast.io/cancel"
-        : "https://www.switchfast.io/cancel";
-
-      // Füge Parameter hinzu: session_id (von Stripe), deviceId und Umgebung
-      const successUrl = `${baseSuccessUrl}?session_id={CHECKOUT_SESSION_ID}&device_id=${encodeURIComponent(
-        this.deviceInfo.deviceId
-      )}&env=${ACTIVE_ENVIRONMENT}`;
-      const cancelUrl = `${baseCancelUrl}?device_id=${encodeURIComponent(
-        this.deviceInfo.deviceId
-      )}&env=${ACTIVE_ENVIRONMENT}`;
-
-      console.log(
-        `[License] Öffne Stripe Checkout in ${ACTIVE_ENVIRONMENT}-Umgebung`
-      );
-      console.log(
-        `[License] Verwende Preis-ID: ${stripePriceId || "NICHT DEFINIERT"}`
-      );
-
-      if (!stripeSecretKey) {
-        console.error(
-          "[License] ❌ Stripe API-Schlüssel ist nicht konfiguriert"
-        );
-        throw new Error("Stripe API-Schlüssel ist nicht konfiguriert");
-      }
-
-      if (!stripePriceId) {
-        console.error("[License] ❌ Stripe Preis-ID ist nicht konfiguriert");
-        throw new Error("Stripe Preis-ID ist nicht konfiguriert");
-      }
-
-      console.log(
-        "[License] ✅ Alle Keys vorhanden, rufe createCheckoutSession auf..."
-      );
+      console.log(`[License] Environment: ${ACTIVE_ENVIRONMENT}`);
 
       // **NEU: Prüfung vor Checkout-Erstellung, ob bereits eine Lizenz existiert**
       try {
@@ -845,7 +816,7 @@ export class LicenseManager {
           deviceId: this.deviceInfo.deviceId,
           deviceName: this.deviceInfo.deviceName,
           email: email,
-          priceId: stripePriceId, // Preis-ID hinzufügen
+          // Preis-ID wird server-seitig basierend auf Environment bestimmt
         };
 
         const headers = {
@@ -917,43 +888,50 @@ export class LicenseManager {
         throw error;
       }
 
-      // Legacy-Fallback (falls die neue Validierung nicht funktioniert)
-      // Stripe-Instanz erstellen
-      const Stripe = require("stripe");
-      console.log("[License] Erstelle Stripe-Instanz...");
-      const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: "2023-10-16", // Explizite API-Version angeben
-      });
+      // Falls Edge Function fehlschlägt, zeige Fehler
+      console.error(
+        "[License] 🔴 Edge Function konnte keine Checkout-URL erstellen"
+      );
+      const errorDetails = {
+        errorMessage: "Edge Function failed to create checkout session",
+        errorCode: "EDGE_FUNCTION_NO_URL",
+        environment: ACTIVE_ENVIRONMENT,
+        deviceId: this.deviceInfo.deviceId,
+        timestamp: new Date().toISOString(),
+      };
+      this.showCheckoutErrorDialog(errorDetails);
+    } catch (error: any) {
+      console.error(
+        "🔴 [License] FEHLER beim Öffnen des Stripe Checkouts:",
+        error
+      );
 
-      // Checkout-Session erstellen
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price: stripePriceId,
-            quantity: 1,
-          },
-        ],
-        mode: "subscription",
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        customer_email: email || undefined,
-        client_reference_id: this.deviceInfo.deviceId,
-        metadata: {
-          deviceName: this.deviceInfo.deviceName,
-        },
-      });
+      // Detailliertes Error-Logging
+      const errorDetails = {
+        errorMessage: error?.message || "Unknown error",
+        errorCode: error?.code || "NO_CODE",
+        errorStack: error?.stack || "No stack trace",
+        axiosError: error?.response?.data || null,
+        axiosStatus: error?.response?.status || null,
+        stripeError: error?.type || null,
+        environment: ACTIVE_ENVIRONMENT,
+        deviceId: this.deviceInfo.deviceId,
+        timestamp: new Date().toISOString(),
+      };
 
-      if (session && session.url) {
-        // URL im Standard-Browser öffnen
-        const { shell } = require("electron");
-        await shell.openExternal(session.url);
-      } else {
-        this.showCheckoutErrorDialog();
-      }
-    } catch (error) {
-      console.error("Fehler beim Öffnen des Stripe Checkouts:", error);
-      this.showCheckoutErrorDialog();
+      console.error(
+        "🔴 [License] Error Details:",
+        JSON.stringify(errorDetails, null, 2)
+      );
+
+      // PostHog Event für diesen spezifischen Fehler
+      const { captureException } = require("../analytics");
+      captureException(
+        new Error(`Stripe Checkout Failed: ${error?.message}`),
+        errorDetails
+      );
+
+      this.showCheckoutErrorDialog(errorDetails);
     }
   }
 
@@ -1447,14 +1425,60 @@ export class LicenseManager {
   /**
    * Zeigt einen Dialog an, wenn der Checkout fehlgeschlagen ist
    */
-  private showCheckoutErrorDialog(): void {
-    dialog.showMessageBox({
-      type: "error",
-      title: "Checkout fehlgeschlagen",
-      message:
-        "Der Stripe Checkout konnte nicht geöffnet werden. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support.",
-      buttons: ["OK"],
-    });
+  private showCheckoutErrorDialog(errorDetails?: any): void {
+    let detailMessage =
+      "Der Stripe Checkout konnte nicht geöffnet werden. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support.";
+
+    if (errorDetails) {
+      // Erstelle eine detaillierte Fehlermeldung für den User
+      detailMessage += "\n\nTechnische Details:";
+
+      if (errorDetails.axiosStatus) {
+        detailMessage += `\n• HTTP Status: ${errorDetails.axiosStatus}`;
+      }
+
+      if (errorDetails.axiosError?.message) {
+        detailMessage += `\n• Server Fehler: ${errorDetails.axiosError.message}`;
+      }
+
+      if (errorDetails.errorMessage && !errorDetails.axiosError) {
+        detailMessage += `\n• Lokaler Fehler: ${errorDetails.errorMessage}`;
+      }
+
+      if (errorDetails.environment) {
+        detailMessage += `\n• Umgebung: ${errorDetails.environment}`;
+      }
+
+      // Copy Error Details to Clipboard Button würde hier Sinn machen
+      detailMessage += "\n\nFür Support bitte diese Details mitteilen:";
+      detailMessage += `\nTimestamp: ${errorDetails.timestamp}`;
+      detailMessage += `\nDevice ID: ${errorDetails.deviceId?.substring(
+        0,
+        8
+      )}...`;
+    }
+
+    dialog
+      .showMessageBox({
+        type: "error",
+        title: "Checkout fehlgeschlagen",
+        message: detailMessage,
+        buttons: ["OK", "Fehlerdetails kopieren"],
+      })
+      .then((result) => {
+        if (result.response === 1 && errorDetails) {
+          // Copy to clipboard
+          const { clipboard } = require("electron");
+          clipboard.writeText(JSON.stringify(errorDetails, null, 2));
+
+          dialog.showMessageBox({
+            type: "info",
+            title: "Kopiert",
+            message: "Fehlerdetails wurden in die Zwischenablage kopiert.",
+            buttons: ["OK"],
+          });
+        }
+      });
   }
 
   /**
@@ -1499,6 +1523,11 @@ export class LicenseManager {
     if (this.licenseCheckTimer) {
       clearInterval(this.licenseCheckTimer);
       this.licenseCheckTimer = null;
+    }
+
+    if (this.trialCheckTimer) {
+      clearInterval(this.trialCheckTimer);
+      this.trialCheckTimer = null;
     }
   }
 
