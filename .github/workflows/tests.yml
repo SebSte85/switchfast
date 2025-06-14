@@ -317,6 +317,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Configure Git credentials
+        run: |
+          git config --global credential.helper store
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Get next version (dry-run)
         id: get-next-version
         run: npx semantic-release --dry-run
@@ -383,6 +390,13 @@ jobs:
         run: |
           echo "Uploading versioned release v${{ needs.get-next-version.outputs.new-release-version }}..."
           aws s3 cp release/ s3://switchfast-prod/releases/v${{ needs.get-next-version.outputs.new-release-version }}/ --recursive
+
+      - name: Configure Git credentials for release
+        run: |
+          git config --global credential.helper store
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create version tag and GitHub release
         run: npx semantic-release
