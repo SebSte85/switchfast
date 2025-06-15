@@ -351,7 +351,24 @@ jobs:
           echo "Uploading versioned release v${{ steps.version.outputs.VERSION }}..."
           aws s3 cp release/ s3://switchfast-prod/releases/v${{ steps.version.outputs.VERSION }}/ --recursive
 
+      - name: Check if release exists
+        id: check_release
+        run: |
+          $TAG = "v${{ steps.version.outputs.VERSION }}"
+          try {
+            $response = gh release view $TAG --json id 2>$null
+            echo "RELEASE_EXISTS=true" >> $env:GITHUB_OUTPUT
+            echo "⚠️ Release $TAG already exists, skipping creation"
+          } catch {
+            echo "RELEASE_EXISTS=false" >> $env:GITHUB_OUTPUT
+            echo "✅ Release $TAG does not exist, will create"
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
+        id: create_release
+        if: steps.check_release.outputs.RELEASE_EXISTS == 'false'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -372,6 +389,17 @@ jobs:
           draft: false
           prerelease: false
 
+      - name: Upload Release Asset
+        if: steps.check_release.outputs.RELEASE_EXISTS == 'false'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/switchfast-${{ steps.version.outputs.VERSION }}.exe
+          asset_name: switchfast-${{ steps.version.outputs.VERSION }}.exe
+          asset_content_type: application/octet-stream
+
       - name: Notify deployment success
         run: |
           echo "🎉 Production deployment successful!"
@@ -379,6 +407,125 @@ jobs:
           echo "S3 Bucket: switchfast-prod"
           echo "Latest: https://switchfast-prod.s3.eu-west-1.amazonaws.com/latest/"
           echo "Release: https://switchfast-prod.s3.eu-west-1.amazonaws.com/releases/v${{ steps.version.outputs.VERSION }}/"
+
+  # Development build für main branch (parallel zu production)
+  development-build:
+    name: 🔨 Development Build (Main Branch)
+    runs-on: windows-latest
+    needs: [unit-tests, integration-tests, security-tests, windows-build-test]
+    if: github.ref == 'refs/heads/main' && needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' && needs.security-tests.result == 'success' && needs.windows-build-test.result == 'success'
+
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get version info
+        id: version
+        run: |
+          $VERSION = node -p "require('./package.json').version"
+          $COMMIT_HASH = git rev-parse --short HEAD
+          $BUILD_NUMBER = "$VERSION-dev-$COMMIT_HASH"
+          echo "VERSION=$VERSION" >> $env:GITHUB_OUTPUT
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $env:GITHUB_OUTPUT
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $env:GITHUB_OUTPUT
+          echo "🔨 Building Development Version: $BUILD_NUMBER"
+
+      - name: Update package.json for development build
+        run: |
+          $packageJson = Get-Content package.json | ConvertFrom-Json
+          $packageJson.version = "${{ steps.version.outputs.BUILD_NUMBER }}"
+          $packageJson.name = "switchfast-dev"
+          $packageJson.build.productName = "switchfast Development"
+          $packageJson.build.appId = "com.switchfast.dev.app"
+          # Update S3 publish config für Development Bucket
+          $packageJson.build.publish[0].bucket = "switchfast-develop"
+          $packageJson.build.publish[0].path = "/latest"
+          $packageJson | ConvertTo-Json -Depth 10 | Set-Content package.json
+
+      - name: Build development application
+        run: npm run build:test:ci
+        env:
+          ACTIVE_ENVIRONMENT: test
+
+      - name: Package development executable
+        run: npm run package:test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Create S3 bucket if not exists
+        run: |
+          echo "Checking if switchfast-develop bucket exists..."
+          try {
+            aws s3api head-bucket --bucket switchfast-develop 2>$null
+            echo "✅ Bucket switchfast-develop already exists"
+          } catch {
+            echo "🏗️ Creating bucket switchfast-develop..."
+            aws s3 mb s3://switchfast-develop --region eu-west-1
+            
+            echo "🔧 Setting bucket policy for public read access..."
+            $policy = @"
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::switchfast-develop/latest/*"
+              }
+            ]
+          }
+          "@
+            $policy | Out-File -FilePath bucket-policy.json -Encoding utf8
+            aws s3api put-bucket-policy --bucket switchfast-develop --policy file://bucket-policy.json
+            echo "✅ Bucket switchfast-develop created and configured"
+          }
+
+      - name: Upload to S3 - Development Latest
+        run: |
+          echo "📦 Uploading development build to S3..."
+          echo "Build: ${{ steps.version.outputs.BUILD_NUMBER }}"
+          echo "Commit: ${{ steps.version.outputs.COMMIT_HASH }}"
+
+          # Upload main files for auto-update
+          aws s3 cp release/ s3://switchfast-develop/latest/ --recursive --exclude "*" --include "*.exe" --include "*.yml" --include "*.yaml"
+
+          echo "✅ Development build uploaded successfully!"
+
+      - name: Upload to S3 - Versioned Development Build
+        run: |
+          echo "📦 Uploading versioned development build..."
+          aws s3 cp release/ s3://switchfast-develop/builds/${{ steps.version.outputs.BUILD_NUMBER }}/ --recursive
+
+      - name: Notify development build success
+        run: |
+          echo "🎉 Development build successful!"
+          echo "Build Number: ${{ steps.version.outputs.BUILD_NUMBER }}"
+          echo "S3 Bucket: switchfast-develop"
+          echo "Latest: https://switchfast-develop.s3.eu-west-1.amazonaws.com/latest/"
+          echo "This Build: https://switchfast-develop.s3.eu-west-1.amazonaws.com/builds/${{ steps.version.outputs.BUILD_NUMBER }}/"
 
   # Separate workflow for nightly tests
   nightly-tests:
