@@ -179,35 +179,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-west-1
 
-      - name: Create S3 bucket if not exists
-        run: |
-          echo "Checking if switchfast-develop bucket exists..."
-          try {
-            aws s3api head-bucket --bucket switchfast-develop 2>$null
-            echo "✅ Bucket switchfast-develop already exists"
-          } catch {
-            echo "🏗️ Creating bucket switchfast-develop..."
-            aws s3 mb s3://switchfast-develop --region eu-west-1
-            
-            echo "🔧 Setting bucket policy for public read access..."
-            $policy = @"
-          {
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": "s3:GetObject",
-                "Resource": "arn:aws:s3:::switchfast-develop/latest/*"
-              }
-            ]
-          }
-          "@
-            $policy | Out-File -FilePath bucket-policy.json -Encoding utf8
-            aws s3api put-bucket-policy --bucket switchfast-develop --policy file://bucket-policy.json
-            echo "✅ Bucket switchfast-develop created and configured"
-          }
-
       - name: Upload to S3 - Development Latest
         run: |
           echo "📦 Uploading development build to S3..."
