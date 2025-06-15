@@ -1,7 +1,7 @@
 {
   "name": "switchfast",
   "version": "0.1.2",
-  "description": "Desktop app to manage application focus by grouping them under themes",
+  "description": "Powerful desktop app to boost productivity by instantly switching between application themes and managing window focus",
   "main": "dist/main.js",
   "scripts": {
     "start": "electron .",
