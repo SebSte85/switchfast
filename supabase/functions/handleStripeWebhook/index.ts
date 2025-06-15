@@ -9,6 +9,66 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-environment, stripe-signature",
 };
 
+// ✅ SICHERHEIT: Stripe IP-Adressen für Validierung
+const STRIPE_WEBHOOK_IPS = [
+  '3.18.12.63/32',
+  '3.130.192.231/32',
+  '13.235.14.237/32',
+  '13.235.122.149/32',
+  '18.211.135.69/32',
+  '35.154.171.200/32',
+  '52.15.183.38/32',
+  '54.88.130.119/32',
+  '54.88.130.237/32',
+  '54.187.174.169/32',
+  '54.187.205.235/32',
+  '54.187.216.72/32'
+];
+
+// ✅ SICHERHEIT: IP-Adresse validieren
+function isValidStripeIP(request: Request): boolean {
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  const clientIP = forwardedFor?.split(',')[0].trim();
+  
+  if (!clientIP) {
+    console.log('🔴 No client IP found in headers');
+    return false;
+  }
+
+  console.log(`🔍 Validating client IP: ${clientIP}`);
+  
+  // In Development: Skip IP validation
+  if (Deno.env.get('ACTIVE_ENVIRONMENT') === 'test') {
+    console.log('🟡 Development mode: Skipping IP validation');
+    return true;
+  }
+
+  // Production: Validate against Stripe IPs
+  const isValid = STRIPE_WEBHOOK_IPS.some(ip => {
+    const [network, mask] = ip.split('/');
+    return ipInRange(clientIP, network, parseInt(mask));
+  });
+
+  if (!isValid) {
+    console.log(`🔴 Invalid IP: ${clientIP} not in Stripe IP ranges`);
+  }
+
+  return isValid;
+}
+
+// ✅ HILFSFUNKTION: IP-Range Validierung
+function ipInRange(ip: string, network: string, mask: number): boolean {
+  const ipNum = ipToNumber(ip);
+  const netNum = ipToNumber(network);
+  const maskNum = (0xffffffff << (32 - mask)) >>> 0;
+  
+  return (ipNum & maskNum) === (netNum & maskNum);
+}
+
+function ipToNumber(ip: string): number {
+  return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+}
+
 // Funktion zum Ermitteln der aktiven Umgebung
 function getEnvironment(req: Request): string {
   // 1. Prüfen des x-environment Headers
@@ -44,6 +104,18 @@ serve(async (req) => {
   }
 
   try {
+    // ✅ SICHERHEIT: IP-Validierung vor weiterer Verarbeitung
+    if (!isValidStripeIP(req)) {
+      console.log('🔴 SECURITY: Invalid IP address for webhook');
+      return new Response(
+        JSON.stringify({ error: "Unauthorized IP address" }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     // Umgebung bestimmen
     const environment = getEnvironment(req);
     console.log(`🟢 Using environment: ${environment}`);
@@ -58,7 +130,7 @@ serve(async (req) => {
         ? Deno.env.get("PROD_STRIPE_SECRET_KEY")
         : Deno.env.get("TEST_STRIPE_SECRET_KEY");
 
-    // Webhook-Secret aus Umgebungsvariablen laden
+    // ✅ SICHERHEIT: Webhook-Secret aus Environment Variables
     const webhookSecretKey =
       environment === "prod"
         ? "PROD_STRIPE_WEBHOOK_SECRET"
@@ -66,18 +138,22 @@ serve(async (req) => {
 
     console.log(`🔍 Looking for webhook secret with key: ${webhookSecretKey}`);
 
-    // TEMPORÄR: Webhook-Secret hart codieren für Debugging
-    let stripeWebhookSecret = Deno.env.get(webhookSecretKey);
+    const stripeWebhookSecret = Deno.env.get(webhookSecretKey);
 
-    // Wenn wir in der Test-Umgebung sind und kein Secret gefunden wurde, verwenden wir das hart codierte Secret
-    if (environment === "test" && !stripeWebhookSecret) {
-      stripeWebhookSecret = "whsec_IGSFWWT3TV4a9LmA5fBFstEjcNY4KocG";
-      console.log("🟡 TEMPORARY: Using hardcoded TEST webhook secret");
+    // ✅ SICHERHEIT: Kein Fallback auf hardcoded Secret mehr
+    if (!stripeWebhookSecret) {
+      console.error(`🔴 CRITICAL: ${webhookSecretKey} environment variable not configured`);
+      return new Response(
+        JSON.stringify({ 
+          error: "Webhook configuration error",
+          message: "Webhook secret not configured properly"
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
-
-    console.log(
-      `🟢 Webhook secret found: ${stripeWebhookSecret ? "Yes" : "No"}`
-    );
 
     console.log(`🟢 Stripe config:`, {
       environment: environment,
@@ -115,11 +191,11 @@ serve(async (req) => {
       const stripe = new Stripe(stripeSecretKey || "");
       console.log(`🔍 Verifying webhook signature...`);
 
-      // Asynchrone Methode zur Signaturverifizierung verwenden
+      // ✅ SICHERHEIT: Signaturverifizierung mit Environment Variable
       event = await stripe.webhooks.constructEventAsync(
         rawBody,
         signature,
-        stripeWebhookSecret || ""
+        stripeWebhookSecret
       );
       console.log(
         "🟢 Signature successfully verified with constructEventAsync!"
@@ -146,20 +222,6 @@ serve(async (req) => {
     const stripe = new Stripe(stripeSecretKey ?? "", {
       apiVersion: "2023-10-16",
     });
-
-    // Wenn kein Webhook-Secret gefunden wurde, können wir die Signatur nicht verifizieren
-    if (!stripeWebhookSecret) {
-      console.log(
-        `🔴 ERROR: ${environment.toUpperCase()}_STRIPE_WEBHOOK_SECRET is not configured`
-      );
-      return new Response(
-        JSON.stringify({ error: "Webhook-Secret ist nicht konfiguriert" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
 
     // Supabase-Client initialisieren mit korrekter Schema-Konfiguration
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
