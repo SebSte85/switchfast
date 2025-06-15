@@ -1,0 +1,342 @@
+name: Development Build & Deploy
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Force deploy even if tests fail"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # Führe alle Tests zuerst aus
+  unit-tests:
+    name: Unit Tests (Development)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_build_from_source: true
+
+      - name: Build application (CI - skip native addons)
+        run: npm run build:ci
+        env:
+          NODE_ENV: test
+
+      - name: Run unit tests
+        run: npm run test:unit
+        env:
+          NODE_ENV: test
+
+      - name: Generate coverage report
+        run: npm run test:unit -- --coverage
+        env:
+          NODE_ENV: test
+
+  integration-tests:
+    name: Integration Tests (Development)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: switchfast_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          npm_config_build_from_source: true
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase local development
+        run: supabase start
+        env:
+          SUPABASE_DB_PASSWORD: postgres
+
+      - name: Run database migrations
+        run: supabase db push --local
+
+      - name: Build application (CI - skip native addons)
+        run: npm run build:ci
+        env:
+          NODE_ENV: test
+
+      - name: Run integration tests
+        run: npm run test:unit -- --run --reporter=verbose
+        env:
+          NODE_ENV: test
+          SUPABASE_URL: http://localhost:54321
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_LOCAL }}
+
+      - name: Stop Supabase
+        run: supabase stop
+
+  # Windows Build und Deploy zu S3
+  development-build-deploy:
+    name: 🚀 Development Build & Deploy
+    runs-on: windows-latest
+    needs: [unit-tests, integration-tests]
+    if: |
+      always() && 
+      (
+        (needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success') ||
+        github.event.inputs.force_deploy == 'true'
+      )
+
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get version info
+        id: version
+        run: |
+          $VERSION = node -p "require('./package.json').version"
+          $COMMIT_HASH = git rev-parse --short HEAD
+          $BUILD_NUMBER = "$VERSION-dev-$COMMIT_HASH"
+          echo "VERSION=$VERSION" >> $env:GITHUB_OUTPUT
+          echo "COMMIT_HASH=$COMMIT_HASH" >> $env:GITHUB_OUTPUT
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $env:GITHUB_OUTPUT
+          echo "🔨 Building Development Version: $BUILD_NUMBER"
+
+      - name: Update package.json for development build
+        run: |
+          $packageJson = Get-Content package.json | ConvertFrom-Json
+          $packageJson.version = "${{ steps.version.outputs.BUILD_NUMBER }}"
+          $packageJson.name = "switchfast-dev"
+          $packageJson.build.productName = "switchfast Development"
+          $packageJson.build.appId = "com.switchfast.dev.app"
+          # Update S3 publish config für Development Bucket
+          $packageJson.build.publish[0].bucket = "switchfast-develop"
+          $packageJson.build.publish[0].path = "/latest"
+          $packageJson | ConvertTo-Json -Depth 10 | Set-Content package.json
+
+      - name: Build development application
+        run: npm run build:test:ci
+        env:
+          ACTIVE_ENVIRONMENT: test
+
+      - name: Package development executable
+        run: npm run package:test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Create S3 bucket if not exists
+        run: |
+          echo "Checking if switchfast-develop bucket exists..."
+          try {
+            aws s3api head-bucket --bucket switchfast-develop 2>$null
+            echo "✅ Bucket switchfast-develop already exists"
+          } catch {
+            echo "🏗️ Creating bucket switchfast-develop..."
+            aws s3 mb s3://switchfast-develop --region eu-west-1
+            
+            echo "🔧 Setting bucket policy for public read access..."
+            $policy = @"
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::switchfast-develop/latest/*"
+              }
+            ]
+          }
+          "@
+            $policy | Out-File -FilePath bucket-policy.json -Encoding utf8
+            aws s3api put-bucket-policy --bucket switchfast-develop --policy file://bucket-policy.json
+            echo "✅ Bucket switchfast-develop created and configured"
+          }
+
+      - name: Upload to S3 - Development Latest
+        run: |
+          echo "📦 Uploading development build to S3..."
+          echo "Build: ${{ steps.version.outputs.BUILD_NUMBER }}"
+          echo "Commit: ${{ steps.version.outputs.COMMIT_HASH }}"
+
+          # Upload main files for auto-update
+          aws s3 cp release/ s3://switchfast-develop/latest/ --recursive --exclude "*" --include "*.exe" --include "*.yml" --include "*.yaml"
+
+          echo "✅ Development build uploaded successfully!"
+
+      - name: Upload to S3 - Versioned Development Build
+        run: |
+          echo "📦 Uploading versioned development build..."
+          aws s3 cp release/ s3://switchfast-develop/builds/${{ steps.version.outputs.BUILD_NUMBER }}/ --recursive
+
+          # Create build info file
+          $buildInfo = @{
+            version = "${{ steps.version.outputs.VERSION }}"
+            buildNumber = "${{ steps.version.outputs.BUILD_NUMBER }}"
+            commitHash = "${{ steps.version.outputs.COMMIT_HASH }}"
+            branch = "develop"
+            buildDate = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+            testsPassed = "${{ needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success' }}"
+            downloadUrl = "https://switchfast-develop.s3.eu-west-1.amazonaws.com/latest/"
+          }
+
+          $buildInfo | ConvertTo-Json | Out-File -FilePath build-info.json -Encoding utf8
+          aws s3 cp build-info.json s3://switchfast-develop/builds/${{ steps.version.outputs.BUILD_NUMBER }}/build-info.json
+          aws s3 cp build-info.json s3://switchfast-develop/latest/build-info.json
+
+      - name: Create build summary
+        run: |
+          echo "## 🚀 Development Build Deployed" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "### 📦 Build Information" >> $env:GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.VERSION }}" >> $env:GITHUB_STEP_SUMMARY
+          echo "- **Build Number:** ${{ steps.version.outputs.BUILD_NUMBER }}" >> $env:GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ steps.version.outputs.COMMIT_HASH }}" >> $env:GITHUB_STEP_SUMMARY
+          echo "- **Branch:** develop" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "### 📊 Test Results" >> $env:GITHUB_STEP_SUMMARY
+          echo "- Unit Tests: ${{ needs.unit-tests.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $env:GITHUB_STEP_SUMMARY
+          echo "- Integration Tests: ${{ needs.integration-tests.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "### 🔗 Download Links" >> $env:GITHUB_STEP_SUMMARY
+          echo "- **Latest:** https://switchfast-develop.s3.eu-west-1.amazonaws.com/latest/" >> $env:GITHUB_STEP_SUMMARY
+          echo "- **This Build:** https://switchfast-develop.s3.eu-west-1.amazonaws.com/builds/${{ steps.version.outputs.BUILD_NUMBER }}/" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "### 📝 Instructions" >> $env:GITHUB_STEP_SUMMARY
+          echo "1. Download the .exe file from the Latest link" >> $env:GITHUB_STEP_SUMMARY
+          echo "2. Install and test the development version" >> $env:GITHUB_STEP_SUMMARY
+          echo "3. If everything works, merge develop → main for production release" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Comment on commit (if push from PR)
+        uses: actions/github-script@v7
+        if: github.event_name == 'push'
+        with:
+          script: |
+            const commitHash = '${{ steps.version.outputs.COMMIT_HASH }}';
+            const buildNumber = '${{ steps.version.outputs.BUILD_NUMBER }}';
+            const downloadUrl = `https://switchfast-develop.s3.eu-west-1.amazonaws.com/latest/`;
+
+            const comment = `## 🚀 Development Build Ready
+
+            ✅ **Build ${{ steps.version.outputs.BUILD_NUMBER }}** has been deployed!
+
+            ### 📦 Download & Test
+            **Download URL:** ${downloadUrl}
+
+            ### 🧪 Test Results
+                         - Unit Tests: ${{ needs.unit-tests.result == 'success' && '✅' || '❌' }}
+             - Integration Tests: ${{ needs.integration-tests.result == 'success' && '✅' || '❌' }}
+
+            ### 📝 Next Steps
+            1. Download and install the development build
+            2. Test all critical functionality
+            3. If everything works → merge to main for production release
+
+            ---
+            Build: \`${buildNumber}\` | Commit: \`${commitHash}\``;
+
+            // Create a commit comment
+            try {
+              await github.rest.repos.createCommitComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+                body: comment
+              });
+            } catch (error) {
+              console.log('Failed to create commit comment:', error);
+            }
+
+      - name: Notify deployment success
+        run: |
+          echo "🎉 Development deployment successful!"
+          echo "Build Number: ${{ steps.version.outputs.BUILD_NUMBER }}"
+          echo "S3 Bucket: switchfast-develop"
+          echo "Latest: https://switchfast-develop.s3.eu-west-1.amazonaws.com/latest/"
+          echo "This Build: https://switchfast-develop.s3.eu-west-1.amazonaws.com/builds/${{ steps.version.outputs.BUILD_NUMBER }}/"
+          echo ""
+          echo "🔗 Ready for testing! Download and verify before merging to main."
+
+  # Cleanup alte Development Builds (optional)
+  cleanup-old-builds:
+    name: 🧹 Cleanup Old Development Builds
+    runs-on: ubuntu-latest
+    needs: [development-build-deploy]
+    if: needs.development-build-deploy.result == 'success'
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Cleanup old development builds (keep last 10)
+        run: |
+          echo "🧹 Cleaning up old development builds..."
+
+          # Liste alle Builds und behalte nur die letzten 10
+          aws s3api list-objects-v2 --bucket switchfast-develop --prefix "builds/" --query "sort_by(Contents, &LastModified)[:-10].Key" --output text | tr '\t' '\n' | while read key; do
+            if [ ! -z "$key" ]; then
+              echo "Deleting old build: $key"
+              aws s3 rm "s3://switchfast-develop/$key"
+            fi
+          done
+
+          echo "✅ Cleanup completed - kept last 10 builds"
