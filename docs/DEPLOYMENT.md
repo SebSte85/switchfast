@@ -72,9 +72,9 @@ git commit -m "test: add trial expiry tests"
 ### GitHub Secrets
 
 ```bash
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-GITHUB_TOKEN=ghp_... (automatisch verfügbar)
+AWS_ACCESS_KEY_ID=<your-aws-access-key>
+AWS_SECRET_ACCESS_KEY=<your-aws-secret-key>
+GITHUB_TOKEN=<automatically-provided>
 ```
 
 ### S3 Bucket Policy
